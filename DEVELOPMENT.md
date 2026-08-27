@@ -142,13 +142,20 @@ src-tauri/
 5. **aria2 状态批量查询**：任务量大时可能漏项（见上），如需优化应分批创建任务
 6. **Cookie 存储**：明文存在 `app-state.json`，仅本机使用可接受
 7. **订阅 store 职责偏重**：`subscription.ts` 同时依赖抓推文、aria2、下载、cookie 多模块。当前规模可接受，扩展前评估是否需要拆分调度/抓取/下载
+8. **本地 fork 继承的历史 tag 清理（待办）**：仓库本地残留 x-spider 时代的历史 tag（v1.0.3~v2.2.2 等，指向旧 commit，未 push 远端），不影响使用但较乱。清理：`git tag | ForEach-Object { git tag -d $_ }`（注意保留自己打的 release tag）。⚠️ 发布新版本前若本地存在同名旧 tag（如 v1.1.0 曾指向旧 commit），必须 `git tag -d v<ver>` 删除，否则 `gh release create` 报 "tag exists but not pushed"
 
-> 说明：更新检查已恢复（`src/github/api.ts` + `src/hooks/useCheckUpdate.ts`），指向 `mdo730/P-spider` 的 releases。
+> 说明：更新检查已恢复（`src/github/api.ts` + `src/hooks/useCheckUpdate.ts`），指向 `mdo730/P-spider` 的 releases，按 `tag_name`（须带 `v` 前缀）与当前版本比较。
+> 已发布：**v1.1.0**（2026-08-28，Pawchive 平台 + 下载速度 + 多项修复），GitHub Description/Topics/README 已同步。
 
 ## 如何发布新版
 
-1. 改 `package.json` version
-2. 改代码后跑 `pnpm typeCheck` + `npx eslint ./src` + `pnpm build`
-3. `pnpm tauri build` 生成 exe + NSIS
-4. 复制 `src-tauri/target/release/P-Spider.exe` 和 `aria2c.exe` 到发布目录（同目录）
-5. 若改图标：先 `pnpm tauri icon <源图>` 再打包，并清 Windows 图标缓存（重启 explorer）
+1. 改 `package.json` version，**同步改 `src-tauri/Cargo.toml` version**（exe 内嵌版本与安装包名需一致；tauri.conf.json 的 version 引用 package.json）
+2. 跑 `pnpm typeCheck` + `npx eslint ./src` + `pnpm build`
+3. `pnpm tauri build` 生成 exe + NSIS。注意：exe 被占用（正在运行的 P-Spider）会失败，需先退出；NSIS 偶发文件锁可重试
+4. 产物：`src-tauri/target/release/P-Spider.exe` + `aria2c.exe` + `bundle/nsis/P-Spider_<ver>_x64-setup.exe`
+5. 提交代码：`git add -A` + commit + `git push`
+6. 发布 GitHub Release（`gh` 已装于 `C:\Program Files\GitHub CLI\gh.exe`，已登录 mdo730）：
+   - 若本地存在同名旧 tag（fork 继承的历史 tag 指向旧 commit），先 `git tag -d v<ver>`
+   - `gh release create v<ver> --title "P-Spider <ver>" --notes-file <notes.md> <P-Spider.exe> <aria2c.exe> <setup.exe>`
+7. 可选：更新 README / GitHub Description / Topics（`gh api` 或 PUT `/repos/.../topics`）
+8. 若改图标：先 `pnpm tauri icon <源图>` 再打包，并清 Windows 图标缓存（重启 explorer）
