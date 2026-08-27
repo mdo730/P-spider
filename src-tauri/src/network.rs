@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use reqwest::Method;
 use serde_json::Value;
+use winreg::enums::HKEY_CURRENT_USER;
+use winreg::RegKey;
 
 #[derive(Default, serde::Serialize)]
 pub struct Response {
@@ -111,15 +113,86 @@ pub async fn network_fetch(
 
 #[tauri::command]
 pub async fn network_get_system_proxy_url() -> Result<HashMap<String, String>, ()> {
-  let proxies = reqwest::get_system_proxy_map();
-  let mut mapped_proxies: HashMap<String, String> = HashMap::with_capacity(proxies.len());
+  let mut mapped_proxies: HashMap<String, String> = HashMap::new();
 
-  for (key, value) in proxies {
-    mapped_proxies.insert(key.clone(), match value {
-      reqwest::ProxyScheme::Http { host, .. } => host.to_string(),
-      reqwest::ProxyScheme::Https { host, .. } => host.to_string(),
-    });
+  // 读取 Windows 注册表中的系统代理设置
+  let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+  let settings = hkcu
+    .open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Internet Settings");
+
+  let (proxy_enable, proxy_server) = match settings {
+    Ok(key) => {
+      let enable: u32 = key.get_value("ProxyEnable").unwrap_or(0);
+      let server: String = key.get_value("ProxyServer").unwrap_or_default();
+      (enable, server)
+    }
+    Err(_) => (0, String::new()),
+  };
+
+  if proxy_enable == 1 && !proxy_server.is_empty() {
+    // 代理服务器格式可能是 "127.0.0.1:7890" 或 "http=127.0.0.1:7890;https=127.0.0.1:7890"
+    let server = proxy_server.trim().to_string();
+    if server.contains('=') {
+      // 按协议分开的格式
+      for part in server.split(';') {
+        let part = part.trim();
+        if let Some(eq) = part.find('=') {
+          let scheme = part[..eq].to_lowercase();
+          let host = part[eq + 1..].to_string();
+          mapped_proxies.insert(scheme, host);
+        }
+      }
+    } else {
+      // 单一代理地址，同时用于 http/https
+      mapped_proxies.insert("http".to_string(), server.clone());
+      mapped_proxies.insert("https".to_string(), server);
+    }
   }
 
   Ok(mapped_proxies)
+}
+
+const RUN_KEY_PATH: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
+const RUN_VALUE_NAME: &str = "P-Spider";
+
+/// 设置开机自启动（写入当前用户 Run 注册表键）
+#[tauri::command]
+pub fn set_auto_start(enabled: bool) -> Result<bool, String> {
+  let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+  let run_key = hkcu
+    .create_subkey(RUN_KEY_PATH)
+    .map_err(|e| format!("Failed to open Run key: {e}"))?
+    .0;
+
+  if enabled {
+    // 取当前 exe 路径，带引号防止路径含空格
+    let exe_path = std::env::current_exe()
+      .map_err(|e| format!("Failed to get current exe path: {e}"))?;
+    let cmd = format!("\"{}\"", exe_path.display());
+    run_key
+      .set_value(RUN_VALUE_NAME, &cmd)
+      .map_err(|e| format!("Failed to set autostart: {e}"))?;
+  } else {
+    let _ = run_key.delete_value(RUN_VALUE_NAME);
+  }
+
+  Ok(true)
+}
+
+/// 查询当前是否已设置开机自启动
+#[tauri::command]
+pub fn get_auto_start() -> bool {
+  let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+  if let Ok(run_key) = hkcu.open_subkey(RUN_KEY_PATH) {
+    if let Ok::<String, _>(value) = run_key.get_value(RUN_VALUE_NAME) {
+      return !value.is_empty();
+    }
+  }
+  false
+}
+
+/// 退出应用（托盘/关闭选择框用，可靠退出方式）
+#[tauri::command]
+pub fn quit_app(app: tauri::AppHandle) {
+  app.exit(0);
 }

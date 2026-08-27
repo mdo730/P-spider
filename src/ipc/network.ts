@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api';
 import { Response } from '../interfaces/Response';
 import { RequestOptions } from '../interfaces/RequestOptions';
 import * as R from 'ramda';
+import { useAppStateStore } from '../stores/app-state';
 import { useSettingsStore } from '../stores/settings';
 import { delay } from '../utils';
 
@@ -23,6 +24,13 @@ export async function request(options: RequestOptions) {
   }
 
   const settings = useSettingsStore.getState();
+  const appState = useAppStateStore.getState();
+  // useSystem 时用轮询到的系统代理地址显式传给后端，避免 reqwest 系统代理缓存问题
+  const resolvedProxy = settings.proxy.enable
+    ? settings.proxy.useSystem
+      ? appState.systemProxyUrl
+      : settings.proxy.url
+    : '';
   let remainingRetryCount = MAX_RETRY_COUNT;
   let retryDelay = 100;
   let lastErr: any;
@@ -34,7 +42,7 @@ export async function request(options: RequestOptions) {
         url.href,
         R.defaultTo('', options.body),
         settings.proxy.enable,
-        settings.proxy.useSystem ? '' : settings.proxy.url,
+        resolvedProxy,
         R.defaultTo({}, options.headers),
         options.responseType,
       );

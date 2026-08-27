@@ -10,8 +10,7 @@ export interface Settings_V1 {
     sameFileSkip: boolean;
   };
   app: {
-    autoCheckUpdate: boolean;
-    acceptPrerelease: boolean;
+    writeLogs: boolean;
   };
 }
 
@@ -28,9 +27,10 @@ export interface Settings_V2 {
     sameFileSkip: boolean;
   };
   app: {
-    autoCheckUpdate: boolean;
-    acceptPrerelease: boolean;
     writeLogs: boolean;
+    autoStart: boolean;
+    closeAction: 'minimize' | 'exit' | 'ask';
+    rememberCloseChoice: boolean;
   };
 }
 

@@ -1,21 +1,25 @@
-【停止维护说明】
+# P-Spider
 
-由于个人规划，该软件停止维护，如果有需要可以尝试一下付费版本，付费版本整体加强了开源版本的各种功能，稳定性更强，可定制化程度更高，欢迎大家尝试：<https://bh.keli.moe/>
-
-# X-Spider
-
-[![版本](https://img.shields.io/github/v/release/MiningCattiva/x-spider?label=%E7%89%88%E6%9C%AC)](https://github.com/MiningCattiva/x-spider/releases)
-[![下载数](https://img.shields.io/github/downloads/MiningCattiva/x-spider/total?style=flat&label=%E4%B8%8B%E8%BD%BD%E6%95%B0)](https://github.com/MiningCattiva/x-spider/releases)
 ![操作系统](https://img.shields.io/badge/%E6%93%8D%E4%BD%9C%E7%B3%BB%E7%BB%9F-Windows-yellow)
-[![爱发电](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fgithub.com%2FMiningCattiva%2Fsponsors%2Fraw%2Fmain%2Fsponsors.json&query=%24.count&suffix=%E4%BA%BA&label=%E7%88%B1%E5%8F%91%E7%94%B5&color=%23926be5)
-](https://afdian.net/a/moyuscript)
-
 
 一个推特媒体（图片、视频）下载器。
 
+> **本项目为 [X-Spider](https://github.com/MiningCattiva/x-spider) 的修改版（fork）**，在原版基础上新增订阅、统计、时间流等功能。原版版权归其原作者所有，本项目遵循 GPL-3.0 许可证。
+
+## 新增功能
+
+- **订阅自动追更**：给账号添加订阅，设置刷新间隔（默认 12 小时），自动检查并下载新推文媒体
+- **一键刷新**：手动触发所有订阅立即检查
+- **订阅管理**：按账号独立编辑媒体类型、刷新间隔；导出/导入订阅列表（JSON）
+- **统计**：按日期查看订阅新增下载量（数量 + 大小）柱状图，订阅下载排行
+- **时间流**：近 7 天下载记录按推文时间倒序浏览，缩略图 + 原图预览
+- **开机自启动**：开机自动运行，方便订阅自动检查
+- **关闭行为**：点击 X 可选择最小化到托盘或退出，托盘图标常驻
+- **下载历史**：自动记录每次下载的推文、时间、文件，作为时间流数据源
+
 ## 下载
 
-[Releases](https://github.com/MiningCattiva/x-spider/releases/latest)
+[Releases](https://github.com/mdo730/P-spider/releases/latest)
 
 ## 功能
 
@@ -33,6 +37,10 @@
 
 ![screenshot-downloading](./assets/screenshot-downloading.jpg)
 
-## 给猫猫喂口红色莓果
+## 致谢
 
-[爱发电](https://afdian.net/a/moyuscript)
+本项目基于 [X-Spider](https://github.com/MiningCattiva/x-spider) 修改开发（fork）。
+
+- **原版仓库**：[MiningCattiva/x-spider](https://github.com/MiningCattiva/x-spider)
+- **原版作者**：[MiningCattiva](https://github.com/MiningCattiva)
+- **开源协议**：GPL-3.0（与 X-Spider 一致），保留原 LICENSE

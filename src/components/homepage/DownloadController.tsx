@@ -1,11 +1,32 @@
 /* eslint-disable react/prop-types */
-import { App, Button, Checkbox, DatePicker, Form, Radio, Space } from 'antd';
+import {
+  App,
+  Button,
+  Checkbox,
+  DatePicker,
+  Form,
+  Radio,
+  Select,
+  Space,
+} from 'antd';
+import { CheckOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import React from 'react';
+import React, { useState } from 'react';
 import MediaType from '../../enums/MediaType';
 import { DownloadFilter } from '../../interfaces/DownloadFilter';
 import { useDownloadStore } from '../../stores/download';
 import { useHomepageStore } from '../../stores/homepage';
+import { useSubscriptionStore } from '../../stores/subscription';
+
+const INTERVAL_OPTIONS = [
+  { value: 15, label: '15 分钟' },
+  { value: 30, label: '30 分钟' },
+  { value: 60, label: '1 小时' },
+  { value: 180, label: '3 小时' },
+  { value: 360, label: '6 小时' },
+  { value: 720, label: '12 小时' },
+  { value: 1440, label: '1 天' },
+];
 
 export const DownloadController: React.FC = () => {
   const { message } = App.useApp();
@@ -17,6 +38,14 @@ export const DownloadController: React.FC = () => {
   const { createCreationTask } = useDownloadStore((s) => ({
     createCreationTask: s.createCreationTask,
   }));
+  const { addSubscription, subscriptions } = useSubscriptionStore();
+  const [subscribing, setSubscribing] = useState(false);
+  const [intervalMin, setIntervalMin] = useState(720);
+
+  // 是否已订阅当前检索的账号
+  const alreadySubscribed = subscriptions.some(
+    (s) => s.username.toLowerCase() === (user?.screenName || '').toLowerCase(),
+  );
 
   const onStartDownload = async () => {
     if (!user) {
@@ -35,6 +64,37 @@ export const DownloadController: React.FC = () => {
     } catch (err: any) {
       log.error(err);
       message.error('创建下载任务失败');
+    }
+  };
+
+  const onSubscribe = async () => {
+    if (!user) {
+      message.error('请先加载用户');
+      return;
+    }
+    if (alreadySubscribed) {
+      message.info(`@${user.screenName} 已订阅过，无需重复订阅`);
+      return;
+    }
+    if (!filter.mediaTypes || filter.mediaTypes.length === 0) {
+      message.error('请至少选择一个媒体类型');
+      return;
+    }
+    setSubscribing(true);
+    try {
+      await addSubscription({
+        username: user.screenName,
+        intervalMin,
+        mediaTypes: filter.mediaTypes,
+      });
+      message.success(
+        `已订阅 @${user.screenName}，将每 ${intervalMin} 分钟检查一次新内容并自动下载`,
+      );
+    } catch (err: any) {
+      log.error(err);
+      message.error(`订阅失败：${err?.message || '未知原因'}`);
+    } finally {
+      setSubscribing(false);
     }
   };
 
@@ -117,11 +177,27 @@ export const DownloadController: React.FC = () => {
         </Form.Item>
       </Form>
       <hr className="my-4" />
-      <section className="flex space-x-2">
+      <section className="flex items-center space-x-2">
         <Button type="primary" onClick={onStartDownload}>
           <Space>
             <span>开始下载</span>
           </Space>
+        </Button>
+        <Select
+          value={intervalMin}
+          onChange={setIntervalMin}
+          options={INTERVAL_OPTIONS}
+          style={{ width: 110 }}
+          title="订阅刷新间隔"
+        />
+        <Button
+          onClick={onSubscribe}
+          loading={subscribing}
+          disabled={!user || !filter.mediaTypes?.length || alreadySubscribed}
+          type={alreadySubscribed ? 'default' : 'default'}
+          icon={alreadySubscribed ? <CheckOutlined /> : undefined}
+        >
+          {alreadySubscribed ? '已订阅' : '订阅'}
         </Button>
       </section>
     </section>

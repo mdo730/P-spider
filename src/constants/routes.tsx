@@ -4,9 +4,15 @@ import {
   SettingFilled,
   DownloadOutlined,
   InfoCircleFilled,
+  BellOutlined,
+  BarChartOutlined,
+  ClockCircleOutlined,
 } from '@ant-design/icons';
 import { Homepage } from '../pages/Homepage';
 import { DownloadManagement } from '../pages/DownloadManagement';
+import { SubscriptionPage } from '../pages/Subscription';
+import { StatisticsPage } from '../pages/Statistics';
+import { TimelinePage } from '../pages/Timeline';
 import { Settings } from '../pages/Settings';
 import { About } from '../pages/About';
 
@@ -16,6 +22,24 @@ export const ROUTES: Route[] = [
     name: '主页',
     icon: <HomeFilled />,
     element: <Homepage />,
+  },
+  {
+    id: 'subscription',
+    name: '订阅',
+    icon: <BellOutlined />,
+    element: <SubscriptionPage />,
+  },
+  {
+    id: 'statistics',
+    name: '统计',
+    icon: <BarChartOutlined />,
+    element: <StatisticsPage />,
+  },
+  {
+    id: 'timeline',
+    name: '时间流',
+    icon: <ClockCircleOutlined />,
+    element: <TimelinePage />,
   },
   {
     id: 'download-management',

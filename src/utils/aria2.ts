@@ -26,7 +26,7 @@ class Aria2 {
     return this.#ready;
   }
   #secret = crypto.randomUUID();
-  #port = 6801;
+  #port = 6802;
   #ws?: WebSocket;
   #command?: Command;
   #child?: Child;
@@ -116,8 +116,8 @@ class Aria2 {
      * 绑定一些事件
      */
     window.addEventListener('beforeunload', this.#onBeforeUnload);
-    this.#command.stderr.on('data', this.#onStderr);
-    this.#ws.addEventListener('message', this.#onWsMessage);
+    this.#command!.stderr.on('data', this.#onStderr);
+    this.#ws!.addEventListener('message', this.#onWsMessage);
   }
 
   #_onBeforeUnload() {
@@ -267,6 +267,7 @@ class Aria2 {
 
     const resultMap = R.pipe(
       R.flatten,
+      R.filter<any>(R.isNotNil),
       R.map<any, [string, any]>((r: AriaTask) => [r.gid, r]),
       R.fromPairs,
     )(results);

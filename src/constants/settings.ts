@@ -14,9 +14,10 @@ export const DEFAULT_SETTINGS: Settings = {
     sameFileSkip: true,
   },
   app: {
-    autoCheckUpdate: true,
-    acceptPrerelease: false,
     writeLogs: false,
+    autoStart: true,
+    closeAction: 'minimize',
+    rememberCloseChoice: true,
   },
 };
 

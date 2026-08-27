@@ -16,6 +16,9 @@ import { resolveVariables } from '../utils/file-name-template';
 import { FileNameTemplateData } from '../interfaces/FileNameTemplateData';
 import dayjs from 'dayjs';
 import { notification as antNotification } from 'antd';
+import MediaType from '../enums/MediaType';
+import { EventEmitter } from '../utils/event';
+import { appendDownloadHistory } from './download-history';
 
 let _log: ICategoriedLogger;
 
@@ -25,9 +28,13 @@ function log() {
   return _log;
 }
 
+/** 下载任务完成事件（携带任务信息，订阅功能借此统计字节数） */
+export const onTaskCompleted = new EventEmitter<DownloadTask>();
+
 export interface CreateDownloadTaskParams {
   post: TwitterPost;
   media: TwitterMedia;
+  subscriptionId?: string;
 }
 
 async function mergeAriaStatusToDownloadTask(
@@ -51,6 +58,7 @@ async function mergeAriaStatusToDownloadTask(
 async function prepareDownloadTask({
   post,
   media,
+  subscriptionId,
 }: CreateDownloadTaskParams): Promise<DownloadTask> {
   const settings = useSettingsStore.getState();
   const downloadUrl = getDownloadUrl(media);
@@ -86,6 +94,7 @@ async function prepareDownloadTask({
     updatedAt: Date.now(),
     downloadUrl,
     ariaRetryCountRemains: 5,
+    subscriptionId,
   };
 
   return task;
@@ -214,7 +223,7 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
 
     tasks.forEach((task, index) => {
       task.gid = gids[index];
-      task.status = statusMap[task.gid].status;
+      task.status = statusMap[task.gid]?.status || AriaStatus.Active;
     });
 
     const newTasks = get().downloadTasks.concat(tasks);
@@ -345,6 +354,37 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
     } else {
       const newTask = await mergeAriaStatusToDownloadTask(status, task);
       updateDownloadTask(newTask, now);
+
+      // 任务首次完成时触发，供订阅统计与下载历史记录使用
+      if (status.status === 'complete' && task.status !== 'complete') {
+        // 写入下载历史（时间流数据源）
+        try {
+          const mediaType =
+            task.media?.type === 'video'
+              ? MediaType.Video
+              : task.media?.type === 'animated_gif'
+                ? MediaType.Gif
+                : MediaType.Photo;
+          appendDownloadHistory({
+            postId: task.post?.id || '',
+            tweetTime:
+              task.post?.createdAt?.toISOString?.() ||
+              new Date(now).toISOString(),
+            fullText: task.post?.fullText,
+            username: task.post?.user?.screenName,
+            displayName: task.post?.user?.name,
+            mediaType,
+            mediaUrl: task.media?.url,
+            filePath: await path.join(task.dir, task.fileName),
+            fileName: task.fileName,
+            downloadedAt: now,
+            source: task.subscriptionId ? 'subscription' : 'manual',
+          });
+        } catch (histErr) {
+          log().error('Failed to write download history', histErr);
+        }
+        onTaskCompleted.emit(newTask);
+      }
     }
   },
 

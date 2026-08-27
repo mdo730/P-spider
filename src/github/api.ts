@@ -1,8 +1,18 @@
 import { request } from '../ipc/network';
 import * as R from 'ramda';
 
-export async function getLatestReleases(pre = false) {
-  let url = 'https://api.github.com/repos/MiningCattiva/x-spider/releases';
+const REPO_API_URL = 'https://api.github.com/repos/mdo730/P-spider/releases';
+
+export interface GithubRelease {
+  tag_name: string;
+  html_url: string;
+  prerelease: boolean;
+}
+
+export async function getLatestReleases(
+  pre = false,
+): Promise<GithubRelease | null> {
+  let url = REPO_API_URL;
   // eslint-disable-next-line no-constant-condition
   while (true) {
     const resp = await request({
@@ -10,7 +20,7 @@ export async function getLatestReleases(pre = false) {
       responseType: 'text',
       url,
       headers: {
-        'User-Agent': 'X-Spider',
+        'User-Agent': 'P-Spider',
       },
     });
 

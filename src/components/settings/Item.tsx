@@ -18,6 +18,7 @@ export interface ItemProps {
   validator?: <T = unknown>(
     value: T,
   ) => string | undefined | Promise<string | undefined>;
+  onValueChange?: (value: unknown) => void | Promise<void>;
 }
 
 export const Item: React.FC<ItemProps> = ({
@@ -27,6 +28,7 @@ export const Item: React.FC<ItemProps> = ({
   valuePropName = 'value',
   description,
   validator = R.always(''),
+  onValueChange,
 }) => {
   const context = useSectionContext();
   const { value, setValue } = useSettings(context.name, settingKey);
@@ -89,6 +91,13 @@ export const Item: React.FC<ItemProps> = ({
             const val = e?.target ? e.target[valuePropName] : e;
             setInternalValue(val);
             debouncedTrySetValue.run(val);
+            if (onValueChange) {
+              try {
+                await onValueChange(val);
+              } catch (err) {
+                log.error('Item onValueChange failed', err);
+              }
+            }
           }}
           {...{ [valuePropName]: internalValue, ...children.props }}
         />

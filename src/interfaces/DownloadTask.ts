@@ -15,4 +15,6 @@ export interface DownloadTask {
   updatedAt: number;
   downloadUrl: string;
   ariaRetryCountRemains: number;
+  /** 订阅关联 ID（由订阅功能发起的下载） */
+  subscriptionId?: string;
 }

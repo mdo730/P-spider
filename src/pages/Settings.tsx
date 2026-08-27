@@ -1,20 +1,63 @@
 /* eslint-disable react/prop-types */
 import React from 'react';
+import { invoke, dialog, fs } from '@tauri-apps/api';
 import { PageHeader } from '../components/PageHeader';
 import { Section } from '../components/settings/Section';
 import { Item } from '../components/settings/Item';
 import { DownloadOutlined, GlobalOutlined } from '@ant-design/icons';
 import Joi from 'joi';
 import { SavePathSelector } from '../components/settings/SavePathSelector';
-import { Button, Input, Switch } from 'antd';
+import { App, Button, Input, Radio, Switch } from 'antd';
 import { FileNameTemplateInput } from '../components/settings/FileNameTemplateInput';
 import { showInFolder } from '../utils/shell';
 import { path } from '@tauri-apps/api';
+import { useSubscriptionStore } from '../stores/subscription';
 
 export const Settings: React.FC = () => {
+  const { message } = App.useApp();
+  const { exportSubscriptions, importSubscriptions } = useSubscriptionStore();
+
+  const onExport = async () => {
+    const json = exportSubscriptions();
+    const filePath = await dialog.save({
+      title: '导出订阅',
+      defaultPath: 'p-spider-subscriptions.json',
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+    });
+    if (!filePath) return;
+    await fs.writeTextFile(filePath, json);
+    message.success('订阅已导出');
+  };
+
+  const onImport = async () => {
+    const filePath = await dialog.open({
+      title: '导入订阅',
+      multiple: false,
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+    });
+    if (!filePath) return;
+    try {
+      const content = await fs.readTextFile(String(filePath));
+      const { added, skipped } = importSubscriptions(content);
+      message.success(`导入完成：新增 ${added} 个，跳过 ${skipped} 个`);
+    } catch (err: any) {
+      message.error(`导入失败：${err?.message || '未知原因'}`);
+    }
+  };
   return (
     <>
       <PageHeader />
+      <Section title="订阅管理" name="subscription">
+        <div className="flex items-center space-x-2">
+          <Button type="primary" onClick={onExport}>
+            导出订阅
+          </Button>
+          <Button onClick={onImport}>导入订阅</Button>
+        </div>
+        <p className="text-sm text-gray-400 mt-2">
+          导出为 JSON 文件；导入为追加模式，已存在的订阅会自动跳过，不会覆盖。
+        </p>
+      </Section>
       <Section title="下载" name="download" titleIcon={<DownloadOutlined />}>
         <Item
           validator={(value) => {
@@ -110,19 +153,32 @@ export const Settings: React.FC = () => {
       </Section>
       <Section title="应用" name="app">
         <Item
-          label="自动检查更新"
-          settingKey="autoCheckUpdate"
+          label="开机自启动"
+          description="开机时自动启动本软件，方便订阅自动检查"
+          settingKey="autoStart"
           valuePropName="checked"
+          onValueChange={async (checked) => {
+            try {
+              await invoke('set_auto_start', { enabled: checked });
+            } catch (err) {
+              log.error('Set autostart failed', err);
+            }
+          }}
         >
           <Switch />
         </Item>
         <Item
-          label="接收预览版"
-          description="预览版更新更频繁，能获取到最新的特性，但不太稳定，可能会出现各种错误。"
-          settingKey="acceptPrerelease"
-          valuePropName="checked"
+          label="关闭窗口时"
+          description="点击窗口右上角 X 时的行为；若记住选择则下次直接执行不再询问"
+          settingKey="closeAction"
         >
-          <Switch />
+          <Radio.Group
+            options={[
+              { label: '最小化到托盘', value: 'minimize' },
+              { label: '退出', value: 'exit' },
+              { label: '每次询问', value: 'ask' },
+            ]}
+          />
         </Item>
         <Item
           label="记录日志文件"

@@ -6,7 +6,7 @@
     "distDir": "../dist"
   },
   "package": {
-    "productName": "X-Spider",
+    "productName": "P-Spider",
     "version": "../package.json"
   },
   "tauri": {
@@ -52,6 +52,9 @@
       "fs": {
         "all": true,
         "scope": ["**"]
+      },
+      "protocol": {
+        "assetScope": ["**"]
       }
     },
     "bundle": {
@@ -59,7 +62,7 @@
       "targets": [
         "nsis"
       ],
-      "identifier": "x-spider",
+      "identifier": "p-spider",
       "icon": [
         "icons/32x32.png",
         "icons/128x128.png",
@@ -71,6 +74,9 @@
         "binaries/aria2c"
       ]
     },
+    "systemTray": {
+      "iconPath": "icons/icon.ico"
+    },
     "security": {
       "csp": null
     },
@@ -78,7 +84,7 @@
       {
         "fullscreen": false,
         "resizable": true,
-        "title": "X-Spider",
+        "title": "P-Spider",
         "width": 1280,
         "height": 920,
         "minWidth": 800,
