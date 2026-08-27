@@ -25,6 +25,7 @@ import { fs, path } from '@tauri-apps/api';
 import { PageHeader } from '../components/PageHeader';
 import MediaType from '../enums/MediaType';
 import { Subscription } from '../interfaces/Subscription';
+import { PlatformSource } from '../platforms';
 import { useAppStateStore } from '../stores/app-state';
 import { useSettingsStore } from '../stores/settings';
 import { useSubscriptionStore } from '../stores/subscription';
@@ -52,6 +53,27 @@ const STATUS_MAP: Record<
   error: { color: 'error', text: '出错' },
 };
 
+const PLATFORM_LABEL: Record<string, string> = {
+  twitter: 'X',
+  pawchive: 'Pawchive',
+};
+
+const PLATFORM_OPTIONS = [
+  { value: 'twitter', label: 'X (Twitter)' },
+  { value: 'pawchive', label: 'Pawchive' },
+];
+
+/** 按订阅平台生成创作者主页链接 */
+function buildSubProfileUrl(sub: Subscription): string {
+  if (sub.source === 'pawchive') {
+    const [service, user] = sub.username.split('/');
+    return service && user
+      ? `https://pawchive.pw/${service}/user/${user}`
+      : '#';
+  }
+  return buildUserUrl(sub.username);
+}
+
 /** 相对时间格式化：刚刚 / X 分钟前 / X 小时前 / MM-DD HH:mm */
 function formatRelativeTime(ts: number): string {
   const diff = Date.now() - ts;
@@ -67,6 +89,9 @@ export const SubscriptionPage: React.FC = () => {
   const { message } = App.useApp();
   const [adding, setAdding] = useState(false);
   const [checkingAll, setCheckingAll] = useState(false);
+  const [addForm] = Form.useForm();
+  const addSource: PlatformSource =
+    Form.useWatch('source', addForm) || 'twitter';
   const {
     subscriptions,
     addSubscription,
@@ -82,6 +107,7 @@ export const SubscriptionPage: React.FC = () => {
     username: string;
     intervalMin: number;
     mediaTypes: MediaType[];
+    source: PlatformSource;
   }) => {
     const username = values.username?.trim();
     if (!username) {
@@ -95,12 +121,13 @@ export const SubscriptionPage: React.FC = () => {
     setAdding(true);
     try {
       await addSubscription({
+        source: values.source || 'twitter',
         username,
         intervalMin: values.intervalMin,
         mediaTypes: values.mediaTypes,
       });
       message.success(
-        `已订阅 @${username}，首次检查将建立基线，后续新推文将自动下载`,
+        `已订阅 ${username}，首次检查将建立基线，后续新内容将自动下载`,
       );
     } catch (err: any) {
       message.error(`订阅失败：${err?.message || '未知原因'}`);
@@ -132,23 +159,30 @@ export const SubscriptionPage: React.FC = () => {
       <section className="bg-white rounded-md p-4 border-[1px] mb-4">
         <h2 className="font-bold mb-4">添加订阅</h2>
         <Form
+          form={addForm}
           layout="inline"
           onFinish={onAdd}
           initialValues={{
+            source: 'twitter',
             intervalMin: 720,
             mediaTypes: [MediaType.Photo, MediaType.Video, MediaType.Gif],
           }}
-          disabled={!cookieString}
+          disabled={addSource === 'twitter' && !cookieString}
         >
+          <Form.Item name="source" label="平台">
+            <Select options={PLATFORM_OPTIONS} style={{ width: 150 }} />
+          </Form.Item>
           <Form.Item
             name="username"
             rules={[{ required: true, message: '请输入用户 ID' }]}
           >
             <Input
               placeholder={
-                cookieString
-                  ? '用户 ID，如：shiratamacaron'
-                  : '请先登录后再添加订阅'
+                addSource === 'twitter'
+                  ? cookieString
+                    ? '用户 ID，如：shiratamacaron'
+                    : '请先登录后再添加订阅'
+                  : 'service/数字ID，如 patreon/3295915'
               }
               style={{ width: 220 }}
             />
@@ -180,7 +214,7 @@ export const SubscriptionPage: React.FC = () => {
             icon={<ReloadOutlined />}
             loading={checkingAll}
             onClick={onCheckAll}
-            disabled={!cookieString || subscriptions.length === 0}
+            disabled={subscriptions.length === 0}
           >
             一键刷新
           </Button>
@@ -262,7 +296,7 @@ const SubscriptionItem: React.FC<SubscriptionItemProps> = ({
     if (await fs.exists(dir)) {
       await showInFolder(dir);
     } else {
-      message.info(`@${sub.username} 还没有下载文件夹`);
+      message.info(`${sub.username} 还没有下载文件夹`);
     }
   };
 
@@ -276,7 +310,7 @@ const SubscriptionItem: React.FC<SubscriptionItemProps> = ({
       intervalMin: values.intervalMin,
       mediaTypes: values.mediaTypes,
     });
-    message.success(`已更新 @${sub.username} 的订阅设置`);
+    message.success(`已更新 ${sub.username} 的订阅设置`);
     setEditing(false);
   };
 
@@ -288,9 +322,12 @@ const SubscriptionItem: React.FC<SubscriptionItemProps> = ({
         </Avatar>
         <div className="ml-3 min-w-0">
           <div className="flex items-center space-x-2">
+            <Tag color={sub.source === 'twitter' ? 'blue' : 'purple'}>
+              {PLATFORM_LABEL[sub.source] || sub.source}
+            </Tag>
             <a
               className="font-medium truncate"
-              href={buildUserUrl(sub.username)}
+              href={buildSubProfileUrl(sub)}
               target="_blank"
               rel="noreferrer"
               title={sub.username}
@@ -312,8 +349,8 @@ const SubscriptionItem: React.FC<SubscriptionItemProps> = ({
             )}
           </div>
           <p className="text-sm text-gray-400 truncate">
-            @{sub.username} · 间隔 {intervalLabel} · 已下载{' '}
-            {sub.downloadedCount}
+            {sub.source === 'twitter' ? `@${sub.username}` : sub.username} ·
+            间隔 {intervalLabel} · 已下载 {sub.downloadedCount}
           </p>
         </div>
       </div>
@@ -338,7 +375,7 @@ const SubscriptionItem: React.FC<SubscriptionItemProps> = ({
           文件夹
         </Button>
         <Popconfirm
-          title={`确定取消订阅 @${sub.username} 吗？`}
+          title={`确定取消订阅 ${sub.username} 吗？`}
           onConfirm={() => onRemove(sub.id)}
         >
           <Button size="small" danger>
@@ -348,7 +385,7 @@ const SubscriptionItem: React.FC<SubscriptionItemProps> = ({
       </div>
 
       <Modal
-        title={`编辑订阅 @${sub.username}`}
+        title={`编辑订阅 ${sub.username}`}
         open={editing}
         onOk={saveEdit}
         onCancel={() => setEditing(false)}

@@ -22,7 +22,8 @@
 ```
 src/
   pages/            页面组件
-    Homepage.tsx        主页（检索 + 下载配置）
+    Homepage.tsx        主页（X 检索 + 下载配置）
+    Archiver.tsx        Pawchive 检索页
     Subscription.tsx    订阅管理
     Statistics.tsx      统计（柱状图 + 排行）
     Timeline.tsx        时间流（近7天下载记录）
@@ -31,16 +32,24 @@ src/
     About.tsx           关于
   components/       通用组件
     homepage/DownloadController.tsx  主页下载/订阅按钮
+    archiver/           Pawchive 页组件（网格/批量下载）
     download-management/  下载列表
     settings/           设置项组件
   stores/           状态管理（Zustand + persist）
     subscription.ts      订阅 store + 调度循环（每1秒扫一次，到点检查）
     download.ts          下载任务 store + aria2 状态同步
     download-history.ts  下载历史（jsonl 文件）
+    archiver-browse.ts   多源合并浏览 store
     settings.ts / app-state.ts / route.ts / homepage.ts
   twitter/
     api.ts             Twitter GraphQL 调用（getUser/getUserMedias/getUserTweets）
     url.ts / utils.ts  推文/媒体 URL 工具
+  platforms/        平台抽象层（X / Pawchive）
+    types.ts           统一模型（PlatformCreator/Post/Media/Adapter）
+    archiver.ts        归档站通用适配器工厂
+    twitter.ts         X 适配器（包装 twitter/api）
+    pawchive.ts        Pawchive 适配器
+    index.ts           适配器注册表 getAdapter(source)
   ipc/network.ts     调用 Rust 网络命令
   utils/
     aria2.ts            aria2 RPC 客户端（WebSocket）
@@ -82,18 +91,59 @@ src-tauri/
 - Rust `set_auto_start(enabled)` 写 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 的 `P-Spider` 键
 - 设置项 `app.autoStart`，默认 true，应用启动时同步注册表
 
+### Pawchive 检索页
+
+- 页面：`pages/Archiver.tsx` + `stores/archiver-browse.ts` + `components/archiver/`
+- 只检索 pawchive（2026-08 定案，kemono 已移除）。输入纯数字创作者 ID（如 `3316400`）或 `service/数字ID`（如 `patreon/3295915`）
+- 纯数字 ID 自动探测 service（pawchive 仅支持 fanbox/patreon/discord，逐 service `resolveCreator` 命中即定）
+- `resolveCreator` + 拉第一页；某 service 解析失败自动降级；结果按 post id 去重、按发布时间倒序；滚动分页（强制 50 步进）
+- 每帖带 `source`（`PlatformPost.source`），单附件下载走 pawchive CDN
+- 批量下载：创建一个爬虫任务（`CreationTask` 泛化支持 source），下载到 `保存目录/创作者名/帖子标题`
+- 归档站批量/订阅共用同一套 `runCreationTask`（按 source 分发拉取，twitter 走 api、pawchive 走适配器）
+
 ### 下载任务
 
 - `download.ts`：`createCreationTask`（爬虫任务，带 dateRange/媒体类型过滤）→ `batchCreateDownloadTask`（批量 addUri + tellStatus）
 - 已知边界：大批量任务时 aria2 RPC 批量状态查询可能漏项，`statusMap[gid]` 缺失时兜底为 Active（防崩溃，但状态可能短暂不准）
 
-## 已知问题 / 维护注意
+## 待办 / 已知问题 / 维护注意
 
-1. **HomeTimeline（真首页动态）未实现**：GraphQL hash 硬编码在 X 混淆 JS 里，频繁变化，第三方库维护的 hash 也易失效（实测 403）。如需实现需引入无头浏览器动态抓取 hash，工程量大且不稳定，已放弃
-2. **asset 协议本地图片**：时间流曾尝试 `convertFileSrc` 加载本地文件（F:\ 下），Tauri v1 的 asset scope 默认不含任意路径，改用推特 CDN 缩略图规避
-3. **aria2 状态批量查询**：任务量大时可能漏项（见上），如需优化应分批创建任务
-4. **更新检查已移除**：github/api.ts 及 hooks 已删除（原更新走作者仓库，改名后无意义）
-5. **Cookie 存储**：明文存在 `app-state.json`，仅本机使用可接受
+1. **架构解耦：下载历史改事件驱动**（✅ 已完成）
+   - 现状：`download.ts` 不再依赖任何历史/统计模块，职责纯化，只在任务首次 complete 时 `emit onTaskCompleted`
+   - `download-history.ts` 模块顶层注册 `onTaskCompleted.listen` 自写历史，与订阅的字节统计模式统一
+   - ⚠️ 维护注意：该监听依赖模块**常驻加载**。`main.tsx` 已加副作用 `import './stores/download-history'`，若移除该 import，后台订阅下载完成时将不再写入历史（时间流会丢记录）
+
+2. **平台抽象层重构（X / Pawchive）**（✅ 已完成）
+   - 背景：`subscription.ts`→`twitter/api`、`download.ts`→`TwitterPost/TwitterMedia` 硬编码 X，为多平台抽象
+   - 目标架构（已落地）：
+     ```
+     通用层（平台无关）
+     ├── stores/ subscription / download / download-history / archiver-browse
+     ├── platforms/
+     │   ├── types.ts   统一模型（PlatformCreator/Post/Media/Adapter）
+     │   ├── archiver.ts 归档站通用适配器工厂
+     │   ├── twitter.ts X 适配器（包装现有 twitter/api）
+     │   ├── pawchive.ts Pawchive 适配器
+     │   └── index.ts   适配器注册表 getAdapter(source)
+     └── pages/         只和抽象模型交互
+     ```
+   - 统一模型：`PlatformCreator{id,name,username,avatar,profileUrl}`、`PlatformPost{id,creator,publishedAt,text,medias,tags,links,postUrl,source}`、`PlatformMedia{id,type,url,thumbUrl,downloadUrl,fileName,videoInfo}`、`PlatformAdapter{fetchPosts,resolveCreator,source}`
+   - **Pawchive 适配器**（2026-08 实测）：API 根 `https://pawchive.pw/api/v1`，公开免登录；帖子列表 `?o=` **强制 50 步进**；创作者按数字 id 走 `/profile`（无 slug 端点，订阅/检索 username 存 `service/数字id` 如 `patreon/3295915`）；媒体原图 `file.pawchive.pw/data{path}`、缩略图 `img.pawchive.pw/thumbnail/data{path}`
+   - **媒体 URL 规则（archiver 工厂）**：API 的 `path` 为 `/xx/yy/hash.ext`（**不含 /data**），完整 URL 需补 `/data`：原图 `{fileRoot}/data{path}`、缩略图 `{thumbRoot}/thumbnail/data{path}`。⚠️ 曾漏 `/data` 导致下载 404，已修复
+   - **DownloadTask 泛化**：`DownloadTask.post/media` 存 `PlatformPost/PlatformMedia`，加 `source`；`prepareDownloadTask` 按 source 分支目录/文件名（twitter 模板机制、pawchive 固定两级目录 `保存目录/创作者名/帖子标题/` + 附件原文件名）
+   - **外链处理**：pawchive 帖 embed/正文(content) 有外部链接（网盘等）时：① 文件夹内生成 `链接清单.txt`；② 帖子标题目录名加 `[needDL]` 后缀。纯外链帖（无附件）也单独建目录写清单
+   - **UI**：订阅表单平台选择（X/Pawchive）；`Pawchive` 页（数字 ID 检索，自动探测 service）单附件/批量下载；下载管理项按 `postUrl/thumbUrl` 展示
+   - **persist migrate**：订阅 version 现为 **v5**（v4 补 `source:'twitter'`；v5 `source:'kemono'`→`'pawchive'`）
+   - **Kemono 已移除（2026-08 定案）**：数据停滞在 2026-01 且原图 CDN 节点 `n1-n4.kemono.cr` 连不上（HTTP 000），下载不可用；pawchive 基于 kemono 数据基本覆盖。删除 `platforms/kemono.ts`，`PlatformSource` 仅 `twitter | pawchive`，旧 kemono 订阅 migrate 为 pawchive（同 service/id 通用）
+   - 关键难点（已解决）：`DownloadTask` 改存 `PlatformPost`/`PlatformMedia`；新增平台只需实现 `PlatformAdapter`（可复用 archiver 工厂）+ 注册 `getAdapter`
+
+3. **HomeTimeline（真首页动态）未实现**：GraphQL hash 硬编码在 X 混淆 JS 里，频繁变化，第三方库维护的 hash 也易失效（实测 403）。如需实现需引入无头浏览器动态抓取 hash，工程量大且不稳定，已放弃
+4. **asset 协议本地图片**：时间流曾尝试 `convertFileSrc` 加载本地文件（F:\ 下），Tauri v1 的 asset scope 默认不含任意路径，改用推特 CDN 缩略图规避
+5. **aria2 状态批量查询**：任务量大时可能漏项（见上），如需优化应分批创建任务
+6. **Cookie 存储**：明文存在 `app-state.json`，仅本机使用可接受
+7. **订阅 store 职责偏重**：`subscription.ts` 同时依赖抓推文、aria2、下载、cookie 多模块。当前规模可接受，扩展前评估是否需要拆分调度/抓取/下载
+
+> 说明：更新检查已恢复（`src/github/api.ts` + `src/hooks/useCheckUpdate.ts`），指向 `mdo730/P-spider` 的 releases。
 
 ## 如何发布新版
 

@@ -13,10 +13,27 @@ import * as R from 'ramda';
 import React from 'react';
 import { DownloadTask } from '../../interfaces/DownloadTask';
 import { useDownloadStore } from '../../stores/download';
-import { buildPostUrl, buildUserUrl } from '../../twitter/url';
 import { showInFolder } from '../../utils/shell';
 import { StatusText } from './StatusText';
 import { TaskAction, TaskActions } from './TaskActions';
+
+function formatSpeed(bytesPerSec: number): string {
+  if (!bytesPerSec || bytesPerSec <= 0) return '';
+  if (bytesPerSec >= 1024 * 1024) {
+    return `${(bytesPerSec / 1024 / 1024).toFixed(1)} MB/s`;
+  }
+  if (bytesPerSec >= 1024) return `${(bytesPerSec / 1024).toFixed(0)} KB/s`;
+  return `${bytesPerSec} B/s`;
+}
+
+function formatSize(bytes: number): string {
+  if (!bytes || bytes <= 0 || bytes === Infinity) return '';
+  if (bytes >= 1024 * 1024) {
+    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  }
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${bytes} B`;
+}
 
 export interface DownloadListItemProps {
   task: DownloadTask;
@@ -134,11 +151,7 @@ export const DownloadListItem: React.FC<DownloadListItemProps> = ({
       className="bg-white border-[1px] border-gray-300 rounded-md flex overflow-hidden"
     >
       <a
-        href={
-          t.post.user?.screenName && t.post.id
-            ? buildPostUrl(t.post.user.screenName, t.post.id)
-            : 'javascript:void(0);'
-        }
+        href={t.post.postUrl || 'javascript:void(0);'}
         target="_blank"
         rel="noreferrer"
         className="shrink-0 overflow-hidden"
@@ -146,10 +159,10 @@ export const DownloadListItem: React.FC<DownloadListItemProps> = ({
           width: itemClientHeight,
           height: itemClientHeight,
         }}
-        title="打开推文页"
+        title="打开原帖页"
       >
         <img
-          src={`${t.media.url}?format=jpg&name=thumb`}
+          src={t.media.thumbUrl || `${t.media.url}?format=jpg&name=thumb`}
           loading="lazy"
           className="w-full h-full object-cover transition-transform transform hover:scale-105"
         />
@@ -162,19 +175,15 @@ export const DownloadListItem: React.FC<DownloadListItemProps> = ({
           {t.fileName}
         </p>
         <a
-          href={
-            t.post.user?.screenName
-              ? buildUserUrl(t.post.user?.screenName)
-              : 'javascript:void(0);'
-          }
-          title={`跳转到 ${t.post.user?.name || t.post.user?.screenName || '未知用户'} 的主页`}
+          href={t.post.creator?.profileUrl || 'javascript:void(0);'}
+          title={`跳转到 ${t.post.creator?.name || t.post.creator?.username || '未知用户'} 的主页`}
           target="_blank"
           rel="noreferrer"
           className="text-xs flex items-center space-x-1 w-fit text-ant-color-text-secondary bg-gray-100 p-1 rounded-full pr-2 overflow-hidden"
         >
-          <Avatar src={t.post.user?.avatar} size={20} />
-          <span>{t.post.user?.name || '未知用户'}</span>
-          {t.post.user?.screenName && <span>@{t.post.user.screenName}</span>}
+          <Avatar src={t.post.creator?.avatar} size={20} />
+          <span>{t.post.creator?.name || '未知用户'}</span>
+          {t.post.creator?.username && <span>@{t.post.creator.username}</span>}
         </a>
         <div className="mt-2">
           <TaskActions
@@ -197,9 +206,28 @@ export const DownloadListItem: React.FC<DownloadListItemProps> = ({
         </div>
         <div className="mt-0">
           <Progress
-            percent={Math.round((t.completeSize / t.totalSize) * 100)}
+            percent={
+              t.totalSize && t.totalSize !== Infinity
+                ? Math.round((t.completeSize / t.totalSize) * 100)
+                : t.status === 'complete'
+                  ? 100
+                  : 0
+            }
             className="mb-0 mr-0"
           />
+        </div>
+        <div className="text-xs text-gray-500 mt-0.5 flex items-center gap-2">
+          {t.downloadSpeed ? (
+            <span className="text-ant-color-primary font-medium">
+              {formatSpeed(t.downloadSpeed)}
+            </span>
+          ) : null}
+          <span>
+            {formatSize(t.completeSize)}
+            {t.totalSize && t.totalSize !== Infinity
+              ? ` / ${formatSize(t.totalSize)}`
+              : ''}
+          </span>
         </div>
         <div>
           <StatusText task={t} />

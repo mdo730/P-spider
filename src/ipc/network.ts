@@ -26,12 +26,15 @@ export async function request(options: RequestOptions) {
   const settings = useSettingsStore.getState();
   const appState = useAppStateStore.getState();
   // useSystem 时用轮询到的系统代理地址显式传给后端，避免 reqwest 系统代理缓存问题
-  const resolvedProxy = settings.proxy.enable
+  // bypassProxy：绕过代理直连（pawchive 等免登录站点直连更快）
+  const useProxy = options.bypassProxy ? false : settings.proxy.enable;
+  const resolvedProxy = useProxy
     ? settings.proxy.useSystem
       ? appState.systemProxyUrl
       : settings.proxy.url
     : '';
-  let remainingRetryCount = MAX_RETRY_COUNT;
+  const maxRetry = options.maxRetry ?? MAX_RETRY_COUNT;
+  let remainingRetryCount = maxRetry;
   let retryDelay = 100;
   let lastErr: any;
 
@@ -41,7 +44,7 @@ export async function request(options: RequestOptions) {
         R.defaultTo('GET', options.method),
         url.href,
         R.defaultTo('', options.body),
-        settings.proxy.enable,
+        useProxy,
         resolvedProxy,
         R.defaultTo({}, options.headers),
         options.responseType,
@@ -100,7 +103,8 @@ async function requestInternal(
   });
 
   const endTs = Date.now() - startTs;
-  log.info(`RES_${reqId}(+${endTs}ms)`, res.status, url, res);
+  // 只打印状态与耗时，避免每次同步序列化整个响应体（大 JSON 会卡主线程）
+  log.info(`RES_${reqId}(+${endTs}ms)`, res.status, url);
 
   return res;
 }

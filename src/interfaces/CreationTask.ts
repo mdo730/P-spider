@@ -1,9 +1,11 @@
 import { DownloadFilter } from './DownloadFilter';
-import { TwitterUser } from './TwitterUser';
+import { PlatformCreator, PlatformSource } from '../platforms';
 
 export interface CreationTask {
   id: string;
-  user: TwitterUser;
+  /** 平台源（twitter / pawchive），决定拉取方式 */
+  source: PlatformSource;
+  creator: PlatformCreator;
   filter: DownloadFilter;
   status: 'waiting' | 'active';
   completeCount: number;

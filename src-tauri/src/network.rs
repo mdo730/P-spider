@@ -95,7 +95,8 @@ pub async fn network_fetch(
   // Load response body
   let body: Value = {
     match response_type.as_str() {
-      "json" => response.json().await.map_err(map_reqwest_err).map(|res| Value::Object(res)),
+      // 直接返回原始 JSON（可能是对象或数组），前端按需取用
+      "json" => response.json::<Value>().await.map_err(map_reqwest_err),
       "text" => response.text().await.map_err(map_reqwest_err).map(|res| Value::String(res)),
       "binary" => {
         let bytes = response.bytes().await.map_err(map_reqwest_err)?;

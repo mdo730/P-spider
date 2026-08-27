@@ -7,8 +7,10 @@ import {
   BellOutlined,
   BarChartOutlined,
   ClockCircleOutlined,
+  AppstoreOutlined,
 } from '@ant-design/icons';
 import { Homepage } from '../pages/Homepage';
+import { Archiver } from '../pages/Archiver';
 import { DownloadManagement } from '../pages/DownloadManagement';
 import { SubscriptionPage } from '../pages/Subscription';
 import { StatisticsPage } from '../pages/Statistics';
@@ -22,6 +24,12 @@ export const ROUTES: Route[] = [
     name: '主页',
     icon: <HomeFilled />,
     element: <Homepage />,
+  },
+  {
+    id: 'archiver',
+    name: 'Pawchive',
+    icon: <AppstoreOutlined />,
+    element: <Archiver />,
   },
   {
     id: 'subscription',

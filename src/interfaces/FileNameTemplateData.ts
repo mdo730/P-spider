@@ -1,7 +1,6 @@
-import { TwitterMedia } from './TwitterMedia';
-import { TwitterPost } from './TwitterPost';
+import { PlatformMedia, PlatformPost } from '../platforms';
 
 export interface FileNameTemplateData {
-  post: TwitterPost;
-  media: TwitterMedia;
+  post: PlatformPost;
+  media: PlatformMedia;
 }

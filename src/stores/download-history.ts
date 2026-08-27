@@ -1,6 +1,7 @@
 import { fs, path } from '@tauri-apps/api';
 import { convertFileSrc } from '@tauri-apps/api/tauri';
 import MediaType from '../enums/MediaType';
+import { onTaskCompleted } from './download';
 
 let _log: ICategoriedLogger;
 
@@ -154,3 +155,31 @@ export function getMediaOriginalUrl(record: DownloadHistoryRecord): string {
   }
   return getMediaThumbUrl(record);
 }
+
+// 监听下载任务完成事件，自动写入历史（时间流数据源）。
+// 注意：本模块需在应用启动时被加载（见 main.tsx 副作用 import），
+// 否则监听只在打开时间流页面时才注册，后台订阅下载将丢失历史记录。
+onTaskCompleted.listen((task) => {
+  void (async () => {
+    try {
+      const filePath = await path.join(task.dir, task.fileName);
+      await appendDownloadHistory({
+        postId: task.post?.id || '',
+        tweetTime:
+          task.post?.publishedAt?.toISOString?.() ||
+          new Date(task.updatedAt).toISOString(),
+        fullText: task.post?.text,
+        username: task.post?.creator?.username,
+        displayName: task.post?.creator?.name,
+        mediaType: task.media?.type || MediaType.Photo,
+        mediaUrl: task.media?.url,
+        filePath,
+        fileName: task.fileName,
+        downloadedAt: task.updatedAt,
+        source: task.subscriptionId ? 'subscription' : 'manual',
+      });
+    } catch (err) {
+      log().error('Failed to write download history', err);
+    }
+  })();
+});

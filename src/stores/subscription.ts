@@ -5,12 +5,18 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import MediaType from '../enums/MediaType';
 import { Subscription } from '../interfaces/Subscription';
-import { TwitterMedia } from '../interfaces/TwitterMedia';
 import { TwitterPost } from '../interfaces/TwitterPost';
 import { getUser, getUserMedias } from '../twitter/api';
 import { aria2 } from '../utils/aria2';
+import { getAdapter, PlatformPost, PlatformSource } from '../platforms';
+import { toPlatformMedia, toPlatformPost } from '../platforms/twitter';
 import { useAppStateStore } from './app-state';
-import { onTaskCompleted, useDownloadStore } from './download';
+import {
+  CreateDownloadTaskParams,
+  onTaskCompleted,
+  prepareArchiverPostDir,
+  useDownloadStore,
+} from './download';
 import { createTauriFileStorage } from './persist/tauri-file-storage';
 
 let _log: ICategoriedLogger;
@@ -25,6 +31,8 @@ export interface CreateSubscriptionParams {
   username: string;
   intervalMin: number;
   mediaTypes: MediaType[];
+  /** 平台源，默认 twitter（阶段3 UI 支持多平台后由表单选择） */
+  source?: PlatformSource;
 }
 
 export interface SubscriptionStore {
@@ -43,10 +51,16 @@ export const useSubscriptionStore = create(
   persist<SubscriptionStore>(
     (set, get) => ({
       subscriptions: [],
-      addSubscription: async ({ username, intervalMin, mediaTypes }) => {
+      addSubscription: async ({
+        username,
+        intervalMin,
+        mediaTypes,
+        source,
+      }) => {
         const id = nanoid();
         const sub: Subscription = {
           id,
+          source: source || 'twitter',
           username,
           intervalMin,
           mediaTypes,
@@ -108,6 +122,7 @@ export const useSubscriptionStore = create(
         const data = {
           version: 1,
           subscriptions: subs.map((s) => ({
+            source: s.source,
             username: s.username,
             intervalMin: s.intervalMin,
             mediaTypes: s.mediaTypes,
@@ -120,6 +135,8 @@ export const useSubscriptionStore = create(
         let parsed: {
           version?: number;
           subscriptions?: {
+            // 外部 JSON 的 source 可能是旧值（如 'kemono'），导入时归并
+            source?: string;
             username: string;
             intervalMin?: number;
             mediaTypes?: MediaType[];
@@ -139,7 +156,9 @@ export const useSubscriptionStore = create(
         }
 
         const existing = new Set(
-          get().subscriptions.map((s) => s.username.toLowerCase()),
+          get().subscriptions.map(
+            (s) => `${s.source || 'twitter'}:${s.username.toLowerCase()}`,
+          ),
         );
 
         let added = 0;
@@ -152,12 +171,18 @@ export const useSubscriptionStore = create(
             continue;
           }
           const username = item.username.trim();
-          if (!username || existing.has(username.toLowerCase())) {
+          const source: PlatformSource =
+            item.source === 'pawchive' || item.source === 'kemono'
+              ? 'pawchive'
+              : 'twitter';
+          const key = `${source}:${username.toLowerCase()}`;
+          if (!username || existing.has(key)) {
             skipped++;
             continue;
           }
           const sub: Subscription = {
             id: nanoid(),
+            source,
             username,
             intervalMin: item.intervalMin || DEFAULT_INTERVAL_MIN,
             mediaTypes:
@@ -169,7 +194,7 @@ export const useSubscriptionStore = create(
             dailyStats: {},
             status: 'idle',
           };
-          existing.add(username.toLowerCase());
+          existing.add(key);
           newSubs.push(sub);
           added++;
         }
@@ -196,7 +221,7 @@ export const useSubscriptionStore = create(
     }),
     {
       name: 'subscriptions',
-      version: 3,
+      version: 5,
       storage: createTauriFileStorage(),
       migrate(state: any) {
         state.subscriptions = (state.subscriptions || []).map((s: any) => {
@@ -215,6 +240,8 @@ export const useSubscriptionStore = create(
           }
           return {
             ...s,
+            // v4：旧订阅平台源统一补为 twitter；v5：kemono 订阅迁移为 pawchive（同 service/id 通用）
+            source: s.source === 'kemono' ? 'pawchive' : s.source || 'twitter',
             dailyStats,
             downloadedCount: s.downloadedCount || 0,
           };
@@ -226,14 +253,28 @@ export const useSubscriptionStore = create(
 );
 
 /**
- * 执行一次订阅检查：
+ * 执行一次订阅检查：按订阅平台分发到对应实现。
+ * - twitter：原逻辑，走 twitter/api，新推文自动下载
+ * - pawchive：走适配器（目录结构：saveDirBase/创作者名/帖子标题）
+ */
+export async function checkSubscription(
+  sub: Subscription,
+): Promise<{ downloaded: number }> {
+  if (sub.source === 'twitter') {
+    return checkTwitterSubscription(sub);
+  }
+  return checkArchiverSubscription(sub);
+}
+
+/**
+ * X（twitter）订阅检查：
  * 1. 解析用户名拿到 userId
  * 2. 拉取最新一页媒体推文
  * 3. 与 lastTweetId 对比，筛出新增推文
  * 4. 新推文的媒体自动加入下载队列
  * 5. 更新 lastTweetId 与最后检查时间
  */
-export async function checkSubscription(
+async function checkTwitterSubscription(
   sub: Subscription,
 ): Promise<{ downloaded: number }> {
   const { updateSubscription } = useSubscriptionStore.getState();
@@ -280,17 +321,18 @@ export async function checkSubscription(
 
       const { batchCreateDownloadTask } = useDownloadStore.getState();
 
-      const paramsList: {
-        post: TwitterPost;
-        media: TwitterMedia;
-        subscriptionId: string;
-      }[] = [];
+      const paramsList: CreateDownloadTaskParams[] = [];
       for (const post of newPosts) {
         const medias = (post.medias || []).filter((m) =>
           sub.mediaTypes.includes(m.type),
         );
         for (const media of medias) {
-          paramsList.push({ post, media, subscriptionId: sub.id });
+          paramsList.push({
+            source: 'twitter',
+            post: toPlatformPost(post),
+            media: toPlatformMedia(media),
+            subscriptionId: sub.id,
+          });
         }
       }
 
@@ -321,6 +363,122 @@ export async function checkSubscription(
     return { downloaded };
   } catch (err: any) {
     log().error('Subscription check failed', { id: sub.id, err });
+    update({
+      status: 'error',
+      errorMessage: err?.message || '未知原因',
+    });
+    return { downloaded: 0 };
+  }
+}
+
+/**
+ * Pawchive 订阅检查：走 getAdapter(sub.source) 解析创作者并拉取最新一页帖子，
+ * 与 lastPostId（复用 lastTweetId 字段）对比建立基线，
+ * 新帖的 medias 按 mediaTypes 过滤后加入下载队列
+ * （目录结构：saveDirBase/创作者名/帖子标题，附件保留原始文件名）。
+ */
+async function checkArchiverSubscription(
+  sub: Subscription,
+): Promise<{ downloaded: number }> {
+  const { updateSubscription } = useSubscriptionStore.getState();
+  const update = (patch: Partial<Subscription>) =>
+    updateSubscription(sub.id, patch);
+
+  update({ status: 'running', errorMessage: undefined });
+
+  try {
+    const adapter = getAdapter(sub.source);
+    const creator = await adapter.resolveCreator(sub.username);
+    const { posts } = await adapter.fetchPosts(creator.id, undefined, 20);
+    // fetchPosts 返回的帖子 creator 无 name，填充已解析的 creator（目录命名用创作者名）
+    const enrichedPosts = posts.map((p) => ({ ...p, creator }));
+
+    if (!enrichedPosts || enrichedPosts.length === 0) {
+      update({
+        status: 'idle',
+        lastCheckedAt: Date.now(),
+        displayName: creator.name || creator.username,
+        avatar: creator.avatar,
+      });
+      return { downloaded: 0 };
+    }
+
+    // 取第一条（最新）作为新基线
+    const newestId = enrichedPosts[0].id;
+
+    // 是否有新帖：最新一条与上次基线不同即视为有新内容
+    const isNew = newestId !== sub.lastTweetId;
+
+    let downloaded = 0;
+
+    if (isNew && sub.lastTweetId) {
+      const newPosts = R.takeWhile(
+        (p: PlatformPost) => p.id !== sub.lastTweetId,
+        enrichedPosts,
+      );
+      if (newPosts.length > 0) {
+        const { batchCreateDownloadTask } = useDownloadStore.getState();
+        const paramsList: CreateDownloadTaskParams[] = [];
+        const linkOnlyPosts: PlatformPost[] = [];
+        for (const post of newPosts) {
+          const medias = (post.medias || []).filter((m) =>
+            sub.mediaTypes.includes(m.type),
+          );
+          if (medias.length > 0) {
+            for (const media of medias) {
+              paramsList.push({
+                source: sub.source,
+                post,
+                media,
+                subscriptionId: sub.id,
+              });
+            }
+          } else if ((post.links?.length || 0) > 0) {
+            // 纯外链帖（无附件但有网盘链接）：单独建目录 + 写链接清单，不下载
+            linkOnlyPosts.push(post);
+          }
+        }
+        if (paramsList.length > 0) {
+          if (!aria2.ready) {
+            log().warn(
+              'Aria2 is not ready, skip downloading for subscription',
+              {
+                id: sub.id,
+                count: paramsList.length,
+              },
+            );
+          } else {
+            await batchCreateDownloadTask(paramsList);
+            downloaded = paramsList.length;
+          }
+        }
+        for (const post of linkOnlyPosts) {
+          try {
+            await prepareArchiverPostDir(post);
+          } catch (err: any) {
+            log().error('Failed to write external links file', {
+              id: sub.id,
+              postId: post.id,
+              err,
+            });
+          }
+        }
+      }
+    }
+
+    update({
+      status: 'idle',
+      lastTweetId: newestId,
+      lastCheckedAt: Date.now(),
+      displayName: creator.name || creator.username,
+      avatar: creator.avatar,
+      downloadedCount: sub.downloadedCount + downloaded,
+      dailyStats: addDailyStats(sub.dailyStats, downloaded),
+    });
+
+    return { downloaded };
+  } catch (err: any) {
+    log().error('Pawchive subscription check failed', { id: sub.id, err });
     update({
       status: 'error',
       errorMessage: err?.message || '未知原因',

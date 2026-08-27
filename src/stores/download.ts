@@ -5,20 +5,23 @@ import { create } from 'zustand';
 import { CreationTask } from '../interfaces/CreationTask';
 import { DownloadFilter } from '../interfaces/DownloadFilter';
 import { DownloadTask } from '../interfaces/DownloadTask';
-import { TwitterMedia } from '../interfaces/TwitterMedia';
-import { TwitterPost } from '../interfaces/TwitterPost';
-import { TwitterUser } from '../interfaces/TwitterUser';
 import { AriaStatus, aria2 } from '../utils/aria2';
 import { getUserMedias, getUserTweets } from '../twitter/api';
 import { useSettingsStore } from './settings';
-import { getDownloadUrl } from '../twitter/utils';
 import { resolveVariables } from '../utils/file-name-template';
 import { FileNameTemplateData } from '../interfaces/FileNameTemplateData';
+import {
+  getAdapter,
+  PlatformCreator,
+  PlatformMedia,
+  PlatformPost,
+  PlatformSource,
+} from '../platforms';
+import { toPlatformPost } from '../platforms/twitter';
+import { unicodeFilenamify } from '../utils/unicode';
 import dayjs from 'dayjs';
 import { notification as antNotification } from 'antd';
-import MediaType from '../enums/MediaType';
 import { EventEmitter } from '../utils/event';
-import { appendDownloadHistory } from './download-history';
 
 let _log: ICategoriedLogger;
 
@@ -32,8 +35,9 @@ function log() {
 export const onTaskCompleted = new EventEmitter<DownloadTask>();
 
 export interface CreateDownloadTaskParams {
-  post: TwitterPost;
-  media: TwitterMedia;
+  source: PlatformSource;
+  post: PlatformPost;
+  media: PlatformMedia;
   subscriptionId?: string;
 }
 
@@ -48,6 +52,7 @@ async function mergeAriaStatusToDownloadTask(
     status: ariaStatus.status,
     completeSize: Number(ariaStatus.completedLength),
     totalSize: Number(ariaStatus.totalLength),
+    downloadSpeed: Number(ariaStatus.downloadSpeed) || 0,
     fileName: await path.basename(ariaStatus.files[0].path),
     error: ariaStatus.errorMessage,
     dir: ariaStatus.dir,
@@ -55,34 +60,85 @@ async function mergeAriaStatusToDownloadTask(
   };
 }
 
+/**
+ * 计算归档站（pawchive）帖子的保存目录：saveDirBase/创作者名/帖子标题。
+ * 帖子含外链时目录名加 [needDL] 后缀，并幂等写入外链清单 txt（标题 + 外链）。
+ * 供 prepareDownloadTask（有附件帖）与 checkArchiverSubscription（纯外链帖）复用。
+ */
+export async function prepareArchiverPostDir(
+  post: PlatformPost,
+): Promise<{ dir: string; hasExternalLinks: boolean }> {
+  const settings = useSettingsStore.getState();
+  const creatorName = unicodeFilenamify(
+    post.creator?.name || post.creator?.username || 'unknown',
+  );
+  let postTitle = unicodeFilenamify(post.text || post.id || 'untitled');
+  const hasExternalLinks = (post.links?.length || 0) > 0;
+  if (hasExternalLinks) {
+    postTitle = `${postTitle}[needDL]`;
+  }
+  const dir = await path.join(
+    settings.download.saveDirBase,
+    creatorName,
+    postTitle,
+  );
+  if (hasExternalLinks) {
+    // 幂等写入外链清单（同一帖多附件重复调用时避免重复写）；写入前确保目录存在
+    const txtPath = await path.join(dir, '链接清单.txt');
+    if (!(await fs.exists(txtPath))) {
+      await fs.createDir(dir, { recursive: true });
+      await fs.writeTextFile(
+        txtPath,
+        [`标题：${post.text || post.id || ''}`, ...(post.links || []), ''].join(
+          '\n',
+        ),
+      );
+    }
+  }
+  return { dir, hasExternalLinks };
+}
+
 async function prepareDownloadTask({
+  source,
   post,
   media,
   subscriptionId,
 }: CreateDownloadTaskParams): Promise<DownloadTask> {
   const settings = useSettingsStore.getState();
-  const downloadUrl = getDownloadUrl(media);
-  log().info('downloadUrl', downloadUrl);
-  const templateData: FileNameTemplateData = {
-    media,
-    post,
-  };
-  const resolvedDirName = settings.download.dirTemplate
-    ? resolveVariables(settings.download.dirTemplate, templateData)
-    : '';
-  log().info('resolved dirName', resolvedDirName);
-  const dir = await path.join(settings.download.saveDirBase, resolvedDirName);
-  log().info('resolved dir', dir);
+  const downloadUrl = media.downloadUrl || media.url;
+  if (!downloadUrl) {
+    throw new Error('媒体没有下载链接');
+  }
 
-  const fileName = resolveVariables(
-    settings.download.fileNameTemplate,
-    templateData,
-  );
+  let dir: string;
+  let fileName: string;
+
+  if (source !== 'twitter') {
+    // 归档站（pawchive）：固定两级目录，附件保留原始文件名
+    const { dir: archiverDir } = await prepareArchiverPostDir(post);
+    dir = archiverDir;
+    fileName = media.fileName || `file-${media.id || Date.now()}`;
+  } else {
+    // twitter：走文件名模板机制
+    const templateData: FileNameTemplateData = { media, post };
+    const resolvedDirName = settings.download.dirTemplate
+      ? resolveVariables(settings.download.dirTemplate, templateData)
+      : '';
+    log().info('resolved dirName', resolvedDirName);
+    dir = await path.join(settings.download.saveDirBase, resolvedDirName);
+    log().info('resolved dir', dir);
+
+    fileName = resolveVariables(
+      settings.download.fileNameTemplate,
+      templateData,
+    );
+  }
 
   log().info('resolved fileName', fileName);
 
   const task: DownloadTask = {
     gid: '',
+    source,
     status: AriaStatus.Waiting,
     completeSize: 0,
     totalSize: Infinity,
@@ -126,7 +182,11 @@ export interface DownloadStore {
   batchRedownloadTask: (gid: string[]) => Promise<void>;
 
   creationTasks: CreationTask[];
-  createCreationTask: (user: TwitterUser, filter: DownloadFilter) => void;
+  createCreationTask: (
+    source: PlatformSource,
+    creator: PlatformCreator,
+    filter: DownloadFilter,
+  ) => void;
   removeCreationTask: (id: string) => void;
   updateCreationTask: (task: CreationTask) => void;
 }
@@ -194,9 +254,18 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
   },
   batchCreateDownloadTask: async (paramsList) => {
     const tasks: DownloadTask[] = [];
+    const settings = useSettingsStore.getState();
 
     for (const params of paramsList) {
       const task = await prepareDownloadTask(params);
+      // 跳过本地已存在的同名文件（sameFileSkip 设置开启时），避免重复下载
+      if (settings.download.sameFileSkip) {
+        const filePath = await path.join(task.dir, task.fileName);
+        if (await fs.exists(filePath)) {
+          log().info('Skip because sameFileSkip', task.fileName);
+          continue;
+        }
+      }
       tasks.push(task);
     }
 
@@ -282,6 +351,7 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
     }
     await store.removeDownloadTask(oldTask.gid);
     await store.createDownloadTask({
+      source: oldTask.source,
       post: oldTask.post,
       media: oldTask.media,
     });
@@ -296,6 +366,7 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
     await store.batchRemoveDownloadTasks(gids);
     await store.batchCreateDownloadTask(
       oldTasks.map((task) => ({
+        source: task.source,
         media: task.media,
         post: task.post,
       })),
@@ -320,6 +391,7 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
         removeDownloadTask(task.gid);
 
         const newTask = await prepareDownloadTask({
+          source: task.source,
           post: task.post,
           media: task.media,
         });
@@ -357,39 +429,13 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
 
       // 任务首次完成时触发，供订阅统计与下载历史记录使用
       if (status.status === 'complete' && task.status !== 'complete') {
-        // 写入下载历史（时间流数据源）
-        try {
-          const mediaType =
-            task.media?.type === 'video'
-              ? MediaType.Video
-              : task.media?.type === 'animated_gif'
-                ? MediaType.Gif
-                : MediaType.Photo;
-          appendDownloadHistory({
-            postId: task.post?.id || '',
-            tweetTime:
-              task.post?.createdAt?.toISOString?.() ||
-              new Date(now).toISOString(),
-            fullText: task.post?.fullText,
-            username: task.post?.user?.screenName,
-            displayName: task.post?.user?.name,
-            mediaType,
-            mediaUrl: task.media?.url,
-            filePath: await path.join(task.dir, task.fileName),
-            fileName: task.fileName,
-            downloadedAt: now,
-            source: task.subscriptionId ? 'subscription' : 'manual',
-          });
-        } catch (histErr) {
-          log().error('Failed to write download history', histErr);
-        }
         onTaskCompleted.emit(newTask);
       }
     }
   },
 
   creationTasks: [],
-  createCreationTask: (user, filter) => {
+  createCreationTask: (source, creator, filter) => {
     const id = nanoid();
     const abortController = new AbortController();
     creationTaskAbortControllerMap.set(id, abortController);
@@ -398,7 +444,8 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
         ...get().creationTasks,
         {
           id,
-          user,
+          source,
+          creator,
           filter,
           status: 'waiting',
           completeCount: 0,
@@ -430,7 +477,7 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
 
 async function runCreationTask(task: CreationTask, abortSignal: AbortSignal) {
   log().info('Run creation task', task);
-  const { filter, user } = task;
+  const { filter, creator, source } = task;
 
   const { batchCreateDownloadTask, updateCreationTask } =
     useDownloadStore.getState();
@@ -444,9 +491,24 @@ async function runCreationTask(task: CreationTask, abortSignal: AbortSignal) {
   const until = filter.dateRange?.[1] || now.clone();
   let nextCursor: string | undefined | null = undefined;
 
-  const getListFn = filter.source === 'medias' ? getUserMedias : getUserTweets;
+  // 按平台分发「拉一页」：twitter 走原始 api（转 Platform 模型），归档站走适配器
+  const fetchPage = async (
+    cursor?: string,
+  ): Promise<{ posts: PlatformPost[]; cursor: string | null }> => {
+    if (source === 'twitter') {
+      const getListFn =
+        filter.source === 'medias' ? getUserMedias : getUserTweets;
+      const { twitterPosts, cursor: next } = await getListFn(
+        creator.id,
+        cursor,
+      );
+      return { posts: twitterPosts.map(toPlatformPost), cursor: next };
+    }
+    const adapter = getAdapter(source);
+    return adapter.fetchPosts(creator.id, cursor, 50);
+  };
 
-  const getMediaCounts = R.reduce((acc: number, elem: TwitterPost) => {
+  const getMediaCounts = R.reduce((acc: number, elem: PlatformPost) => {
     return acc + (elem.medias?.length || 0);
   }, 0);
 
@@ -456,27 +518,28 @@ async function runCreationTask(task: CreationTask, abortSignal: AbortSignal) {
     }
 
     log().info('CreationTask fetching', nextCursor);
-    const { twitterPosts, cursor } = await getListFn(user.id, nextCursor);
+    const { posts, cursor } = await fetchPage(nextCursor);
     if (abortSignal.aborted) break;
     nextCursor = cursor;
-    now = R.last(twitterPosts)?.createdAt || now;
+    now = R.last(posts)?.publishedAt || now;
     log().info('Now', now.format('YYYY-MM-DD'), 'next cursor', nextCursor);
-    const filteredPosts = twitterPosts.filter(
+    // fetchPosts 返回的帖子 creator 无 name，填充已解析的 creator（目录命名用创作者名）
+    const enrichedPosts = posts.map((p) => ({ ...p, creator: task.creator }));
+    const filteredPosts = enrichedPosts.filter(
       R.allPass([
         (post) => (post.medias ? post.medias.length >= 0 : false),
         (post) => {
-          if (!post.createdAt) return true;
-          return until ? post.createdAt.isBefore(until) : true;
+          if (!post.publishedAt) return true;
+          return until ? post.publishedAt.isBefore(until) : true;
         },
         (post) => {
-          if (!post.createdAt) return true;
-          return since ? post.createdAt.isAfter(since) : true;
+          if (!post.publishedAt) return true;
+          return since ? post.publishedAt.isAfter(since) : true;
         },
       ]),
     );
 
-    const filteredCount =
-      getMediaCounts(twitterPosts) - getMediaCounts(filteredPosts);
+    const filteredCount = getMediaCounts(posts) - getMediaCounts(filteredPosts);
     skipCount += filteredCount;
     log().info('FilteredPosts', filteredPosts);
 
@@ -492,7 +555,7 @@ async function runCreationTask(task: CreationTask, abortSignal: AbortSignal) {
     const paramsList: CreateDownloadTaskParams[] = [];
 
     for (const post of filteredPosts) {
-      const filteredMedias = post.medias!.filter(
+      const filteredMedias = (post.medias || []).filter(
         R.allPass([
           (media) => {
             if (!filter.mediaTypes) return false;
@@ -503,9 +566,13 @@ async function runCreationTask(task: CreationTask, abortSignal: AbortSignal) {
 
       log().info('FilteredMedias', filteredMedias);
       for (const media of filteredMedias) {
-        const task = await prepareDownloadTask({ post, media });
-        log().info('Prepared download task', task);
-        const filePath = await path.join(task.dir, task.fileName);
+        const prepared = await prepareDownloadTask({
+          source,
+          post,
+          media,
+        });
+        log().info('Prepared download task', prepared);
+        const filePath = await path.join(prepared.dir, prepared.fileName);
         log().info('Resolved file path', filePath);
         if (settings.download.sameFileSkip && (await fs.exists(filePath))) {
           skipCount++;
@@ -513,6 +580,7 @@ async function runCreationTask(task: CreationTask, abortSignal: AbortSignal) {
           continue;
         }
         paramsList.push({
+          source,
           media,
           post,
         });

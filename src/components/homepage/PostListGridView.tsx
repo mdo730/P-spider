@@ -9,6 +9,7 @@ import { TwitterMedia } from '../../interfaces/TwitterMedia';
 import { TwitterPost } from '../../interfaces/TwitterPost';
 import { useDownloadStore } from '../../stores/download';
 import { useHomepageStore } from '../../stores/homepage';
+import { toPlatformMedia, toPlatformPost } from '../../platforms/twitter';
 import { buildPostUrl } from '../../twitter/url';
 import { InfiniteScroll } from '../InfiniteScroll';
 import { GridViewItemAction, GridViewItemActions } from './GridViewItemActions';
@@ -98,8 +99,9 @@ export const PostListGridView: React.FC = () => {
             )!;
             try {
               await createDownloadTask({
-                post,
-                media,
+                source: 'twitter',
+                post: toPlatformPost(post),
+                media: toPlatformMedia(media),
               });
               message.success('已添加到下载队列');
             } catch (err: any) {

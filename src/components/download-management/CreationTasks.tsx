@@ -2,7 +2,6 @@
 import React from 'react';
 import { useDownloadStore } from '../../stores/download';
 import { Avatar, Button, Tooltip } from 'antd';
-import { buildUserUrl } from '../../twitter/url';
 import { QuestionCircleOutlined } from '@ant-design/icons';
 
 export const CreationTasks: React.FC = () => {
@@ -21,17 +20,17 @@ export const CreationTasks: React.FC = () => {
           <li className="flex items-center justify-between" key={t.id}>
             <a
               href={
-                t.user?.screenName
-                  ? buildUserUrl(t.user.screenName)
+                t.creator?.profileUrl
+                  ? t.creator.profileUrl
                   : 'javascript:void(0);'
               }
               target="_blank"
               rel="noreferrer"
               className="flex items-center space-x-1 overflow-hidden pr-4"
             >
-              <Avatar size={20} src={t.user.avatar} className="shrink-0" />
+              <Avatar size={20} src={t.creator.avatar} className="shrink-0" />
               <span className="whitespace-nowrap overflow-hidden text-ellipsis">
-                {`${t.user?.name || '未知用户'} ${t.user?.screenName ? `@${t.user.screenName}` : ''}`}
+                {`${t.creator?.name || '未知用户'} ${t.creator?.username ? `@${t.creator.username}` : ''}`}
               </span>
             </a>
             <div className="flex items-center space-x-2 shrink-0">

@@ -1,10 +1,13 @@
 import MediaType from '../enums/MediaType';
+import { PlatformSource } from '../platforms/types';
 
 export type SubscriptionStatus = 'idle' | 'running' | 'error' | 'paused';
 
 export interface Subscription {
   id: string;
-  /** 用户 ID（screenName） */
+  /** 平台源：twitter / pawchive（旧数据 migrate 时补为 twitter，kemono 迁移为 pawchive） */
+  source: PlatformSource;
+  /** 用户 ID（screenName），Pawchive 为 service/数字ID 形式 */
   username: string;
   /** 用户昵称，用于展示（可空，轮询时刷新） */
   displayName?: string;

@@ -7,6 +7,9 @@ import duration from 'dayjs/plugin/duration';
 import 'dayjs/locale/zh-cn';
 import './utils/log';
 import { Logger } from './utils/log';
+// 副作用 import：确保下载历史模块常驻加载，注册 onTaskCompleted 监听，
+// 使后台订阅下载也能写入历史（时间流数据源）
+import './stores/download-history';
 
 dayjs.extend(duration);
 dayjs.locale('zh-cn');

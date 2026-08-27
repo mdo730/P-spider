@@ -1,23 +1,13 @@
 /* eslint-disable react/prop-types */
-import {
-  App,
-  Button,
-  Checkbox,
-  DatePicker,
-  Form,
-  Radio,
-  Select,
-  Space,
-} from 'antd';
+import { App, Button, Checkbox, DatePicker, Form, Select } from 'antd';
 import { CheckOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import React, { useState } from 'react';
 import MediaType from '../../enums/MediaType';
 import { DownloadFilter } from '../../interfaces/DownloadFilter';
+import { useArchiverBrowseStore } from '../../stores/archiver-browse';
 import { useDownloadStore } from '../../stores/download';
-import { useHomepageStore } from '../../stores/homepage';
 import { useSubscriptionStore } from '../../stores/subscription';
-import { toPlatformCreator } from '../../platforms/twitter';
 
 const INTERVAL_OPTIONS = [
   { value: 15, label: '15 分钟' },
@@ -29,54 +19,59 @@ const INTERVAL_OPTIONS = [
   { value: 1440, label: '1 天' },
 ];
 
-export const DownloadController: React.FC = () => {
+/**
+ * Pawchive 批量下载 + 订阅：
+ * - 批量下载：创建爬虫任务（爬全部页），目录走归档站两级文件夹逻辑
+ * - 订阅：按当前创作者建 Pawchive 订阅，新帖自动下载
+ */
+export const ArchiverDownloadController: React.FC = () => {
   const { message } = App.useApp();
-  const { filter, setFilter, user } = useHomepageStore((s) => ({
-    filter: s.filter,
-    setFilter: s.setFilter,
-    user: s.userInfo.data,
-  }));
-  const { createCreationTask } = useDownloadStore((s) => ({
-    createCreationTask: s.createCreationTask,
-  }));
+  const { creator, sources } = useArchiverBrowseStore();
+  const { createCreationTask } = useDownloadStore();
   const { addSubscription, subscriptions } = useSubscriptionStore();
-  const [subscribing, setSubscribing] = useState(false);
+  const [filter, setFilter] = useState<DownloadFilter>({
+    mediaTypes: [MediaType.Photo, MediaType.Video, MediaType.Gif],
+    source: 'medias',
+  });
   const [intervalMin, setIntervalMin] = useState(720);
+  const [subscribing, setSubscribing] = useState(false);
 
-  // 是否已订阅当前检索的账号（主页为 X 平台场景，只匹配 twitter 订阅）
+  // 是否已订阅当前创作者（Pawchive 订阅按 service/id 匹配）
   const alreadySubscribed = subscriptions.some(
     (s) =>
-      s.source === 'twitter' &&
-      s.username.toLowerCase() === (user?.screenName || '').toLowerCase(),
+      s.source === 'pawchive' &&
+      !!creator &&
+      s.username.toLowerCase() === creator.username.toLowerCase(),
   );
 
   const onStartDownload = async () => {
-    if (!user) {
-      message.error('请先加载用户');
+    if (!creator) {
+      message.info('请先检索创作者');
       return;
     }
-
     if (!filter.mediaTypes || filter.mediaTypes.length === 0) {
       message.error('请至少选择一个媒体类型');
       return;
     }
-
-    try {
-      createCreationTask('twitter', toPlatformCreator(user), filter);
-      message.success('已成功创建下载任务，请到下载管理页查看');
-    } catch (err: any) {
-      log.error(err);
-      message.error('创建下载任务失败');
+    const available = sources.filter((s) => !s.failed && s.posts.length > 0);
+    if (available.length === 0) {
+      message.info('还没有内容');
+      return;
     }
+    for (const s of available) {
+      createCreationTask(s.source, creator, {
+        mediaTypes: filter.mediaTypes,
+        source: 'medias',
+        dateRange: filter.dateRange,
+      });
+    }
+    message.success('已创建下载任务，请到下载管理页查看');
   };
 
   const onSubscribe = async () => {
-    if (!user) {
-      message.error('请先加载用户');
-      return;
-    }
+    if (!creator) return;
     if (alreadySubscribed) {
-      message.info(`@${user.screenName} 已订阅过，无需重复订阅`);
+      message.info(`已订阅过 ${creator.name || creator.username}，无需重复`);
       return;
     }
     if (!filter.mediaTypes || filter.mediaTypes.length === 0) {
@@ -86,12 +81,13 @@ export const DownloadController: React.FC = () => {
     setSubscribing(true);
     try {
       await addSubscription({
-        username: user.screenName,
+        source: 'pawchive',
+        username: creator.username,
         intervalMin,
         mediaTypes: filter.mediaTypes,
       });
       message.success(
-        `已订阅 @${user.screenName}，将每 ${intervalMin} 分钟检查一次新内容并自动下载`,
+        `已订阅 ${creator.name || creator.username}，将每 ${intervalMin} 分钟检查一次新帖并自动下载`,
       );
     } catch (err: any) {
       log.error(err);
@@ -103,36 +99,27 @@ export const DownloadController: React.FC = () => {
 
   return (
     <section className="p-4 bg-white rounded-md mt-3 border-[1px]">
-      <h2 className="font-bold mb-4">下载配置</h2>
+      <h2 className="font-bold mb-4">批量下载与订阅</h2>
       <Form<DownloadFilter>
         layout="inline"
         initialValues={filter}
-        onValuesChange={(_, values) => {
-          setFilter(values);
-        }}
+        onValuesChange={(_, values) => setFilter(values)}
       >
         <Form.Item name="dateRange" label="日期范围">
           <DatePicker.RangePicker
             presets={[
-              {
-                label: '至今',
-                value: [dayjs.unix(0), dayjs()],
-              },
+              { label: '至今', value: [dayjs.unix(0), dayjs()] },
               {
                 label: '最近 7 天',
                 value: [dayjs().subtract(7, 'day'), dayjs()],
               },
               {
-                label: '最近 15 天',
-                value: [dayjs().subtract(15, 'day'), dayjs()],
+                label: '最近 30 天',
+                value: [dayjs().subtract(30, 'day'), dayjs()],
               },
               {
-                label: '最近 1 个月',
-                value: [dayjs().subtract(1, 'month'), dayjs()],
-              },
-              {
-                label: '最近 6 个月',
-                value: [dayjs().subtract(6, 'month'), dayjs()],
+                label: '最近 90 天',
+                value: [dayjs().subtract(90, 'day'), dayjs()],
               },
               {
                 label: '最近 1 年',
@@ -145,46 +132,17 @@ export const DownloadController: React.FC = () => {
         <Form.Item name="mediaTypes" label="媒体类型">
           <Checkbox.Group
             options={[
-              {
-                label: '视频',
-                value: MediaType.Video,
-              },
-              {
-                label: '照片',
-                value: MediaType.Photo,
-              },
-              {
-                label: 'GIF',
-                value: MediaType.Gif,
-              },
-            ]}
-          />
-        </Form.Item>
-        <Form.Item
-          name="source"
-          label="下载源"
-          tooltip="帖子能下载到更早的推文，但爬取速度较慢；媒体可能下载不到更早的推文，但爬取速度更快。"
-        >
-          <Radio.Group
-            options={[
-              {
-                label: '帖子',
-                value: 'tweets',
-              },
-              {
-                label: '媒体',
-                value: 'medias',
-              },
+              { label: '照片', value: MediaType.Photo },
+              { label: '视频', value: MediaType.Video },
+              { label: 'GIF', value: MediaType.Gif },
             ]}
           />
         </Form.Item>
       </Form>
       <hr className="my-4" />
       <section className="flex items-center space-x-2">
-        <Button type="primary" onClick={onStartDownload}>
-          <Space>
-            <span>开始下载</span>
-          </Space>
+        <Button type="primary" onClick={onStartDownload} disabled={!creator}>
+          开始下载全部
         </Button>
         <Select
           value={intervalMin}
@@ -196,12 +154,14 @@ export const DownloadController: React.FC = () => {
         <Button
           onClick={onSubscribe}
           loading={subscribing}
-          disabled={!user || !filter.mediaTypes?.length || alreadySubscribed}
-          type={alreadySubscribed ? 'default' : 'default'}
+          disabled={!creator || !filter.mediaTypes?.length || alreadySubscribed}
           icon={alreadySubscribed ? <CheckOutlined /> : undefined}
         >
           {alreadySubscribed ? '已订阅' : '订阅'}
         </Button>
+        <span className="text-sm text-gray-400">
+          下载到 保存目录/创作者名/帖子标题
+        </span>
       </section>
     </section>
   );
