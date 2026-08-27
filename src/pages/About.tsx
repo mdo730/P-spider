@@ -52,16 +52,30 @@ export const About: React.FC = () => {
           <span>parukamun</span>
         </li>
         <li>
-          <strong>基于 X-Spider 开发</strong>
+          <strong>基于</strong>
+          <a
+            href="https://github.com/MiningCattiva/x-spider"
+            target="_blank"
+            rel="noreferrer"
+          >
+            X-Spider
+          </a>
+          开发
         </li>
         <li>
           <strong>仓库地址：</strong>
-          <span className="text-gray-400">（暂未开放）</span>
+          <a
+            href="https://github.com/mdo730/P-spider"
+            target="_blank"
+            rel="noreferrer"
+          >
+            https://github.com/mdo730/P-spider
+          </a>
         </li>
         <li>
           <strong>开源协议：</strong>
           <a
-            href="https://github.com/MiningCattiva/x-spider/blob/master/LICENSE"
+            href="https://github.com/mdo730/P-spider/blob/master/LICENSE"
             target="_blank"
             rel="noreferrer"
           >
