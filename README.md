@@ -31,11 +31,13 @@
 
 ## 软件截图
 
-![screenshot-homepage](./assets/screenshot-homepage.jpg)
+![截图1](./pic/QQ20260828-040827.png)
 
-![screenshot-settings](./assets/screenshot-settings.jpg)
+![截图2](./pic/QQ20260828-040950.png)
 
-![screenshot-downloading](./assets/screenshot-downloading.jpg)
+![截图3](./pic/QQ20260828-041000.png)
+
+![截图4](./pic/QQ20260828-041015.png)
 
 ## 致谢
 
