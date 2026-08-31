@@ -16,12 +16,14 @@ import {
   PlatformMedia,
   PlatformPost,
   PlatformSource,
+  withCreator,
 } from '../platforms';
 import { toPlatformPost } from '../platforms/twitter';
 import { unicodeFilenamify } from '../utils/unicode';
 import dayjs from 'dayjs';
 import { notification as antNotification } from 'antd';
 import { EventEmitter } from '../utils/event';
+import { delay } from '../utils';
 
 let _log: ICategoriedLogger;
 
@@ -158,6 +160,21 @@ async function prepareDownloadTask({
 
 const creationTaskAbortControllerMap = new Map<string, AbortController>();
 
+/** 构造 aria2 addUri 的选项：归档站下载加浏览器 UA + Referer，降低 Cloudflare 限流（429） */
+function aria2DownloadOptions(task: DownloadTask): Record<string, any> {
+  const options: Record<string, any> = {
+    dir: task.dir,
+    out: task.fileName,
+  };
+  if (task.source !== 'twitter') {
+    options.header = [
+      'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Referer: https://pawchive.pw/',
+    ];
+  }
+  return options;
+}
+
 export interface DownloadStore {
   currentTab: string;
   setCurrentTab: (tab: string) => void;
@@ -202,10 +219,11 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
   createDownloadTask: async (params) => {
     const task = await prepareDownloadTask(params);
 
-    const gid = await aria2.invoke('aria2.addUri', [task.downloadUrl], {
-      dir: task.dir,
-      out: task.fileName,
-    });
+    const gid = await aria2.invoke(
+      'aria2.addUri',
+      [task.downloadUrl],
+      aria2DownloadOptions(task),
+    );
     task.gid = gid;
 
     const status = await aria2.tellStatus(task.gid);
@@ -277,13 +295,7 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
       await aria2.batchInvoke(
         tasks.map((task) => ({
           methodName: 'aria2.addUri',
-          params: [
-            [task.downloadUrl],
-            {
-              dir: task.dir,
-              out: task.fileName,
-            },
-          ],
+          params: [[task.downloadUrl], aria2DownloadOptions(task)],
         })),
       )
     ).flat();
@@ -384,31 +396,68 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
 
     if (status.status === 'error') {
       if (task.ariaRetryCountRemains > 0) {
-        log().warn(
-          `Task download failed, retry it. RetryCountRemains: ${task.ariaRetryCountRemains}`,
-          task,
-        );
-        removeDownloadTask(task.gid);
+        const errMsg = status.errorMessage || '';
+        try {
+          // Cloudflare 429 限流时退避再重试，避免重试风暴（更严重限流）
+          if (/429|Too Many/i.test(errMsg)) {
+            await delay(3000);
+          }
+          // 原图 404（pawchive 部分附件未标 preview_only 但原图未归档）：改用缩略图重试
+          const useThumb =
+            /Resource not found|status=404|404/i.test(errMsg) &&
+            !!task.media?.thumbUrl &&
+            task.downloadUrl !== task.media.thumbUrl;
+          const retryUrl: string = useThumb
+            ? task.media.thumbUrl!
+            : task.downloadUrl;
 
-        const newTask = await prepareDownloadTask({
-          source: task.source,
-          post: task.post,
-          media: task.media,
-        });
-        newTask.ariaRetryCountRemains = task.ariaRetryCountRemains - 1;
+          log().warn(
+            `Task download failed, retry it. RetryCountRemains: ${task.ariaRetryCountRemains}`,
+            { ...task, useThumb },
+          );
 
-        const gid = await aria2.invoke('aria2.addUri', [task.downloadUrl], {
-          dir: newTask.dir,
-          out: newTask.fileName,
-        });
-        newTask.gid = gid;
+          const newTask = await prepareDownloadTask({
+            source: task.source,
+            post: task.post,
+            media: task.media,
+          });
+          newTask.ariaRetryCountRemains = task.ariaRetryCountRemains - 1;
+          newTask.downloadUrl = retryUrl;
 
-        const status = await aria2.tellStatus(task.gid);
-        newTask.status = status.status;
+          const newGid = await aria2.invoke(
+            'aria2.addUri',
+            [retryUrl],
+            aria2DownloadOptions(newTask),
+          );
+          newTask.gid = newGid;
 
-        set({
-          downloadTasks: get().downloadTasks.concat(newTask),
-        });
+          // 用新 gid 查询（旧 gid 已被移除，查旧 gid 会抛错导致新任务丢失）
+          const newStatus = await aria2.tellStatus(newGid);
+          newTask.status = newStatus.status;
+
+          // 新任务成功加入后再移除旧任务，避免任何一步抛错导致任务从列表消失
+          removeDownloadTask(task.gid);
+          set({
+            downloadTasks: get().downloadTasks.concat(newTask),
+          });
+        } catch (retryErr) {
+          // 重试过程异常（prepare/addUri/tellStatus 抛错）：保留旧任务为错误状态，不丢失
+          log().error('Retry failed, keep task as error', {
+            gid: task.gid,
+            retryErr,
+          });
+          updateDownloadTask(
+            {
+              ...task,
+              status: AriaStatus.Error,
+              error:
+                typeof retryErr === 'string'
+                  ? retryErr
+                  : (retryErr as any)?.message || '重试失败',
+            },
+            now,
+          );
+        }
       } else {
         const newTask = await mergeAriaStatusToDownloadTask(status, task);
         const msg = '任务下载失败';
@@ -521,10 +570,12 @@ async function runCreationTask(task: CreationTask, abortSignal: AbortSignal) {
     const { posts, cursor } = await fetchPage(nextCursor);
     if (abortSignal.aborted) break;
     nextCursor = cursor;
-    now = R.last(posts)?.publishedAt || now;
+    // 本页最早帖时间作为推进基线；若本页全无发布时间则视为到底，避免死循环
+    const lastPub = R.last(posts)?.publishedAt;
+    now = lastPub || dayjs.unix(0);
     log().info('Now', now.format('YYYY-MM-DD'), 'next cursor', nextCursor);
     // fetchPosts 返回的帖子 creator 无 name，填充已解析的 creator（目录命名用创作者名）
-    const enrichedPosts = posts.map((p) => ({ ...p, creator: task.creator }));
+    const enrichedPosts = withCreator(posts, task.creator);
     const filteredPosts = enrichedPosts.filter(
       R.allPass([
         (post) => (post.medias ? post.medias.length >= 0 : false),

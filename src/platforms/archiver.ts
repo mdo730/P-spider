@@ -138,6 +138,18 @@ export interface ArchiverAdapterConfig {
   resolveCreatorByIdentifier: (identifier: string) => Promise<PlatformCreator>;
 }
 
+/**
+ * 给归档站拉取的帖子填充已解析的创作者。
+ * fetchPosts 返回的帖子 creator 只有 id/username（name 为空，目录命名需要），
+ * 消费方解析出 creator 后统一用本函数填充，避免各处手写 map。
+ */
+export function withCreator<T extends PlatformPost>(
+  posts: T[],
+  creator: PlatformCreator,
+): T[] {
+  return posts.map((p) => ({ ...p, creator }));
+}
+
 /** 解析订阅标识：service/user 二元组（user 为数字 id 或 slug） */
 export function parseIdentifier(identifier: string): {
   service: string;

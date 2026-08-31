@@ -63,6 +63,9 @@ class Aria2 {
       this.#secret,
       '--rpc-listen-port',
       this.#port.toString(),
+      // 限制并发：避免大批量任务同时打同一域名触发 Cloudflare 掐断（429 / Download aborted）
+      '--max-concurrent-downloads=8',
+      '--max-connection-per-server=4',
     ];
     this.#command = Command.sidecar('binaries/aria2c', args);
     this.#log.info('Spawn with args:', args);

@@ -5,6 +5,7 @@ import { pawchiveAdapter } from './pawchive';
 export * from './types';
 export { twitterAdapter, TWITTER_SOURCE } from './twitter';
 export { pawchiveAdapter, PAWCHIVE_SOURCE } from './pawchive';
+export { withCreator } from './archiver';
 
 const adapters: Partial<Record<PlatformSource, PlatformAdapter>> = {
   twitter: twitterAdapter,

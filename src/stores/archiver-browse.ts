@@ -5,6 +5,7 @@ import {
   PlatformCreator,
   PlatformPost,
   PlatformSource,
+  withCreator,
 } from '../platforms';
 
 /**
@@ -23,6 +24,9 @@ export const ARCHIVER_SOURCES: PlatformSource[] = [PAWCHIVE_SOURCE];
 
 /** pawchive 支持的原站 service */
 const COMMON_SERVICES = ['fanbox', 'patreon', 'discord'];
+
+/** 检索序号：快速连续检索时，慢响应不覆盖新结果（竞态保护） */
+let loadSeq = 0;
 
 export interface ArchiverSourceState {
   source: PlatformSource;
@@ -141,6 +145,7 @@ export const useArchiverBrowseStore = create<ArchiverBrowseStore>(
     hasMore: false,
 
     load: async (identifier) => {
+      const seq = ++loadSeq;
       const parsed = parseIdentifier(identifier);
       const id = parsed.id;
       let service = parsed.service;
@@ -151,6 +156,7 @@ export const useArchiverBrowseStore = create<ArchiverBrowseStore>(
         service = detected.service;
         knownCreator = detected.creator;
       }
+      if (seq !== loadSeq) return;
       const creatorKey = `${service}/${id}`;
       set({
         identifier,
@@ -179,6 +185,7 @@ export const useArchiverBrowseStore = create<ArchiverBrowseStore>(
           ]);
         }
       } catch (err: any) {
+        if (seq !== loadSeq) return;
         set({
           loading: false,
           creatorError:
@@ -186,9 +193,10 @@ export const useArchiverBrowseStore = create<ArchiverBrowseStore>(
         });
         return;
       }
+      if (seq !== loadSeq) return;
 
       // fetchPosts 返回的帖子 creator 无 name，用已解析的 creator 填充（目录命名用创作者名）
-      const enrichedPosts = page.posts.map((p) => ({ ...p, creator }));
+      const enrichedPosts = withCreator(page.posts, creator);
 
       set({
         creator,
@@ -208,6 +216,7 @@ export const useArchiverBrowseStore = create<ArchiverBrowseStore>(
     },
 
     loadMore: async () => {
+      const seq = loadSeq;
       const state = get();
       if (state.loadingMore || !state.creator) return;
       set({ loadingMore: true });
@@ -222,7 +231,7 @@ export const useArchiverBrowseStore = create<ArchiverBrowseStore>(
             const page = await adapter.fetchPosts(creatorId, s.cursor, 50);
             return {
               ...s,
-              posts: s.posts.concat(page.posts.map((p) => ({ ...p, creator }))),
+              posts: s.posts.concat(withCreator(page.posts, creator)),
               cursor: page.cursor,
             };
           } catch (err: any) {
@@ -234,6 +243,12 @@ export const useArchiverBrowseStore = create<ArchiverBrowseStore>(
           }
         }),
       );
+
+      // 期间发生了新检索，丢弃本次结果
+      if (seq !== loadSeq) {
+        set({ loadingMore: false });
+        return;
+      }
 
       const merged = mergePosts(next.map((s) => s.posts));
       set({

@@ -146,6 +146,12 @@ src-tauri/
 
 > 说明：更新检查已恢复（`src/github/api.ts` + `src/hooks/useCheckUpdate.ts`），指向 `mdo730/P-spider` 的 releases，按 `tag_name`（须带 `v` 前缀）与当前版本比较。
 > 已发布：**v1.1.0**（2026-08-28，Pawchive 平台 + 下载速度 + 多项修复），GitHub Description/Topics/README 已同步。
+> **1.1.1 地基修复（2026-09-01）**：
+> - `runCreationTask` 死循环防护：本页帖子全无发布时间时强制结束（不再卡 `now.isAfter(since)`）
+> - Pawchive 检索竞态保护：请求序号，快速连搜时慢响应不覆盖新结果
+> - creator 填充统一：`platforms/archiver.ts` 导出 `withCreator`，三处消费方统一调用（目录命名不再依赖手写 map）
+> - aria2 并发控制：`--max-concurrent-downloads=8 --max-connection-per-server=4`，缓解批量下载触发 Cloudflare 掐断（429 / Download aborted）
+> - 已知待改（建筑层，下轮）：errorCode 16 退避、缩略图/大文件下载体验细节
 
 ## 如何发布新版
 

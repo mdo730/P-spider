@@ -8,7 +8,12 @@ import { Subscription } from '../interfaces/Subscription';
 import { TwitterPost } from '../interfaces/TwitterPost';
 import { getUser, getUserMedias } from '../twitter/api';
 import { aria2 } from '../utils/aria2';
-import { getAdapter, PlatformPost, PlatformSource } from '../platforms';
+import {
+  getAdapter,
+  PlatformPost,
+  PlatformSource,
+  withCreator,
+} from '../platforms';
 import { toPlatformMedia, toPlatformPost } from '../platforms/twitter';
 import { useAppStateStore } from './app-state';
 import {
@@ -391,7 +396,7 @@ async function checkArchiverSubscription(
     const creator = await adapter.resolveCreator(sub.username);
     const { posts } = await adapter.fetchPosts(creator.id, undefined, 20);
     // fetchPosts 返回的帖子 creator 无 name，填充已解析的 creator（目录命名用创作者名）
-    const enrichedPosts = posts.map((p) => ({ ...p, creator }));
+    const enrichedPosts = withCreator(posts, creator);
 
     if (!enrichedPosts || enrichedPosts.length === 0) {
       update({
