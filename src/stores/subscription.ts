@@ -111,15 +111,14 @@ export const useSubscriptionStore = create(
       },
       checkAll: async () => {
         const subs = get().subscriptions;
-        // 并发检查所有订阅，跳过已运行中的
+        // 一键刷新：强制检查所有订阅（含卡在 running 的），
+        // 避免因请求挂起卡住的订阅被永久跳过而无法恢复
         await Promise.all(
-          subs
-            .filter((s) => s.status !== 'running')
-            .map((sub) =>
-              checkSubscription(sub).catch((err) => {
-                log().error('Check all failed', { id: sub.id, err });
-              }),
-            ),
+          subs.map((sub) =>
+            checkSubscription(sub).catch((err) => {
+              log().error('Check all failed', { id: sub.id, err });
+            }),
+          ),
         );
       },
       exportSubscriptions: () => {

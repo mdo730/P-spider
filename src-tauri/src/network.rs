@@ -36,6 +36,10 @@ pub async fn network_fetch(
   // Build client
   let client = {
     let mut b = reqwest::Client::builder();
+    // 网络超时：避免代理/服务器挂起时请求无限等待（会导致订阅一直卡在"检查中"）
+    b = b
+      .connect_timeout(std::time::Duration::from_secs(15))
+      .timeout(std::time::Duration::from_secs(30));
 
     // Auto set proxy settings
     if enable_proxy {
