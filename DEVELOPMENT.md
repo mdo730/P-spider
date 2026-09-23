@@ -106,6 +106,27 @@ src-tauri/
 - `download.ts`：`createCreationTask`（爬虫任务，带 dateRange/媒体类型过滤）→ `batchCreateDownloadTask`（批量 addUri + tellStatus）
 - 已知边界：大批量任务时 aria2 RPC 批量状态查询可能漏项，`statusMap[gid]` 缺失时兜底为 Active（防崩溃，但状态可能短暂不准）
 
+### 本地库（规划中，未实现）
+
+> 需求：在 p-spider 内浏览本地已下载文件并按分类管理（如"真人cos"分类下挂 `PoppaChan 🍑`、`白栎Shirly` 等作者文件夹）。
+
+- **分类**：单级分类（分类名 → 一级文件夹列表）。管理对象 = `saveDirBase` 下的**一级文件夹**（X 是作者名，Pawchive 是创作者名）
+- **页面**「本地库」：左侧分类栏（全部/未分类/自定义，可新建/改名/删除），右侧当前分类下的文件夹卡片网格（封面取文件夹内首图 + 名称 + 归类操作）
+- **进入文件夹**：
+  - 直接含媒体（X）→ 文件网格（图/视频）
+  - 含子文件夹（Pawchive `创作者/帖子标题/`）→ 顶部切换 **平铺 / 按文件夹**：平铺=递归所有媒体文件网格；按文件夹=帖子文件夹列表 → 进入看文件
+- **文件**：网格预览 + 系统资源管理器打开
+- **数据**：分类存 `%APPDATA%\p-spider\library.json`（zustand persist + createTauriFileStorage）
+- **代码落点**：`stores/library.ts`（分类 CRUD + 扫描）、`utils/library.ts`（扫描 saveDirBase/媒体类型判断/找封面）、`pages/Library.tsx` + `components/library/`、路由注册
+- **关键依赖**：本地图片显示用 `convertFileSrc`（Tauri v1 asset 协议）。`tauri.conf.json` 已加 `protocol.asset: true` + `assetScope: ["**"]`（**待验证**能否显示任意路径本地图）
+- **参考**：用户旧项目 **xibao（`E:\AIproject`）** 是成熟的标签树文件管理器（Python/Flask + 原生 JS，稳定文件 ID、无限级标签）。思路可借鉴，技术栈不同不直接复用。当前版本先做单级分类，架构预留升级空间
+
+### 回滚点（1.1.3）
+
+- git 分支 `backup-1.1.3` → commit `19894a2`（本地；因 github 连接失败暂未 push 远端）
+- 物理源码备份：`E:\OPENCODE\x-spider-backup-1.1.3.zip`
+- 回滚：`git checkout backup-1.1.3` 或解压 zip
+
 ## 待办 / 已知问题 / 维护注意
 
 1. **架构解耦：下载历史改事件驱动**（✅ 已完成）

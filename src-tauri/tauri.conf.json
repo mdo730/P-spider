@@ -54,6 +54,7 @@
         "scope": ["**"]
       },
       "protocol": {
+        "asset": true,
         "assetScope": ["**"]
       }
     },
