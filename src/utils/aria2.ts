@@ -63,9 +63,12 @@ class Aria2 {
       this.#secret,
       '--rpc-listen-port',
       this.#port.toString(),
-      // 限制并发：避免大批量任务同时打同一域名触发 Cloudflare 掐断（429 / Download aborted）
-      '--max-concurrent-downloads=8',
-      '--max-connection-per-server=4',
+      // 限制并发：Cloudflare 对同一 IP 的突发并发会 429/403（pawchive 批量下载），
+      // 降低同时下载数与单服务器连接数，减少被限流
+      '--max-concurrent-downloads=3',
+      '--max-connection-per-server=1',
+      // pawchive 直连（本机 IP 独占且干净，避开共享代理出口 IP 被 Cloudflare 限流；直连也更快）
+      '--no-proxy=pawchive.pw,file.pawchive.pw,img.pawchive.pw',
     ];
     this.#command = Command.sidecar('binaries/aria2c', args);
     this.#log.info('Spawn with args:', args);

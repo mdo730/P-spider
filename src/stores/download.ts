@@ -170,6 +170,12 @@ function aria2DownloadOptions(task: DownloadTask): Record<string, any> {
     options.header = [
       'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       'Referer: https://pawchive.pw/',
+      'Accept: image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+      'Accept-Language: zh-CN,zh;q=0.9,en;q=0.8',
+      'Accept-Encoding: gzip, deflate, br',
+      'Sec-Fetch-Dest: image',
+      'Sec-Fetch-Mode: no-cors',
+      'Sec-Fetch-Site: cross-site',
     ];
   }
   return options;
@@ -398,9 +404,9 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
       if (task.ariaRetryCountRemains > 0) {
         const errMsg = status.errorMessage || '';
         try {
-          // Cloudflare 429 限流时退避再重试，避免重试风暴（更严重限流）
-          if (/429|Too Many/i.test(errMsg)) {
-            await delay(3000);
+          // Cloudflare 限流/禁止（429/403）时退避再重试，避免重试风暴加剧封禁
+          if (/429|403|Too Many|Forbidden/i.test(errMsg)) {
+            await delay(5000);
           }
           // 原图 404（pawchive 部分附件未标 preview_only 但原图未归档）：改用缩略图重试
           const useThumb =
