@@ -174,7 +174,7 @@ src-tauri/
 - **存储**：`保存目录\fig-memo\<日期 标题>\<日期 原文件名>`（日期=文章发布日期 `YYYY-MM-DD`，文件/文件夹都带，便于按时间排序）；标题超长截断 60 字。取图：优先 `/wp-json/wp/v2/media?parent=<id>`（附件原图）；**附件为空的老帖回退解析正文 HTML 取原图**（老帖的图常非附件形式）
 - **元数据**：`%APPDATA%\p-spider\figmemo.jsonl`（每帖一行：postId/标题/分类/日期/链接/图片数）
 - **状态**：`%APPDATA%\p-spider\figmemo-state.json`（enabled/基线/上次检查/每日统计/累计），**不进 subscriptions.json**
-- **分类自动打标**：站点分类落成标签树里根「分类」下的子标签，挂到对应**帖子文件夹**（只标分类，不猜厂商/动作）
+- **自动打标（仅追新）**：**只有订阅后自动接收的新文章**才自动打标（站点分类挂到根 `fig-memo` 下、厂商按标题第一个 `「` 前缀挂到根 `厂商` 下）；**建库补档不自动打标**（历史标签由用户基于本地文件夹手动维护，避免给未下载的帖子建标签）。建库/追新都会把分类写进 `figmemo.jsonl` 元数据
 - **计入统计**：`Statistics` 页把 figmemo 作为**独立项**（柱状图 + 排行一行）；**只计「追新」下载**（任务带 `subscriptionId=figmemo-feed`），**建库不计入**
 - **进时间流**：复用下载历史（`downloads.jsonl`，platform=figmemo、postUrl=帖子链接）
 - **复用下载管线**：`batchCreateDownloadTask`（source=`figmemo`）→ aria2 队列 / 下载管理 / 统计 / 时间流自动打通；`prepareArchiverPostDir` 的「`保存目录/作者名/标题/`」结构天然适配；`aria2DownloadOptions` Referer 按源取（fig-memo 用站点域名）
