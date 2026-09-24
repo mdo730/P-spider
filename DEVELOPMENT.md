@@ -229,3 +229,7 @@ src-tauri/
    - `gh release create v<ver> --title "P-Spider <ver>" --notes-file <notes.md> <P-Spider.exe> <aria2c.exe> <setup.exe>`
 7. 可选：更新 README / GitHub Description / Topics（`gh api` 或 PUT `/repos/.../topics`）
 8. 若改图标：先 `pnpm tauri icon <源图>` 再打包，并清 Windows 图标缓存（重启 explorer）
+
+> ⚠️ **本机推送/发布需走代理**（直连 github 常被重置）：git 未配代理，用一次性代理
+> `git -c http.proxy=http://127.0.0.1:7897 -c https.proxy=http://127.0.0.1:7897 push origin master`；
+> `gh` 前先设环境变量 `$env:HTTPS_PROXY='http://127.0.0.1:7897'`（端口随代理软件，Clash 常见 7897/7890）。
