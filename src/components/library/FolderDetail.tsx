@@ -9,7 +9,7 @@ import {
 } from '@ant-design/icons';
 import { App, Button, Dropdown, Empty, MenuProps, Segmented, Spin } from 'antd';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { fs } from '@tauri-apps/api';
+import { deleteLibraryFiles } from '../../services/library-actions';
 import {
   DirectoryContent,
   FILE_SORT_OPTIONS,
@@ -23,7 +23,7 @@ import {
   sortFolders,
 } from '../../utils/library';
 import { showInFolder } from '../../utils/shell';
-import { deleteCachedThumb } from '../../utils/thumbnail';
+import { useSelection } from '../../hooks/useSelection';
 import { FileGrid } from './FileGrid';
 import { FolderCover } from './FolderCover';
 import { FolderProperties } from './FolderProperties';
@@ -44,7 +44,6 @@ export const FolderDetail: React.FC<Props> = ({ dir, onOpenFolder }) => {
   const [folderSort, setFolderSort] = useState<FolderSortKey>('name-asc');
   const [fileSort, setFileSort] = useState<FileSortKey>('name-asc');
   const [selectMode, setSelectMode] = useState(false);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [propsTarget, setPropsTarget] = useState<LibrarySubFolder | null>(null);
 
   const load = useCallback(async () => {
@@ -79,10 +78,9 @@ export const FolderDetail: React.FC<Props> = ({ dir, onOpenFolder }) => {
     }
   }, [dir, message]);
 
-  // 切换目录时重置
+  // 切换目录时重置视图（选择在下方 hook 就绪后一并清空）
   useEffect(() => {
     setViewMode('folder');
-    setSelected(new Set());
     setSelectMode(false);
   }, [dir]);
 
@@ -105,29 +103,25 @@ export const FolderDetail: React.FC<Props> = ({ dir, onOpenFolder }) => {
     () => sortedFiles.map((f) => f.path),
     [sortedFiles],
   );
-  const selectedCount = filePaths.filter((k) => selected.has(k)).length;
-  const allSelected =
-    filePaths.length > 0 && selectedCount === filePaths.length;
+
+  const {
+    selected,
+    toggle,
+    toggleAll,
+    clear: clearSelection,
+    selectedCount,
+    allSelected,
+  } = useSelection(filePaths);
+
+  // 切换目录 / 视图时清空选择
+  useEffect(() => {
+    clearSelection();
+  }, [dir, viewMode, clearSelection]);
 
   const toggleSelectMode = () => {
     setSelectMode((v) => !v);
-    setSelected(new Set());
+    clearSelection();
   };
-
-  const toggleOne = (path: string) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
-      return next;
-    });
-  };
-
-  const toggleSelectAll = () => {
-    setSelected(allSelected ? new Set() : new Set(filePaths));
-  };
-
-  const clearSelection = () => setSelected(new Set());
 
   const revealFolder = async (folder: LibrarySubFolder) => {
     try {
@@ -147,22 +141,13 @@ export const FolderDetail: React.FC<Props> = ({ dir, onOpenFolder }) => {
       okButtonProps: { danger: true },
       cancelText: '取消',
       onOk: async () => {
-        let failed = 0;
-        for (const file of targets) {
-          try {
-            await fs.removeFile(file.path);
-            await deleteCachedThumb(file.path);
-          } catch (err) {
-            failed += 1;
-            log.error('删除文件失败', file.path, err);
-          }
-        }
-        if (failed > 0) {
+        const result = await deleteLibraryFiles(targets.map((f) => f.path));
+        if (result.failed > 0) {
           message.warning(
-            `已删除 ${targets.length - failed} 个，${failed} 个失败`,
+            `已删除 ${result.deleted} 个，${result.failed} 个失败`,
           );
         } else {
-          message.success(`已删除 ${targets.length} 个文件`);
+          message.success(`已删除 ${result.deleted} 个文件`);
         }
         clearSelection();
         await load();
@@ -232,7 +217,7 @@ export const FolderDetail: React.FC<Props> = ({ dir, onOpenFolder }) => {
       {selectMode && !inFolderView && (
         <div className="flex items-center gap-2 pb-3">
           <span className="text-sm text-gray-500">已选 {selectedCount} 个</span>
-          <Button size="small" onClick={toggleSelectAll}>
+          <Button size="small" onClick={toggleAll}>
             {allSelected ? '取消全选' : '全选'}
           </Button>
           <Button
@@ -313,7 +298,7 @@ export const FolderDetail: React.FC<Props> = ({ dir, onOpenFolder }) => {
             files={sortedFiles}
             selectMode={selectMode}
             selected={selected}
-            onToggle={toggleOne}
+            onToggle={toggle}
             onDeleted={() => load()}
           />
         ) : (

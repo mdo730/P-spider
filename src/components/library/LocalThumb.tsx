@@ -2,7 +2,7 @@
 import { EyeOutlined, LoadingOutlined } from '@ant-design/icons';
 import { Image } from 'antd';
 import React, { useEffect, useRef, useState } from 'react';
-import { toAssetUrl } from '../../utils/library';
+import { toAssetUrl } from '../../utils/asset';
 import {
   generateImageThumbUrl,
   getCachedThumbUrl,

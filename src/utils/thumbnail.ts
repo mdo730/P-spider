@@ -1,5 +1,6 @@
 import { fs, path } from '@tauri-apps/api';
-import { LibraryFolderStats, fetchFolderStats, toAssetUrl } from './library';
+import { toAssetUrl } from './asset';
+import { LibraryFolderStats, fetchFolderStats } from './library';
 
 let _log: ICategoriedLogger;
 

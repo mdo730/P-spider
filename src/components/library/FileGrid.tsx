@@ -5,12 +5,12 @@ import {
   FolderOpenOutlined,
   PlayCircleFilled,
 } from '@ant-design/icons';
-import { fs } from '@tauri-apps/api';
 import { App, Checkbox, Dropdown, Image, MenuProps, Modal } from 'antd';
 import React, { useState } from 'react';
-import { LibraryFile, toAssetUrl } from '../../utils/library';
+import { deleteLibraryFiles } from '../../services/library-actions';
+import { LibraryFile } from '../../utils/library';
+import { toAssetUrl } from '../../utils/asset';
 import { openPath, showInFolder } from '../../utils/shell';
-import { deleteCachedThumb } from '../../utils/thumbnail';
 import { LocalThumb } from './LocalThumb';
 
 interface Props {
@@ -57,15 +57,13 @@ export const FileGrid: React.FC<Props> = ({
       okButtonProps: { danger: true },
       cancelText: '取消',
       onOk: async () => {
-        try {
-          await fs.removeFile(file.path);
-          await deleteCachedThumb(file.path);
-          message.success('已删除');
-          onDeleted?.();
-        } catch (err: any) {
-          message.error(err?.message || '删除失败');
-          throw err;
+        const result = await deleteLibraryFiles([file.path]);
+        if (result.failed > 0) {
+          message.error('删除失败');
+          throw new Error('delete failed');
         }
+        message.success('已删除');
+        onDeleted?.();
       },
     });
   };

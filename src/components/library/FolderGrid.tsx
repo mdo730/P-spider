@@ -30,6 +30,7 @@ import {
   sortFolders,
 } from '../../utils/library';
 import { showInFolder } from '../../utils/shell';
+import { useSelection } from '../../hooks/useSelection';
 import { FolderCover } from './FolderCover';
 import { FolderProperties } from './FolderProperties';
 import { SortSelect } from './SortSelect';
@@ -63,7 +64,6 @@ export const FolderGrid: React.FC<Props> = ({
 
   const [sort, setSort] = useState<FolderSortKey>('name-asc');
   const [selectMode, setSelectMode] = useState(false);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [createNames, setCreateNames] = useState<string[]>([]);
   const [newName, setNewName] = useState('');
   const [propsTarget, setPropsTarget] = useState<LibraryRootFolder | null>(
@@ -75,35 +75,25 @@ export const FolderGrid: React.FC<Props> = ({
     [folders, sort],
   );
 
+  const {
+    selected,
+    isSelected,
+    toggle,
+    toggleAll,
+    clear: clearSelection,
+    selectedCount,
+    allSelected,
+  } = useSelection(sortedFolders.map((f) => f.path));
+
   const selectedFolders = useMemo(
     () => sortedFolders.filter((f) => selected.has(f.path)),
     [sortedFolders, selected],
   );
-  const selectedCount = selectedFolders.length;
-  const allSelected =
-    sortedFolders.length > 0 && selectedCount === sortedFolders.length;
 
   const toggleSelectMode = () => {
     setSelectMode((v) => !v);
-    setSelected(new Set());
+    clearSelection();
   };
-
-  const toggleOne = (path: string) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
-      return next;
-    });
-  };
-
-  const toggleSelectAll = () => {
-    setSelected(
-      allSelected ? new Set() : new Set(sortedFolders.map((f) => f.path)),
-    );
-  };
-
-  const clearSelection = () => setSelected(new Set());
 
   const openCreateModal = (names: string[]) => {
     setNewName('');
@@ -200,7 +190,7 @@ export const FolderGrid: React.FC<Props> = ({
       {selectMode && (
         <div className="flex items-center gap-2 pb-3">
           <span className="text-sm text-gray-500">已选 {selectedCount} 个</span>
-          <Button size="small" onClick={toggleSelectAll}>
+          <Button size="small" onClick={toggleAll}>
             {allSelected ? '取消全选' : '全选'}
           </Button>
           <Dropdown menu={addTagMenu} disabled={selectedCount === 0}>
@@ -260,8 +250,8 @@ export const FolderGrid: React.FC<Props> = ({
                 folder={folder}
                 categories={categories}
                 selectMode={selectMode}
-                selected={selected.has(folder.path)}
-                onToggle={() => toggleOne(folder.path)}
+                selected={isSelected(folder.path)}
+                onToggle={() => toggle(folder.path)}
                 onOpen={() => onOpen(folder)}
                 onReveal={async () => {
                   try {
