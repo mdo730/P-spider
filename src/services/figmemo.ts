@@ -178,8 +178,34 @@ export async function fetchPostsNewerThan(
   }
   return out;
 }
+/** 老帖的图常不是“媒体附件”，回退解析正文 HTML 取原图 */
+async function fetchContentImages(postId: string): Promise<PlatformMedia[]> {
+  let body: any;
+  try {
+    body = await getJson(`${API}/posts/${postId}`, { _fields: 'content' });
+  } catch {
+    return [];
+  }
+  const html: string = body?.content?.rendered || '';
+  const urls = new Set<string>();
+  const re =
+    /https:\/\/fig-memo-r18\.site\/wp-content\/uploads\/[^"'\s)]+?\.(?:jpg|jpeg|png|webp|gif)/gi;
+  for (const m of html.matchAll(re)) {
+    const url = m[0];
+    if (url.includes('/cache/')) continue;
+    urls.add(url.replace(/-\d+x\d+(\.\w+)$/, '$1'));
+  }
+  return [...urls].map((url) => ({
+    id: url,
+    type: MediaType.Photo,
+    url,
+    thumbUrl: url,
+    downloadUrl: url,
+    fileName: decodeURIComponent(url.split('/').pop() || '') || 'figmemo',
+  }));
+}
 
-/** 某帖的图片原图（WP 媒体附件，天然不含正文里的重复引用） */
+/** 某帖的图片原图：优先媒体附件，为空则回退正文解析（覆盖老帖） */
 export async function fetchPostImages(
   postId: string,
 ): Promise<PlatformMedia[]> {
@@ -212,6 +238,10 @@ export async function fetchPostImages(
       });
     }
     if (list.length < PER_PAGE) break;
+  }
+
+  if (out.length === 0) {
+    return await fetchContentImages(postId);
   }
   return out;
 }
@@ -331,7 +361,8 @@ async function processPost(
   catTagMap: Map<number, string>,
   manufacturerRootId: string,
   existingIds: Set<string>,
-  countStats: boolean,
+  /** 是否为订阅后追新的新文章（true：打标签 + 计统计；false：建库补档，不打标不计） */
+  isFeed: boolean,
 ): Promise<number> {
   const images = await fetchPostImages(post.id);
 
@@ -350,8 +381,8 @@ async function processPost(
     existingIds.add(post.id);
   }
 
-  // 标签：fig-memo > 站点分类；厂商 > 标题前缀（每次处理都确保，追加幂等）
-  {
+  // 自动打标：仅订阅后追新的新文章；建库补档不打（由用户基于本地手动维护）
+  if (isFeed && images.length > 0) {
     const relPath = figmemoRelDir(post.title, post.date);
     const tagIds = post.categoryIds
       .map((id) => catTagMap.get(id))
@@ -388,7 +419,7 @@ async function processPost(
       source: FIGMEMO_SOURCE,
       post: platformPost,
       media,
-      subscriptionId: countStats ? FIGMEMO_FEED_ID : undefined,
+      subscriptionId: isFeed ? FIGMEMO_FEED_ID : undefined,
     })),
   );
   return images.length;
