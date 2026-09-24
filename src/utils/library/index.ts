@@ -3,3 +3,4 @@ export * from './sort';
 export * from './format';
 export * from './ipc';
 export * from './trace';
+export * from './tags';

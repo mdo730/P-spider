@@ -1,35 +1,38 @@
 /* eslint-disable react/prop-types */
 import { Descriptions, Modal, Spin, Tag } from 'antd';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useLibraryStore } from '../../stores/library';
 import {
   LibraryFolderStats,
+  buildTagIndex,
   fetchFolderStats,
   formatBytes,
+  terminalTagIds,
+  tagChainLabel,
 } from '../../utils/library';
 
 interface Props {
   open: boolean;
   folderName: string;
+  /** 文件夹相对 saveDirBase 的路径（用于标签） */
+  relPath?: string;
   /** 文件夹绝对路径（用于统计） */
   folderPath?: string;
   /** 已扫描到的媒体数（免二次统计） */
   mediaCount?: number;
-  /** 是否展示标签（仅一级文件夹有标签） */
-  showTags?: boolean;
   onClose: () => void;
 }
 
-/** 文件夹属性：文件数 / 占用空间 / 标签 */
+/** 文件夹属性：文件数 / 占用空间 / 标签（末端标签展开祖先链） */
 export const FolderProperties: React.FC<Props> = ({
   open,
   folderName,
+  relPath,
   folderPath,
   mediaCount,
-  showTags,
   onClose,
 }) => {
-  const categories = useLibraryStore((s) => s.categories);
+  const tags = useLibraryStore((s) => s.tags);
   const [stats, setStats] = useState<LibraryFolderStats | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -56,9 +59,15 @@ export const FolderProperties: React.FC<Props> = ({
     };
   }, [open, folderPath]);
 
-  const tags = showTags
-    ? categories.filter((c) => c.folders.includes(folderName))
-    : [];
+  const labelTags = useMemo(() => {
+    if (!relPath) return [];
+    const index = buildTagIndex(tags);
+    const ids = useLibraryStore.getState().getFolderTagIds(relPath);
+    return terminalTagIds(index, ids).map((id) => ({
+      id,
+      label: tagChainLabel(index, id),
+    }));
+  }, [relPath, tags]);
 
   return (
     <Modal
@@ -75,12 +84,12 @@ export const FolderProperties: React.FC<Props> = ({
       ) : (
         <Descriptions column={1} size="small" bordered>
           <Descriptions.Item label="名称">{folderName}</Descriptions.Item>
-          {showTags && (
+          {relPath != null && (
             <Descriptions.Item label="标签">
-              {tags.length > 0 ? (
-                tags.map((t) => (
+              {labelTags.length > 0 ? (
+                labelTags.map((t) => (
                   <Tag key={t.id} color="blue">
-                    {t.name}
+                    {t.label}
                   </Tag>
                 ))
               ) : (

@@ -1,12 +1,10 @@
 /* eslint-disable react/prop-types */
 import {
-  CheckOutlined,
-  DeleteOutlined,
   FolderOpenOutlined,
   InfoCircleOutlined,
   LoadingOutlined,
-  PlusOutlined,
   ReloadOutlined,
+  TagsOutlined,
 } from '@ant-design/icons';
 import {
   App,
@@ -16,23 +14,18 @@ import {
   Empty,
   Input,
   MenuProps,
-  Modal,
   Spin,
 } from 'antd';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useLibraryStore } from '../../stores/library';
-import {
-  getDownloadHistoryMap,
-  normalizePath,
-} from '../../stores/download-history';
 import { useSettingsStore } from '../../stores/settings';
 import { PlatformSource } from '../../platforms';
 import {
   FOLDER_SORT_OPTIONS,
   FolderSortKey,
   LibraryRootFolder,
-  readTraceMap,
   sortFolders,
+  toRelPath,
 } from '../../utils/library';
 import { showInFolder } from '../../utils/shell';
 import { useSelection } from '../../hooks/useSelection';
@@ -40,6 +33,7 @@ import { FolderCover } from './FolderCover';
 import { FolderProperties } from './FolderProperties';
 import { PlatformBadge } from './PlatformBadge';
 import { SortSelect } from './SortSelect';
+import { TagAssignModal } from './TagAssignModal';
 
 interface Props {
   folders: LibraryRootFolder[];
@@ -48,9 +42,10 @@ interface Props {
   onKeywordChange: (value: string) => void;
   onOpen: (folder: LibraryRootFolder) => void;
   onRefresh: () => void;
+  saveDirBase: string;
 }
 
-/** 本地库一级文件夹网格：封面 + 名称 + 标签（多标签）+ 属性 + 多选批量 */
+/** 本地库一级文件夹网格：封面 + 名称 + 平台标记 + 标签 + 多选批量打标签 */
 export const FolderGrid: React.FC<Props> = ({
   folders,
   loading,
@@ -58,56 +53,19 @@ export const FolderGrid: React.FC<Props> = ({
   onKeywordChange,
   onOpen,
   onRefresh,
+  saveDirBase,
 }) => {
   const { message } = App.useApp();
-  const categories = useLibraryStore((s) => s.categories);
-  const addCategory = useLibraryStore((s) => s.addCategory);
-  const addFolderToCategory = useLibraryStore((s) => s.addFolderToCategory);
-  const removeFolderFromCategory = useLibraryStore(
-    (s) => s.removeFolderFromCategory,
-  );
-  const clearFolderCategories = useLibraryStore((s) => s.clearFolderCategories);
 
   const [sort, setSort] = useState<FolderSortKey>('mtime-desc');
   const [selectMode, setSelectMode] = useState(false);
-  const [createNames, setCreateNames] = useState<string[]>([]);
-  const [newName, setNewName] = useState('');
   const [propsTarget, setPropsTarget] = useState<LibraryRootFolder | null>(
     null,
   );
-  const saveDirBase = useSettingsStore((s) => s.download.saveDirBase);
-  const [folderPlatform, setFolderPlatform] = useState<
-    Map<string, PlatformSource>
-  >(new Map());
+  const [assignTargets, setAssignTargets] = useState<string[] | null>(null);
+  const [assignLabel, setAssignLabel] = useState<string | undefined>();
 
-  // 用下载历史/溯源里的平台字段覆盖结构启发式（更准）
-  useEffect(() => {
-    let cancelled = false;
-    Promise.all([getDownloadHistoryMap(), readTraceMap()])
-      .then(([history, trace]) => {
-        if (cancelled || !saveDirBase) return;
-        const prefix = `${normalizePath(saveDirBase).replace(/\\+$/, '')}\\`;
-        const map = new Map<string, PlatformSource>();
-        const consider = (filePath?: string, platform?: PlatformSource) => {
-          if (!filePath || !platform) return;
-          const normalized = normalizePath(filePath);
-          if (!normalized.startsWith(prefix)) return;
-          const seg = normalized.slice(prefix.length).split('\\')[0];
-          if (seg && !map.has(seg)) map.set(seg, platform);
-        };
-        for (const record of history.values()) {
-          consider(record.filePath, record.platform);
-        }
-        for (const filePath of trace.keys()) {
-          consider(filePath, 'twitter');
-        }
-        setFolderPlatform(map);
-      })
-      .catch((err) => log.warn('读取平台信息失败', err));
-    return () => {
-      cancelled = true;
-    };
-  }, [saveDirBase]);
+  const saveDir = useSettingsStore((s) => s.download.saveDirBase);
 
   const sortedFolders = useMemo(
     () => sortFolders(folders, sort),
@@ -115,7 +73,6 @@ export const FolderGrid: React.FC<Props> = ({
   );
 
   const {
-    selected,
     isSelected,
     toggle,
     toggleAll,
@@ -124,77 +81,19 @@ export const FolderGrid: React.FC<Props> = ({
     allSelected,
   } = useSelection(sortedFolders.map((f) => f.path));
 
-  const selectedFolders = useMemo(
-    () => sortedFolders.filter((f) => selected.has(f.path)),
-    [sortedFolders, selected],
-  );
-
   const toggleSelectMode = () => {
     setSelectMode((v) => !v);
     clearSelection();
   };
 
-  const openCreateModal = (names: string[]) => {
-    setNewName('');
-    setCreateNames(names);
-  };
+  const relPathOf = (folder: LibraryRootFolder) =>
+    toRelPath(folder.path, saveDirBase || saveDir);
 
-  const confirmCreate = () => {
-    if (createNames.length === 0) return;
-    try {
-      const id = addCategory(newName);
-      createNames.forEach((name) => addFolderToCategory(name, id));
-      message.success(
-        `已为 ${createNames.length} 个文件夹添加标签「${newName.trim()}」`,
-      );
-      setCreateNames([]);
-      clearSelection();
-    } catch (err: any) {
-      message.error(err?.message || '创建标签失败');
-    }
-  };
-
-  const batchAddTag = (categoryId: string) => {
-    selectedFolders.forEach((f) => addFolderToCategory(f.name, categoryId));
-    message.success(`已为 ${selectedCount} 个文件夹添加标签`);
-    clearSelection();
-  };
-
-  const batchRemoveTag = (categoryId: string) => {
-    selectedFolders.forEach((f) =>
-      removeFolderFromCategory(f.name, categoryId),
-    );
-    message.success(`已移除标签`);
-    clearSelection();
-  };
-
-  const batchClearTags = () => {
-    selectedFolders.forEach((f) => clearFolderCategories(f.name));
-    message.success('已清空所选文件夹的标签');
-    clearSelection();
-  };
-
-  const addTagMenu: MenuProps = {
-    items: [
-      ...categories.map((c) => ({ key: `cat:${c.id}`, label: c.name })),
-      ...(categories.length ? [{ type: 'divider' as const }] : []),
-      { key: 'new', label: '新建标签并添加…', icon: <PlusOutlined /> },
-    ],
-    onClick: ({ key }) => {
-      if (key === 'new') {
-        openCreateModal(selectedFolders.map((f) => f.name));
-        return;
-      }
-      if (key.startsWith('cat:')) batchAddTag(key.slice(4));
-    },
-  };
-
-  const removeTagMenu: MenuProps = {
-    items: categories.map((c) => ({ key: `cat:${c.id}`, label: c.name })),
-    onClick: ({ key }) => {
-      if (key.startsWith('cat:')) batchRemoveTag(key.slice(4));
-    },
-  };
+  const selectedPaths = useMemo(
+    () =>
+      sortedFolders.filter((f) => isSelected(f.path)).map((f) => relPathOf(f)),
+    [sortedFolders, isSelected, saveDirBase, saveDir],
+  );
 
   return (
     <div className="flex flex-col h-full">
@@ -235,29 +134,16 @@ export const FolderGrid: React.FC<Props> = ({
           <Button size="small" onClick={toggleAll}>
             {allSelected ? '取消全选' : '全选'}
           </Button>
-          <Dropdown menu={addTagMenu} disabled={selectedCount === 0}>
-            <Button size="small" disabled={selectedCount === 0}>
-              添加标签
-            </Button>
-          </Dropdown>
-          <Dropdown
-            menu={removeTagMenu}
-            disabled={selectedCount === 0 || categories.length === 0}
-          >
-            <Button
-              size="small"
-              disabled={selectedCount === 0 || categories.length === 0}
-            >
-              移除标签
-            </Button>
-          </Dropdown>
           <Button
             size="small"
-            icon={<DeleteOutlined />}
+            icon={<TagsOutlined />}
             disabled={selectedCount === 0}
-            onClick={batchClearTags}
+            onClick={() => {
+              setAssignLabel(`${selectedPaths.length} 个文件夹`);
+              setAssignTargets(selectedPaths);
+            }}
           >
-            清空标签
+            打标签
           </Button>
           {selectedCount > 0 && (
             <Button size="small" type="link" onClick={clearSelection}>
@@ -275,11 +161,7 @@ export const FolderGrid: React.FC<Props> = ({
         ) : folders.length === 0 ? (
           <Empty
             className="mt-16"
-            description={
-              keyword
-                ? '没有匹配的文件夹'
-                : '该分类下暂无文件夹，去「全部」里给文件夹打标签吧'
-            }
+            description={keyword ? '没有匹配的文件夹' : '当前筛选下暂无文件夹'}
           />
         ) : (
           <ul
@@ -290,11 +172,7 @@ export const FolderGrid: React.FC<Props> = ({
               <FolderCard
                 key={folder.path}
                 folder={folder}
-                categories={categories}
-                platform={
-                  folderPlatform.get(folder.name.toLowerCase()) ||
-                  folder.platform
-                }
+                relPath={relPathOf(folder)}
                 selectMode={selectMode}
                 selected={isSelected(folder.path)}
                 onToggle={() => toggle(folder.path)}
@@ -306,7 +184,10 @@ export const FolderGrid: React.FC<Props> = ({
                     message.error(err?.message || '打开资源管理器失败');
                   }
                 }}
-                onCreateAndAdd={() => openCreateModal([folder.name])}
+                onAssign={() => {
+                  setAssignLabel(folder.name);
+                  setAssignTargets([relPathOf(folder)]);
+                }}
                 onShowProps={() => setPropsTarget(folder)}
               />
             ))}
@@ -319,34 +200,19 @@ export const FolderGrid: React.FC<Props> = ({
         )}
       </div>
 
-      <Modal
-        open={createNames.length > 0}
-        title={
-          createNames.length > 1
-            ? `新建标签（${createNames.length} 个文件夹）`
-            : '新建标签'
-        }
-        okText="创建并添加"
-        cancelText="取消"
-        onOk={confirmCreate}
-        onCancel={() => setCreateNames([])}
-        destroyOnClose
-      >
-        <Input
-          autoFocus
-          value={newName}
-          placeholder="标签名，如 真人cos"
-          onChange={(e) => setNewName(e.target.value)}
-          onPressEnter={confirmCreate}
-        />
-      </Modal>
+      <TagAssignModal
+        open={!!assignTargets}
+        targets={assignTargets || []}
+        label={assignLabel}
+        onClose={() => setAssignTargets(null)}
+      />
 
       <FolderProperties
         open={!!propsTarget}
         folderName={propsTarget?.name || ''}
+        relPath={propsTarget ? relPathOf(propsTarget) : undefined}
         folderPath={propsTarget?.path}
         mediaCount={propsTarget?.mediaCount}
-        showTags
         onClose={() => setPropsTarget(null)}
       />
     </div>
@@ -355,37 +221,30 @@ export const FolderGrid: React.FC<Props> = ({
 
 interface FolderCardProps {
   folder: LibraryRootFolder;
-  categories: { id: string; name: string }[];
-  platform?: PlatformSource;
+  relPath: string;
   selectMode: boolean;
   selected: boolean;
   onToggle: () => void;
   onOpen: () => void;
   onReveal: () => void;
-  onCreateAndAdd: () => void;
+  onAssign: () => void;
   onShowProps: () => void;
 }
 
 const FolderCard: React.FC<FolderCardProps> = ({
   folder,
-  categories,
-  platform,
+  relPath,
   selectMode,
   selected,
   onToggle,
   onOpen,
   onReveal,
-  onCreateAndAdd,
+  onAssign,
   onShowProps,
 }) => {
-  const categoryIds = useLibraryStore((s) =>
-    s.getFolderCategoryIds(folder.name),
-  );
   const coverOverride = useLibraryStore((s) => s.folderCovers[folder.name]);
-  const addFolderToCategory = useLibraryStore((s) => s.addFolderToCategory);
-  const removeFolderFromCategory = useLibraryStore(
-    (s) => s.removeFolderFromCategory,
-  );
+  const tagCount = useLibraryStore((s) => s.getFolderTagIds(relPath).length);
+  const platform = folder.platform as PlatformSource | undefined;
   const setFolderCover = useLibraryStore((s) => s.setFolderCover);
   const { message } = App.useApp();
 
@@ -393,24 +252,7 @@ const FolderCard: React.FC<FolderCardProps> = ({
     { key: 'open', label: '打开', icon: <FolderOpenOutlined /> },
     { key: 'reveal', label: '在资源管理器中打开' },
     { type: 'divider' },
-    {
-      key: 'tags',
-      label: '标签',
-      children: [
-        ...categories.map((c) => ({
-          key: `tag:${c.id}`,
-          label: c.name,
-          icon: categoryIds.includes(c.id) ? (
-            <CheckOutlined className="text-ant-color-primary" />
-          ) : (
-            <span className="inline-block w-3" />
-          ),
-        })),
-        ...(categories.length ? [{ type: 'divider' as const }] : []),
-        { key: 'newtag', label: '新建标签并添加…', icon: <PlusOutlined /> },
-      ],
-    },
-    { type: 'divider' },
+    { key: 'tags', label: '标签…', icon: <TagsOutlined /> },
     { key: 'props', label: '属性', icon: <InfoCircleOutlined /> },
     ...(coverOverride
       ? [
@@ -428,17 +270,11 @@ const FolderCard: React.FC<FolderCardProps> = ({
     domEvent.stopPropagation();
     if (key === 'open') return onOpen();
     if (key === 'reveal') return onReveal();
-    if (key === 'newtag') return onCreateAndAdd();
+    if (key === 'tags') return onAssign();
     if (key === 'props') return onShowProps();
     if (key === 'resetCover') {
       setFolderCover(folder.name, null);
       message.success('已恢复默认缩略图');
-      return;
-    }
-    if (key.startsWith('tag:')) {
-      const id = key.slice(4);
-      if (categoryIds.includes(id)) removeFolderFromCategory(folder.name, id);
-      else addFolderToCategory(folder.name, id);
     }
   };
 
@@ -471,19 +307,14 @@ const FolderCard: React.FC<FolderCardProps> = ({
             </p>
             <p className="text-xs text-gray-400 mt-0.5">
               {folder.mediaCount} 个媒体
+              {tagCount > 0 ? ` · ${tagCount} 标签` : ''}
             </p>
           </div>
         </button>
         <span className="absolute left-1 top-1">
           {selectMode ? (
             <Checkbox checked={selected} className="pointer-events-none" />
-          ) : (
-            categoryIds.length > 0 && (
-              <span className="text-xs text-white bg-[rgba(0,0,0,0.5)] rounded-sm px-1 py-[0.05rem]">
-                {categoryIds.length} 标签
-              </span>
-            )
-          )}
+          ) : null}
         </span>
         <PlatformBadge platform={platform} />
       </li>
