@@ -167,6 +167,13 @@ src-tauri/
 - 物理源码备份：`E:\OPENCODE\x-spider-backup-1.1.3.zip`
 - 回滚：`git checkout backup-1.1.3` 或解压 zip
 
+### 回滚点（1.2.2，标签树改造前）
+
+- git 分支 `backup-1.2.2` → commit `c3fd23c`（本地；未 push 远端）
+- 物理源码备份：`E:\OPENCODE\x-spider-backup-1.2.2.zip`（`git archive HEAD`，仅跟踪文件）
+- 回滚：`git checkout backup-1.2.2` 或解压 zip
+- 说明：本地库「多级标签树」改造前的稳定点（含平台标记、一键缩略图缓存、fig-memo 之前）
+
 ## 待办 / 已知问题 / 维护注意
 
 1. **架构解耦：下载历史改事件驱动**（✅ 已完成）
