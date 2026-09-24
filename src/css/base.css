@@ -2,3 +2,19 @@
 @tailwind components;
 @tailwind utilities;
 
+/* 本地库打开媒体预览时，右侧有固定的推文信息条（TweetSidebar），
+   它会遮挡 antd 预览/弹窗自带的右上角关闭按钮，故隐藏之（改由信息条提供关闭）。 */
+body.library-tweet-bar-open .ant-image-preview-close,
+body.library-tweet-bar-open .ant-modal-close {
+  display: none;
+}
+
+/* 右切换箭头会被信息条盖住，挪到信息条左侧，保证左右切换都可用 */
+body.library-tweet-bar-open .ant-image-preview-switch-right {
+  inset-inline-end: calc(20rem + 12px);
+}
+
+/* 视频弹窗在信息条展开时，居中区域左移，避免被信息条遮挡 */
+body.library-tweet-bar-open .library-video-wrap {
+  padding-right: 20rem;
+}

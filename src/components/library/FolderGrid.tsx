@@ -1,12 +1,10 @@
 /* eslint-disable react/prop-types */
 import {
   CheckOutlined,
-  CheckSquareOutlined,
   DeleteOutlined,
   FolderOpenOutlined,
   InfoCircleOutlined,
   LoadingOutlined,
-  MoreOutlined,
   PlusOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
@@ -62,7 +60,7 @@ export const FolderGrid: React.FC<Props> = ({
   );
   const clearFolderCategories = useLibraryStore((s) => s.clearFolderCategories);
 
-  const [sort, setSort] = useState<FolderSortKey>('name-asc');
+  const [sort, setSort] = useState<FolderSortKey>('mtime-desc');
   const [selectMode, setSelectMode] = useState(false);
   const [createNames, setCreateNames] = useState<string[]>([]);
   const [newName, setNewName] = useState('');
@@ -159,24 +157,27 @@ export const FolderGrid: React.FC<Props> = ({
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center gap-2 pb-2">
+      <div className="flex items-center flex-wrap gap-2 pb-2">
         <Input
           allowClear
           value={keyword}
           onChange={(e) => onKeywordChange(e.target.value)}
           placeholder="筛选文件夹名"
-          className="max-w-xs"
+          className="w-56"
         />
-        <span className="text-sm text-gray-400">{folders.length} 个文件夹</span>
+        <span className="text-sm text-gray-400 shrink-0 whitespace-nowrap">
+          {folders.length} 个文件夹
+        </span>
         <span className="ml-auto" />
         <Button
-          icon={<CheckSquareOutlined />}
           type={selectMode ? 'primary' : 'default'}
           onClick={toggleSelectMode}
         >
           多选
         </Button>
-        <span className="text-sm text-gray-400">排序</span>
+        <span className="text-sm text-gray-400 shrink-0 whitespace-nowrap">
+          排序
+        </span>
         <SortSelect
           value={sort}
           onChange={(v) => setSort(v as FolderSortKey)}
@@ -333,10 +334,13 @@ const FolderCard: React.FC<FolderCardProps> = ({
   const categoryIds = useLibraryStore((s) =>
     s.getFolderCategoryIds(folder.name),
   );
+  const coverOverride = useLibraryStore((s) => s.folderCovers[folder.name]);
   const addFolderToCategory = useLibraryStore((s) => s.addFolderToCategory);
   const removeFolderFromCategory = useLibraryStore(
     (s) => s.removeFolderFromCategory,
   );
+  const setFolderCover = useLibraryStore((s) => s.setFolderCover);
+  const { message } = App.useApp();
 
   const menuItems: MenuProps['items'] = [
     { key: 'open', label: '打开', icon: <FolderOpenOutlined /> },
@@ -361,6 +365,16 @@ const FolderCard: React.FC<FolderCardProps> = ({
     },
     { type: 'divider' },
     { key: 'props', label: '属性', icon: <InfoCircleOutlined /> },
+    ...(coverOverride
+      ? [
+          { type: 'divider' as const },
+          {
+            key: 'resetCover',
+            label: '恢复默认缩略图',
+            icon: <ReloadOutlined />,
+          },
+        ]
+      : []),
   ];
 
   const onMenuClick: MenuProps['onClick'] = ({ key, domEvent }) => {
@@ -369,6 +383,11 @@ const FolderCard: React.FC<FolderCardProps> = ({
     if (key === 'reveal') return onReveal();
     if (key === 'newtag') return onCreateAndAdd();
     if (key === 'props') return onShowProps();
+    if (key === 'resetCover') {
+      setFolderCover(folder.name, null);
+      message.success('已恢复默认缩略图');
+      return;
+    }
     if (key.startsWith('tag:')) {
       const id = key.slice(4);
       if (categoryIds.includes(id)) removeFolderFromCategory(folder.name, id);
@@ -394,8 +413,8 @@ const FolderCard: React.FC<FolderCardProps> = ({
         >
           <FolderCover
             name={folder.name}
-            coverPath={folder.coverPath}
-            coverKind={folder.coverKind}
+            coverPath={coverOverride || folder.coverPath}
+            coverKind={coverOverride ? 'image' : folder.coverKind}
             wrapperClassName="w-full h-[12rem]"
             className="object-cover w-full h-full transition-transform group-hover:scale-105"
           />
@@ -419,19 +438,6 @@ const FolderCard: React.FC<FolderCardProps> = ({
             )
           )}
         </span>
-        {!selectMode && (
-          <span className="absolute right-1 top-1">
-            <Dropdown trigger={['click']} menu={menu}>
-              <button
-                aria-label="文件夹操作"
-                onClick={(e) => e.stopPropagation()}
-                className="flex items-center justify-center w-7 h-7 rounded-full bg-[rgba(0,0,0,0.5)] text-white hover:bg-[rgba(0,0,0,0.7)]"
-              >
-                <MoreOutlined />
-              </button>
-            </Dropdown>
-          </span>
-        )}
       </li>
     </Dropdown>
   );

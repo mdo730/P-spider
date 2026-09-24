@@ -16,3 +16,8 @@ export const showInFolder = createCrossPlatformInvoker<
 export async function openPath(path: string): Promise<void> {
   await shell.open(path);
 }
+
+/** 用系统默认浏览器打开外部链接 */
+export async function openUrl(url: string): Promise<void> {
+  await shell.open(url);
+}

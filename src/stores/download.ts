@@ -100,7 +100,7 @@ export async function prepareArchiverPostDir(
   return { dir, hasExternalLinks };
 }
 
-async function prepareDownloadTask({
+export async function prepareDownloadTask({
   source,
   post,
   media,

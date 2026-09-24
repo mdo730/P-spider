@@ -1,7 +1,29 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api';
+import {
+  LogicalSize,
+  appWindow,
+  currentMonitor,
+  primaryMonitor,
+} from '@tauri-apps/api/window';
 import { aria2 } from '../utils/aria2';
 import { useSettingsStore } from '../stores/settings';
+
+/**
+ * 按当前显示器工作区自适应窗口尺寸并居中。
+ * 解决高 DPI/多屏下默认 1280x920 超出可用高度、底部被任务栏遮挡的问题。
+ */
+async function fitWindowToMonitor(): Promise<void> {
+  const monitor = (await currentMonitor()) || (await primaryMonitor());
+  if (!monitor) return;
+  const scale = monitor.scaleFactor || 1;
+  const workWidth = monitor.size.width / scale;
+  const workHeight = monitor.size.height / scale;
+  const width = Math.min(1280, Math.round(workWidth * 0.92));
+  const height = Math.min(920, Math.round(workHeight * 0.85));
+  await appWindow.setSize(new LogicalSize(width, height));
+  await appWindow.center();
+}
 
 export function useBootstrap() {
   const [ready, setReady] = useState(false);
@@ -22,6 +44,17 @@ export function useBootstrap() {
         fn: () => Promise<void>;
       }
       const flows: BootConfig[] = [
+        {
+          name: 'window',
+          async fn() {
+            // 窗口自适应失败不影响启动
+            try {
+              await fitWindowToMonitor();
+            } catch (err) {
+              log.warn('窗口自适应失败', err);
+            }
+          },
+        },
         {
           name: 'aria',
           async fn() {

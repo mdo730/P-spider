@@ -1,7 +1,6 @@
 /* eslint-disable react/prop-types */
 import {
   AppstoreOutlined,
-  CheckSquareOutlined,
   DeleteOutlined,
   FolderOpenOutlined,
   InfoCircleOutlined,
@@ -10,6 +9,11 @@ import {
 import { App, Button, Dropdown, Empty, MenuProps, Segmented, Spin } from 'antd';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { deleteLibraryFiles } from '../../services/library-actions';
+import {
+  DownloadHistoryRecord,
+  getDownloadHistoryMap,
+} from '../../stores/download-history';
+import { readTraceMap, TracedRecord } from '../../utils/library';
 import {
   DirectoryContent,
   FILE_SORT_OPTIONS,
@@ -31,20 +35,47 @@ import { SortSelect } from './SortSelect';
 
 interface Props {
   dir: string;
+  /** 最外层一级文件夹名（用于「设为文件夹缩略图」） */
+  rootFolderName?: string;
   onOpenFolder: (folder: LibrarySubFolder) => void;
 }
 
 /** 文件夹详情：平铺/按文件夹切换、排序、文件多选批量删除、右键菜单/属性 */
-export const FolderDetail: React.FC<Props> = ({ dir, onOpenFolder }) => {
+export const FolderDetail: React.FC<Props> = ({
+  dir,
+  rootFolderName,
+  onOpenFolder,
+}) => {
   const { message, modal } = App.useApp();
 
   const [content, setContent] = useState<DirectoryContent | null>(null);
   const [loading, setLoading] = useState(false);
   const [viewMode, setViewMode] = useState<'flat' | 'folder'>('flat');
-  const [folderSort, setFolderSort] = useState<FolderSortKey>('name-asc');
-  const [fileSort, setFileSort] = useState<FileSortKey>('name-asc');
+  const [folderSort, setFolderSort] = useState<FolderSortKey>('name-desc');
+  const [fileSort, setFileSort] = useState<FileSortKey>('name-desc');
   const [selectMode, setSelectMode] = useState(false);
   const [propsTarget, setPropsTarget] = useState<LibrarySubFolder | null>(null);
+  const [historyMap, setHistoryMap] = useState<
+    Map<string, DownloadHistoryRecord>
+  >(new Map());
+  const [traceMap, setTraceMap] = useState<Map<string, TracedRecord>>(
+    new Map(),
+  );
+
+  // 加载下载历史索引 + 联网溯源缓存，用于关联原推文/打开原网页
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([getDownloadHistoryMap(), readTraceMap()])
+      .then(([history, trace]) => {
+        if (cancelled) return;
+        setHistoryMap(history);
+        setTraceMap(trace);
+      })
+      .catch((err) => log.error('加载溯源信息失败', err));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -157,8 +188,8 @@ export const FolderDetail: React.FC<Props> = ({ dir, onOpenFolder }) => {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center gap-3 pb-2">
-        <span className="text-sm text-gray-500">
+      <div className="flex items-center flex-wrap gap-3 pb-2">
+        <span className="text-sm text-gray-500 shrink-0 whitespace-nowrap">
           {content ? `${content.files.length} 个媒体` : '加载中…'}
           {hasFolders && content
             ? ` · ${content.folders.length} 个子文件夹`
@@ -167,14 +198,15 @@ export const FolderDetail: React.FC<Props> = ({ dir, onOpenFolder }) => {
         <span className="ml-auto" />
         {!inFolderView && sortedFiles.length > 0 && (
           <Button
-            icon={<CheckSquareOutlined />}
             type={selectMode ? 'primary' : 'default'}
             onClick={toggleSelectMode}
           >
             多选
           </Button>
         )}
-        <span className="text-sm text-gray-400">排序</span>
+        <span className="text-sm text-gray-400 shrink-0 whitespace-nowrap">
+          排序
+        </span>
         {inFolderView ? (
           <SortSelect
             value={folderSort}
@@ -300,6 +332,9 @@ export const FolderDetail: React.FC<Props> = ({ dir, onOpenFolder }) => {
             selected={selected}
             onToggle={toggle}
             onDeleted={() => load()}
+            coverFolderName={rootFolderName}
+            historyMap={historyMap}
+            traceMap={traceMap}
           />
         ) : (
           <Empty className="mt-16" description="该文件夹下没有媒体文件" />

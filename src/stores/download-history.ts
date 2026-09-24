@@ -1,6 +1,7 @@
 import { fs, path } from '@tauri-apps/api';
 import { convertFileSrc } from '@tauri-apps/api/tauri';
 import MediaType from '../enums/MediaType';
+import { buildPostUrl } from '../twitter/url';
 import { onTaskCompleted } from './download';
 
 let _log: ICategoriedLogger;
@@ -22,6 +23,8 @@ export interface DownloadHistoryRecord {
   username?: string;
   /** 推文用户昵称 */
   displayName?: string;
+  /** 推文用户头像 URL */
+  avatar?: string;
   /** 媒体类型 */
   mediaType: MediaType;
   /** 媒体原始 URL */
@@ -34,6 +37,10 @@ export interface DownloadHistoryRecord {
   downloadedAt: number;
   /** 来源：subscription=订阅自动下载，manual=手动下载 */
   source: 'subscription' | 'manual';
+  /** 来源平台（twitter/pawchive），用于还原原帖链接 */
+  platform?: 'twitter' | 'pawchive';
+  /** 帖子详情页 URL */
+  postUrl?: string;
 }
 
 async function getHistoryFilePath(): Promise<string> {
@@ -156,6 +163,61 @@ export function getMediaOriginalUrl(record: DownloadHistoryRecord): string {
   return getMediaThumbUrl(record);
 }
 
+/** 路径归一化（统一分隔符 + 小写），用于本地文件 → 历史记录的匹配 */
+export function normalizePath(p: string): string {
+  return p.replace(/\//g, '\\').toLowerCase();
+}
+
+/** 读取全部历史并建立「文件路径 → 记录」索引（用于本地库关联原推文） */
+export async function getDownloadHistoryMap(): Promise<
+  Map<string, DownloadHistoryRecord>
+> {
+  const all = await readDownloadHistory();
+  const map = new Map<string, DownloadHistoryRecord>();
+  for (const record of all) {
+    if (record.filePath) {
+      map.set(normalizePath(record.filePath), record);
+    }
+  }
+  return map;
+}
+
+/** 由历史记录还原帖子原网页 URL（旧记录无 postUrl 时按 twitter 拼接，无法还原则 undefined） */
+export function resolvePostUrl(
+  record: DownloadHistoryRecord,
+): string | undefined {
+  if (record.postUrl) return record.postUrl;
+  const isTwitter = !record.platform || record.platform === 'twitter';
+  if (isTwitter && record.username && record.postId) {
+    return buildPostUrl(record.username, record.postId);
+  }
+  return undefined;
+}
+
+/** 本地库「文件 → 推文」统一信息（不同来源拼合后的结果） */
+export interface FileTweetInfo {
+  displayName?: string;
+  username?: string;
+  avatar?: string;
+  time?: string;
+  url?: string;
+  text?: string;
+}
+
+/** 下载历史记录 → 统一信息 */
+export function recordToTweetInfo(
+  record: DownloadHistoryRecord,
+): FileTweetInfo {
+  return {
+    displayName: record.displayName,
+    username: record.username,
+    avatar: record.avatar,
+    time: record.tweetTime,
+    url: resolvePostUrl(record),
+    text: record.fullText,
+  };
+}
+
 // 监听下载任务完成事件，自动写入历史（时间流数据源）。
 // 注意：本模块需在应用启动时被加载（见 main.tsx 副作用 import），
 // 否则监听只在打开时间流页面时才注册，后台订阅下载将丢失历史记录。
@@ -171,12 +233,15 @@ onTaskCompleted.listen((task) => {
         fullText: task.post?.text,
         username: task.post?.creator?.username,
         displayName: task.post?.creator?.name,
+        avatar: task.post?.creator?.avatar,
         mediaType: task.media?.type || MediaType.Photo,
         mediaUrl: task.media?.url,
         filePath,
         fileName: task.fileName,
         downloadedAt: task.updatedAt,
         source: task.subscriptionId ? 'subscription' : 'manual',
+        platform: task.post?.source,
+        postUrl: task.post?.postUrl,
       });
     } catch (err) {
       log().error('Failed to write download history', err);

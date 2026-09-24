@@ -169,6 +169,7 @@ export const LibraryPage: React.FC = () => {
             {opened ? (
               <FolderDetail
                 dir={currentDir}
+                rootFolderName={opened.name}
                 onOpenFolder={(folder) =>
                   setSubStack((prev) => [...prev, folder])
                 }

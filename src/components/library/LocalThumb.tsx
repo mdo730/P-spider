@@ -15,13 +15,16 @@ interface Props {
   className?: string;
   /** 外层容器 class（决定占位尺寸） */
   wrapperClassName?: string;
-  /** 是否启用 antd Image 放大预览 */
+  /** 是否接入 antd Image 全屏预览（PreviewGroup） */
   preview?: boolean;
 }
 
 /**
  * 本地图片缩略图：优先用磁盘缓存，命中即秒开；
  * 未命中时进入视口才解码生成（并发受限），并写回缓存目录。
+ *
+ * 注意：preview 模式下**始终挂载 antd Image**（缩略图未就绪时用占位层覆盖），
+ * 以保证 PreviewGroup 的注册顺序与文件顺序一致（右侧信息条按 index 取文件）。
  */
 export const LocalThumb: React.FC<Props> = ({
   filePath,
@@ -72,10 +75,20 @@ export const LocalThumb: React.FC<Props> = ({
     };
   }, [filePath, visible]);
 
+  const placeholder = (
+    <div
+      className={`flex items-center justify-center bg-gray-100 text-gray-400 ${
+        wrapperClassName || 'w-full h-full'
+      }`}
+    >
+      {filePath ? <LoadingOutlined /> : '无图'}
+    </div>
+  );
+
   return (
     <div ref={containerRef} className={wrapperClassName || 'w-full h-full'}>
-      {src ? (
-        preview ? (
+      {preview ? (
+        <div className="relative w-full h-full">
           <Image
             src={src}
             alt={alt}
@@ -86,13 +99,16 @@ export const LocalThumb: React.FC<Props> = ({
               mask: <EyeOutlined />,
             }}
           />
-        ) : (
-          <img src={src} alt={alt} loading="lazy" className={className} />
-        )
-      ) : (
-        <div className="w-full h-full flex items-center justify-center bg-gray-100 text-gray-400">
-          {filePath ? <LoadingOutlined /> : '无图'}
+          {!src && (
+            <div className="absolute inset-0 flex items-center justify-center bg-gray-100 text-gray-400">
+              {filePath ? <LoadingOutlined /> : '无图'}
+            </div>
+          )}
         </div>
+      ) : src ? (
+        <img src={src} alt={alt} loading="lazy" className={className} />
+      ) : (
+        placeholder
       )}
     </div>
   );

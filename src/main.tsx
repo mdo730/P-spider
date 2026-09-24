@@ -33,6 +33,19 @@ function bootstrapLogger() {
   });
 }
 
+/**
+ * 屏蔽 WebView 原生右键菜单（桌面应用不需要「后退/刷新/另存图片」这类菜单）。
+ * 自定义菜单用 antd Dropdown 的 contextMenu 触发，不受影响；
+ * 输入框/可编辑区域保留原生菜单，方便右键粘贴。
+ */
+function blockNativeContextMenu() {
+  window.addEventListener('contextmenu', (event) => {
+    const target = event.target as HTMLElement | null;
+    if (target?.closest('input, textarea, [contenteditable="true"]')) return;
+    event.preventDefault();
+  });
+}
+
 function bootstrapView() {
   log.info('Bootstrap view');
   ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
@@ -42,6 +55,7 @@ function bootstrapView() {
 
 async function bootstrap() {
   bootstrapLogger();
+  blockNativeContextMenu();
   log.info(`App bootstrap, version=${PACKAGE_JSON_VERSION}`);
   bootstrapView();
 }

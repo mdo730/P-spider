@@ -119,23 +119,37 @@ src-tauri/
 - **进入文件夹**：
   - 直接含媒体（X）→ 文件网格（图/视频）
   - 含子文件夹（Pawchive `创作者/帖子标题/`）→ 顶部切换 **平铺 / 按文件夹**：平铺=递归所有媒体文件网格；按文件夹=帖子文件夹列表 → 进入看文件（支持多级下钻 + 面包屑）
-- **右键菜单（统一操作入口）**：一级文件夹右键 = 打开 / 在资源管理器中打开 / 标签（子菜单，逐项勾选切换，可多标签）/ 新建标签并添加 / 属性；子文件夹右键 = 打开 / 在资源管理器中打开 / 属性；文件右键 = 打开（系统默认程序）/ 在资源管理器中打开 / 删除文件。一级文件夹卡片另保留右上角 `⋯` 按钮触发同一菜单。⚠️ 不再有独立「移出分类」（改为标签子菜单里的勾选切换，避免在「全部」下语义混乱）
+- **右键菜单（统一操作入口）**：一级文件夹右键 = 打开 / 在资源管理器中打开 / 标签（子菜单，逐项勾选切换，可多标签）/ 新建标签并添加 / 属性 / 恢复默认缩略图（仅设过自定义封面时）；子文件夹右键 = 打开 / 在资源管理器中打开 / 属性；文件右键 = 打开（系统默认程序）/ 在资源管理器中打开 / 打开原网页（有推文信息时）/ 设为文件夹缩略图（仅图片，作用于当前一级作者文件夹）/ 删除文件。⚠️ 卡片右上角 `⋯` 按钮已移除（统一走右键，避免与右键菜单重复）；不再有独立「移出分类」（改为标签子菜单里的勾选切换）
 - **属性弹窗**（`FolderProperties`）：展示 名称 / 标签 / 媒体数 / 全部文件数 / 占用空间 / 路径。占用空间由 Rust `get_folder_stats` 递归统计
+- **原推文关联（本地库）**：图片走 antd **原生全屏预览**（不改变窗口、不新开窗口），视频弹窗播放；打开媒体时右侧**独立叠加**一条推文信息条（`components/library/TweetSidebar.tsx`，单独 portal 渲染，覆盖不挤占图像）：头像 · 昵称 · @ID · 正文 · 日期。交互：**点头像/@ID → 作者主页**；**点日期 → 原推文**；条内右上角关闭。文件右键另有「打开原网页」。文件 → 推文信息按优先级解析（`utils/library/trace.ts` 的 `resolveFileTweetInfo`）：
+  1. **下载历史** `downloads.jsonl`（最准，含正文/头像）；记录新增 `postUrl`/`platform`/`avatar` 字段（2026-09 起写入，旧记录无 postUrl 时按 twitter 用 `用户名+推文ID` 拼链接）
+  2. **联网溯源缓存** `library-trace.json`
+  3. **文件名反解**（方向 A，离线）：把当前文件名模板转正则，抠出 `POST_ID`/`USER_SCREEN_NAME`/`POST_TIME`（模板须含这些占位符，且需与下载时一致），够显示作者/时间/链接，拿不到正文/头像（头像/昵称会按用户名 `getUser` 现拉一次并缓存）
+- **信息条与关闭按钮**：信息条会挡住 antd 预览自带的右上角关闭按钮与**右切换箭头**，故用 `body.library-tweet-bar-open` + CSS 隐藏关闭按钮、并把右切换箭头挪到信息条左侧、给**视频弹窗**（`.library-video-wrap`）加右内边距（**均保留可用**，关闭统一走信息条右上角）。信息条**左上角可折叠**（折叠后退到右边缘的小按钮）。头像来源优先级：下载历史/溯源记录 → **订阅里同用户名的头像** → 按用户名 `getUser` 现拉（内存缓存）；头像**经 Rust 后端按代理拉取**（`hooks/useRemoteImage.ts`，避免 WebView 直连被墙裂图，失败回退直连）。（曾试过「独立全屏窗口」方案，因新窗口黑屏闪屏不优雅而放弃。）
+- **联网溯源（方向 B）**：设置页「重新溯源本地库（联网）」按钮（`services/library-trace.ts` + `stores/library-trace.ts`）。流程：扫各作者文件夹 → 文件名反解出推文 ID（筛出 X 作者）→ `getUser` 拿 userId → `getUserMedias` 逐页拉取 → 用**下载模板**算出期望本地路径并 `fs.exists` 校验 → 命中写入 `library-trace.json`（增量落盘、可取消、后台常驻）。⚠️ 仅 X；文件夹名须为用户名（screen name）；每作者最多 40 页；已删除推文无法找回；Pawchive 不适用；需要 Cookie
 - **缩略图缓存**：图片不再直接加载原图，而是生成最长边 400px 的 jpg 缩略图缓存到 `%APPDATA%\p-spider\thumb-cache\<hash>.jpg`，命中即秒开（`utils/thumbnail.ts`）。生成方式：`fs.readBinaryFile` 读字节 → `createImageBitmap` 解码 → canvas 缩放 → `toBlob` → `fs.writeBinaryFile`（**避开 asset 跨源 canvas 污染**）。并发限 2 + 同路径去重；进入视口才生成（`LocalThumb` 组件 + IntersectionObserver）。⚠️ 视频暂无缩略图（仍用 `<video>` 首帧 + 播放按钮）；缓存 key 仅按路径，文件被替换需手动清缓存
 - **删除文件**：文件右键「删除文件」→ `fs.removeFile` 永久删除 + 删除对应缩略图缓存，确认弹窗后执行，删完自动重扫当前目录
-- **排序**：一级文件夹支持「名称 A→Z / Z→A、日期 新→旧 / 旧→新、媒体数 多→少 / 少→多」；文件支持「名称 A→Z / Z→A、日期 新→旧 / 旧→新、类型（图片在前）」。排序选择为组件内 state（未持久化）。自然排序（`localeCompare` + `numeric`）
+- **自定义缩略图**：文件右键「设为文件夹缩略图」（仅图片）可把某张图设为所属**一级作者文件夹**的封面，覆盖默认的「文件夹内首图」。存于 store 的 `folderCovers`（一级文件夹名 → 图片路径）；文件夹右键「恢复默认缩略图」可清除
+- **排序**：一级文件夹支持「名称 A→Z / Z→A、日期 新→旧 / 旧→新、媒体数 多→少 / 少→多」（**默认 日期 新→旧**）；文件支持「名称 A→Z / Z→A、日期 新→旧 / 旧→新、类型（图片在前）」（**默认 名称 Z→A**）。排序选择为组件内 state（未持久化）。自然排序（`localeCompare` + `numeric`）
+- **日期排序 + 文件名辅助**：文件按日期排序时**按「天」比较**，同一天再用文件名辅助（爬虫批量下载常同一天完成，秒级 mtime 差不代表内容先后；文件名含发布时间/序号）。文件夹仍按目录 mtime 精确比较（= 最近一次新增内容的时间）
 - **日期来源**：Tauri v1 `fs` 无 stat/mtime API，故新增 Rust 命令 `get_path_mtimes(paths)`（`src-tauri/src/fsutil.rs`）批量取修改时间（毫秒）。文件夹取**目录自身 mtime**（新建文件会更新，近似「最近下载时间」），文件取文件 mtime
 - **多选批量操作**：工具栏「多选」按钮（位于排序左侧）。一级文件夹：勾选多个 → 添加标签 / 移除标签 / 清空标签（仅一级，标签只作用于一级文件夹）；文件：勾选多张 → 批量删除。支持全选/取消全选、清空选择；多选下点击卡片=勾选（文件多选时禁用图片预览），选中项高亮描边。子文件夹不支持多选（未做批量归档）
 - **文件预览**：图片走 antd `Image.PreviewGroup`（网格用小图，点开看原图），视频点击弹窗播放
-- **数据**：标签存 `%APPDATA%\p-spider\library.json`（zustand persist + `createTauriFileStorage`，version 1；多标签仍是「标签→folders[]」结构，无需迁移）
+- **数据**：标签与自定义缩略图存 `%APPDATA%\p-spider\library.json`（zustand persist + `createTauriFileStorage`，version 1；多标签仍是「标签→folders[]」结构，`folderCovers` 为新增字段，旧数据无需迁移）；联网溯源结果存 `%APPDATA%\p-spider\library-trace.json`；下载历史 `downloads.jsonl` 记录新增 `postUrl`/`platform`/`avatar` 字段（2026-09 起写入，旧行无此字段）
+- **UI 缩放适配**：工具栏 `flex-wrap`，计数/「排序」等文字 `shrink-0 whitespace-nowrap`（避免窗口变窄时「N 个文件夹」被挤成竖排）；网格 `repeat(auto-fill,minmax(...))` 自适应
 - **代码落点**：
-  - `utils/library.ts`：`listRootFolders`（列一级目录）、`summarizeFolder(s)`（递归统计媒体数+取封面，带缓存）、`scanDirectory`（一次 `readDir(recursive:true)` 产出「递归文件 + 直接子文件夹汇总」）、`fetchMtimes`/`fetchFolderStats`（调 Rust）、`formatBytes`、`sortFolders`/`sortFiles`、媒体扩展名判断、`toAssetUrl`、`mapLimit`
+  - `utils/library/`（scan / sort / format / ipc / trace + index barrel）：`listRootFolders`、`summarizeFolder(s)`（递归统计媒体数+取封面，带缓存）、`scanDirectory`、`fetchMtimes`/`fetchFolderStats`（调 Rust）、`formatBytes`、`sortFolders`/`sortFiles`、`resolveFileTweetInfo`/`parseFileName`/`readTraceMap`/`writeTraceMap`、媒体扩展名判断、`mapLimit`
+  - `utils/asset.ts`：`toAssetUrl`（Tauri asset 协议，通用）
+  - `services/library-actions.ts`：`deleteLibraryFiles`（删除文件 + 清缩略图，FileGrid 单删与 FolderDetail 批删共用）
+  - `services/library-trace.ts`：`runLibraryTrace`（联网溯源批量任务）
+  - `stores/library-trace.ts`：溯源进度状态（后台常驻、可取消）
+  - `hooks/useSelection.ts`：多选状态（FolderGrid / FolderDetail 共用）
   - `src-tauri/src/fsutil.rs`：`get_path_mtimes`（批量取路径 mtime，供日期排序）、`get_folder_stats`（递归统计文件数与占用空间，供属性）
   - `utils/thumbnail.ts`：缩略图缓存（获取/生成/单删/全清 + 并发控制）
   - `utils/shell.ts`：`showInFolder`（资源管理器定位）、`openPath`（系统默认程序打开）
-  - `stores/library.ts`：标签 CRUD + `addFolderToCategory`/`removeFolderFromCategory`/`clearFolderCategories`/`getFolderCategoryIds`（多标签）
-  - `pages/Library.tsx` + `components/library/`（`CategorySidebar` / `FolderGrid` / `FolderDetail` / `FileGrid` / `FolderCover` / `LocalThumb` / `SortSelect` / `FolderProperties`）、路由 `library`
-  - 设置页「本地库」区块：清除缩略图缓存按钮 + 当前缓存占用显示（`Settings.tsx`，占用走 `getThumbCacheStats` → Rust `get_folder_stats`）
+  - `stores/library.ts`：标签 CRUD + 多标签 API + `folderCovers`/`setFolderCover`/`getFolderCover`（自定义缩略图）
+  - `pages/Library.tsx` + `components/library/`（`CategorySidebar` / `FolderGrid` / `FolderDetail` / `FileGrid` / `FolderCover` / `LocalThumb` / `SortSelect` / `FolderProperties` / `TweetSidebar`）、路由 `library`
+  - 设置页「本地库」区块：清除缩略图缓存按钮 + 当前缓存占用显示；「重新溯源本地库（联网）」按钮 + 进度/取消（`Settings.tsx`）
 - **目录判定关键点**：Tauri v1 `fs.readDir(dir, {recursive:false})` 的条目 **无法区分文件/目录**（`children` 均为 null）。因此：列一级目录时用非递归 + 按媒体扩展名过滤非目录项；判断目录一律用 `readDir(recursive:true)` 后看 `Array.isArray(entry.children)`
 - **本地图片显示**：用 `convertFileSrc`（Tauri v1 asset 协议，Windows 下 `https://asset.localhost/<编码路径>`）。`tauri.conf.json` 已加 `protocol.asset: true` + `assetScope: ["**"]`。⚠️ **浏览器预览（`pnpm dev`）下 `window.__TAURI__` 不存在，`toAssetUrl` 捕获异常返回空串 → 显示占位；需 `pnpm tauri dev` 桌面实测确认任意路径本地图能否显示**
 - **性能**：一级文件夹封面扫描 `mapLimit` 并发 4，结果按路径缓存（`clearFolderSummaryCache()` 可清）；详情页一次递归 readDir 同时得到文件与子文件夹封面，无额外扫描
@@ -198,7 +212,10 @@ src-tauri/
 > - aria2 并发控制：`--max-concurrent-downloads=8 --max-connection-per-server=4`，缓解批量下载触发 Cloudflare 掐断（429 / Download aborted）
 > - 已知待改（建筑层，下轮）：errorCode 16 退避、缩略图/大文件下载体验细节
 > **v1.2.0（2026-09-24，本地库）**：新增「本地库」页（多标签管理 + 本地文件夹/文件浏览），落点 `stores/library.ts`、`utils/library.ts`、`utils/thumbnail.ts`、`components/library/`、`pages/Library.tsx`、路由 `library`、Rust `src-tauri/src/fsutil.rs`；含右键菜单统一操作、**多标签**、属性弹窗（文件数/占用空间）、缩略图磁盘缓存（设置页可查看占用并清除）、文件删除、排序（名称/日期/媒体数）、多选批量加/减标签与删除；顺带修复 `utils/shell.ts` 含空格路径定位。⚠️ asset 协议显示本地图建议桌面实测
-> **待办（下轮）**：本地库有界重构（抽 `services/library-actions.ts` 写操作 / `utils/asset.ts` / `useSelection` hook，拆 `utils/library.ts`）；下载层 errorCode 16 退避、缩略图/大文件下载体验细节
+> **待办（下轮）**：下载层 errorCode 16 退避、缩略图/大文件下载体验细节
+> **本地库体验优化（2026-09，1.2.1）**：默认排序（一级=日期新→旧、文件夹内=名称Z→A）、文件日期排序按天+文件名辅助、文件右键「设为文件夹缩略图」（`folderCovers`）、移除卡片右上角 `⋯` 与多选按钮图标、工具栏窄窗适配、**原推文关联**（窗口内 antd 预览 + 右侧独立叠加信息条：头像/昵称/@ID/正文/日期，点头像→主页、点日期→原推文；来源：下载历史 → 联网溯源 `library-trace.json` → 文件名反解）、**设置页「重新溯源本地库（联网）」**
+> **窗口自适应（1.2.1）**：启动时 `useBootstrap` 的 `window` 流程按**当前显示器工作区**计算尺寸（宽 `min(1280, 92%)`、高 `min(920, 85%)`）并居中，解决高 DPI/多屏下默认 1280x920 超出可用高度、底部被任务栏遮挡；`tauri.conf.json` 窗口另加 `center: true`。
+> **原生右键菜单屏蔽（1.2.1）**：`main.tsx` 启动时全局拦截 `contextmenu` 并 `preventDefault`（输入框/`contenteditable` 除外，保留右键粘贴），去掉 WebView 自带的「后退/刷新/另存图片」菜单；自定义菜单用 antd Dropdown 的 `contextMenu` 触发，不受影响。
 
 ## 如何发布新版
 

@@ -34,9 +34,12 @@ fn main() {
         })
         .on_window_event(|event| {
             if let WindowEvent::CloseRequested { api, .. } = event.event() {
-                // 拦截关闭，交由前端决定（最小化到托盘或真正退出）
-                api.prevent_close();
-                let _ = event.window().emit("close-requested", ());
+                // 仅拦截主窗口（最小化到托盘/退出交由前端决定）；
+                // 其它窗口（如本地库媒体查看器）正常关闭即可
+                if event.window().label() == "main" {
+                    api.prevent_close();
+                    let _ = event.window().emit("close-requested", ());
+                }
             }
         })
         .invoke_handler(tauri::generate_handler![

@@ -90,6 +90,7 @@
         "height": 920,
         "minWidth": 800,
         "minHeight": 600,
+        "center": true,
         "decorations": true
       }
     ]

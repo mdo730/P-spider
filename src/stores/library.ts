@@ -12,6 +12,8 @@ export interface LibraryCategory {
 
 export interface LibraryStore {
   categories: LibraryCategory[];
+  /** 自定义缩略图：一级文件夹名 → 用作封面的图片绝对路径 */
+  folderCovers: Record<string, string>;
   addCategory: (name: string) => string;
   renameCategory: (id: string, name: string) => void;
   removeCategory: (id: string) => void;
@@ -23,12 +25,17 @@ export interface LibraryStore {
   clearFolderCategories: (folderName: string) => void;
   /** 取文件夹所属的全部标签 id */
   getFolderCategoryIds: (folderName: string) => string[];
+  /** 设置一级文件夹的自定义缩略图（传 null 恢复默认） */
+  setFolderCover: (folderName: string, filePath: string | null) => void;
+  /** 取一级文件夹的自定义缩略图路径 */
+  getFolderCover: (folderName: string) => string | undefined;
 }
 
 export const useLibraryStore = create(
   persist<LibraryStore>(
     (set, get) => ({
       categories: [],
+      folderCovers: {},
       addCategory: (name) => {
         const trimmed = name.trim();
         if (!trimmed) throw new Error('标签名不能为空');
@@ -88,6 +95,15 @@ export const useLibraryStore = create(
           .categories.filter((c) => c.folders.includes(folderName))
           .map((c) => c.id);
       },
+      setFolderCover: (folderName, filePath) => {
+        set((state) => {
+          const next = { ...state.folderCovers };
+          if (filePath) next[folderName] = filePath;
+          else delete next[folderName];
+          return { folderCovers: next };
+        });
+      },
+      getFolderCover: (folderName) => get().folderCovers[folderName],
     }),
     {
       name: 'library',

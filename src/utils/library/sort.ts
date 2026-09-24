@@ -21,6 +21,11 @@ function compareName(a: string, b: string): number {
   return a.localeCompare(b, undefined, { numeric: true });
 }
 
+/** 取「天」粒度（毫秒 → 天序号），用于批量下载时忽略秒级差异 */
+function dayOf(t?: number): number {
+  return Math.floor((t || 0) / 86400000);
+}
+
 /** 排序文件夹（返回新数组） */
 export function sortFolders<
   T extends { name: string; mediaCount: number; mtime?: number },
@@ -85,15 +90,17 @@ export function sortFiles(
       sorted.sort((a, b) => compareName(b.name, a.name));
       break;
     case 'mtime-desc':
+      // 爬虫批量下载常同一天完成，mtime 秒级差不代表内容先后；
+      // 故按「天」比较，同一天再用文件名（含发布时间/序号）辅助排序
       sorted.sort(
         (a, b) =>
-          (b.mtime || 0) - (a.mtime || 0) || compareName(a.name, b.name),
+          dayOf(b.mtime) - dayOf(a.mtime) || compareName(b.name, a.name),
       );
       break;
     case 'mtime-asc':
       sorted.sort(
         (a, b) =>
-          (a.mtime || 0) - (b.mtime || 0) || compareName(a.name, b.name),
+          dayOf(a.mtime) - dayOf(b.mtime) || compareName(a.name, b.name),
       );
       break;
     case 'type':

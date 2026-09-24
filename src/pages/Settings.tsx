@@ -18,11 +18,34 @@ import { path } from '@tauri-apps/api';
 import { useSubscriptionStore } from '../stores/subscription';
 import { clearThumbCache, getThumbCacheStats } from '../utils/thumbnail';
 import { LibraryFolderStats, formatBytes } from '../utils/library';
+import { useLibraryTraceStore } from '../stores/library-trace';
 
 export const Settings: React.FC = () => {
   const { message } = App.useApp();
   const { exportSubscriptions, importSubscriptions } = useSubscriptionStore();
   const [cacheStats, setCacheStats] = useState<LibraryFolderStats | null>(null);
+  const trace = useLibraryTraceStore();
+
+  const traceStatusText = (() => {
+    if (trace.error) return `失败：${trace.error}`;
+    if (trace.phase === 'scanning' && trace.progress) {
+      return `扫描作者 ${trace.progress.processedAuthors}/${trace.progress.totalAuthors}…`;
+    }
+    if (trace.phase === 'tracing' && trace.progress) {
+      return `溯源作者 ${trace.progress.processedAuthors}/${trace.progress.totalAuthors}${
+        trace.progress.currentAuthor
+          ? `（${trace.progress.currentAuthor}）`
+          : ''
+      }，已匹配 ${trace.progress.matchedFiles} 个文件`;
+    }
+    if (trace.result) {
+      const r = trace.result;
+      return `${r.aborted ? '已中止，' : '完成：'}匹配 ${r.matched} 个文件 / ${r.authors} 个作者${
+        r.skipped ? `，跳过 ${r.skipped} 个` : ''
+      }`;
+    }
+    return '将已下载的老文件按文件名回溯推文信息（仅 X，需登录；已删除的推文无法找回）';
+  })();
 
   const refreshCacheStats = async () => {
     try {
@@ -171,6 +194,18 @@ export const Settings: React.FC = () => {
           本地库浏览时会为图片生成缩略图缓存（存于应用数据目录
           thumb-cache）。清除后下次浏览会重新生成，不影响原始文件。
         </p>
+        <div className="mt-4 pt-4 border-t-[1px] border-gray-100">
+          <div className="flex items-center gap-3">
+            <Button
+              type="primary"
+              loading={trace.running}
+              onClick={() => (trace.running ? trace.cancel() : trace.start())}
+            >
+              {trace.running ? '取消溯源' : '重新溯源本地库（联网）'}
+            </Button>
+            <span className="text-sm text-gray-500">{traceStatusText}</span>
+          </div>
+        </div>
       </Section>
       <Section title="代理" name="proxy" titleIcon={<GlobalOutlined />}>
         <Item label="启用代理" settingKey="enable" valuePropName="checked">
