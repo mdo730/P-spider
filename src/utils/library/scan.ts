@@ -1,5 +1,6 @@
 import { fs } from '@tauri-apps/api';
 import type { FileEntry } from '@tauri-apps/api/fs';
+import { PlatformSource } from '../../platforms';
 
 let _log: ICategoriedLogger;
 
@@ -75,6 +76,8 @@ export interface LibraryFolderSummary {
   mediaCount: number;
   coverPath?: string;
   coverKind?: LibraryMediaKind;
+  /** 平台（结构启发式推断：含子文件夹≈Pawchive，直接含媒体≈X） */
+  platform?: PlatformSource;
 }
 
 export interface LibraryRootFolder extends LibraryFolderSummary {
@@ -181,10 +184,15 @@ export async function summarizeFolder(
       isMediaFile(entryName(e)),
     );
     const cover = pickCover(media);
+    // 结构启发式：一级文件夹内含子文件夹（帖子标题）≈ Pawchive；直接含媒体 ≈ X
+    const hasSubFolders = entries.some((entry) =>
+      Array.isArray(entry.children),
+    );
     const summary: LibraryFolderSummary = {
       mediaCount: media.length,
       coverPath: cover?.path,
       coverKind: cover ? getMediaKind(entryName(cover)) || 'image' : undefined,
+      platform: hasSubFolders ? 'pawchive' : 'twitter',
     };
     folderSummaryCache.set(dir, summary);
     return summary;

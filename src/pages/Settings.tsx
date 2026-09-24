@@ -19,12 +19,32 @@ import { useSubscriptionStore } from '../stores/subscription';
 import { clearThumbCache, getThumbCacheStats } from '../utils/thumbnail';
 import { LibraryFolderStats, formatBytes } from '../utils/library';
 import { useLibraryTraceStore } from '../stores/library-trace';
+import { useThumbCacheStore } from '../stores/library-thumb-cache';
 
 export const Settings: React.FC = () => {
   const { message } = App.useApp();
   const { exportSubscriptions, importSubscriptions } = useSubscriptionStore();
   const [cacheStats, setCacheStats] = useState<LibraryFolderStats | null>(null);
   const trace = useLibraryTraceStore();
+  const thumbCache = useThumbCacheStore();
+
+  const thumbStatusText = (() => {
+    if (thumbCache.error) return `失败：${thumbCache.error}`;
+    if (thumbCache.phase === 'scanning') return '正在扫描文件…';
+    if (thumbCache.phase === 'generating' && thumbCache.progress) {
+      const p = thumbCache.progress;
+      return `生成中 ${p.processedFiles}/${p.totalFiles}（新增 ${p.generated}，跳过 ${p.skipped}${
+        p.failed ? `，失败 ${p.failed}` : ''
+      }）`;
+    }
+    if (thumbCache.result) {
+      const r = thumbCache.result;
+      return `${r.aborted ? '已中止，' : '完成：'}共 ${r.total} 张，新增 ${r.generated}，跳过 ${r.skipped}${
+        r.failed ? `，失败 ${r.failed}` : ''
+      }`;
+    }
+    return '为现有图片预生成缩略图缓存，之后浏览不再有初次载入卡顿';
+  })();
 
   const traceStatusText = (() => {
     if (trace.error) return `失败：${trace.error}`;
@@ -59,6 +79,13 @@ export const Settings: React.FC = () => {
   useEffect(() => {
     refreshCacheStats();
   }, []);
+
+  // 一键生成完成后刷新缓存占用显示
+  useEffect(() => {
+    if (!thumbCache.running && thumbCache.result) {
+      refreshCacheStats();
+    }
+  }, [thumbCache.running, thumbCache.result]);
 
   const onExport = async () => {
     const json = exportSubscriptions();
@@ -168,7 +195,7 @@ export const Settings: React.FC = () => {
         </Item>
       </Section>
       <Section title="本地库" name="library" titleIcon={<FolderOutlined />}>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center flex-wrap gap-3">
           <Button
             danger
             onClick={async () => {
@@ -183,16 +210,25 @@ export const Settings: React.FC = () => {
           >
             清除缩略图缓存
           </Button>
-          <span className="text-sm text-gray-500">
+          <Button
+            loading={thumbCache.running}
+            onClick={() =>
+              thumbCache.running ? thumbCache.cancel() : thumbCache.start()
+            }
+          >
+            {thumbCache.running ? '取消生成' : '一键生成缩略图缓存'}
+          </Button>
+          <span className="text-sm text-gray-500 shrink-0 whitespace-nowrap">
             当前缓存：
             {cacheStats
               ? `${formatBytes(cacheStats.totalBytes)}（${cacheStats.fileCount} 个文件）`
               : '计算中…'}
           </span>
         </div>
-        <p className="text-sm text-gray-400 mt-2">
+        <p className="text-sm text-gray-400 mt-2">{thumbStatusText}</p>
+        <p className="text-sm text-gray-400 mt-1">
           本地库浏览时会为图片生成缩略图缓存（存于应用数据目录
-          thumb-cache）。清除后下次浏览会重新生成，不影响原始文件。
+          thumb-cache）。可一键为现有图片预生成，之后浏览不再有初次载入卡顿；清除后下次浏览会重新生成，不影响原始文件。
         </p>
         <div className="mt-4 pt-4 border-t-[1px] border-gray-100">
           <div className="flex items-center gap-3">

@@ -19,18 +19,26 @@ import {
   Modal,
   Spin,
 } from 'antd';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useLibraryStore } from '../../stores/library';
+import {
+  getDownloadHistoryMap,
+  normalizePath,
+} from '../../stores/download-history';
+import { useSettingsStore } from '../../stores/settings';
+import { PlatformSource } from '../../platforms';
 import {
   FOLDER_SORT_OPTIONS,
   FolderSortKey,
   LibraryRootFolder,
+  readTraceMap,
   sortFolders,
 } from '../../utils/library';
 import { showInFolder } from '../../utils/shell';
 import { useSelection } from '../../hooks/useSelection';
 import { FolderCover } from './FolderCover';
 import { FolderProperties } from './FolderProperties';
+import { PlatformBadge } from './PlatformBadge';
 import { SortSelect } from './SortSelect';
 
 interface Props {
@@ -67,6 +75,39 @@ export const FolderGrid: React.FC<Props> = ({
   const [propsTarget, setPropsTarget] = useState<LibraryRootFolder | null>(
     null,
   );
+  const saveDirBase = useSettingsStore((s) => s.download.saveDirBase);
+  const [folderPlatform, setFolderPlatform] = useState<
+    Map<string, PlatformSource>
+  >(new Map());
+
+  // 用下载历史/溯源里的平台字段覆盖结构启发式（更准）
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([getDownloadHistoryMap(), readTraceMap()])
+      .then(([history, trace]) => {
+        if (cancelled || !saveDirBase) return;
+        const prefix = `${normalizePath(saveDirBase).replace(/\\+$/, '')}\\`;
+        const map = new Map<string, PlatformSource>();
+        const consider = (filePath?: string, platform?: PlatformSource) => {
+          if (!filePath || !platform) return;
+          const normalized = normalizePath(filePath);
+          if (!normalized.startsWith(prefix)) return;
+          const seg = normalized.slice(prefix.length).split('\\')[0];
+          if (seg && !map.has(seg)) map.set(seg, platform);
+        };
+        for (const record of history.values()) {
+          consider(record.filePath, record.platform);
+        }
+        for (const filePath of trace.keys()) {
+          consider(filePath, 'twitter');
+        }
+        setFolderPlatform(map);
+      })
+      .catch((err) => log.warn('读取平台信息失败', err));
+    return () => {
+      cancelled = true;
+    };
+  }, [saveDirBase]);
 
   const sortedFolders = useMemo(
     () => sortFolders(folders, sort),
@@ -250,6 +291,10 @@ export const FolderGrid: React.FC<Props> = ({
                 key={folder.path}
                 folder={folder}
                 categories={categories}
+                platform={
+                  folderPlatform.get(folder.name.toLowerCase()) ||
+                  folder.platform
+                }
                 selectMode={selectMode}
                 selected={isSelected(folder.path)}
                 onToggle={() => toggle(folder.path)}
@@ -311,6 +356,7 @@ export const FolderGrid: React.FC<Props> = ({
 interface FolderCardProps {
   folder: LibraryRootFolder;
   categories: { id: string; name: string }[];
+  platform?: PlatformSource;
   selectMode: boolean;
   selected: boolean;
   onToggle: () => void;
@@ -323,6 +369,7 @@ interface FolderCardProps {
 const FolderCard: React.FC<FolderCardProps> = ({
   folder,
   categories,
+  platform,
   selectMode,
   selected,
   onToggle,
@@ -438,6 +485,7 @@ const FolderCard: React.FC<FolderCardProps> = ({
             )
           )}
         </span>
+        <PlatformBadge platform={platform} />
       </li>
     </Dropdown>
   );

@@ -120,6 +120,7 @@ src-tauri/
   - 直接含媒体（X）→ 文件网格（图/视频）
   - 含子文件夹（Pawchive `创作者/帖子标题/`）→ 顶部切换 **平铺 / 按文件夹**：平铺=递归所有媒体文件网格；按文件夹=帖子文件夹列表 → 进入看文件（支持多级下钻 + 面包屑）
 - **右键菜单（统一操作入口）**：一级文件夹右键 = 打开 / 在资源管理器中打开 / 标签（子菜单，逐项勾选切换，可多标签）/ 新建标签并添加 / 属性 / 恢复默认缩略图（仅设过自定义封面时）；子文件夹右键 = 打开 / 在资源管理器中打开 / 属性；文件右键 = 打开（系统默认程序）/ 在资源管理器中打开 / 打开原网页（有推文信息时）/ 设为文件夹缩略图（仅图片，作用于当前一级作者文件夹）/ 删除文件。⚠️ 卡片右上角 `⋯` 按钮已移除（统一走右键，避免与右键菜单重复）；不再有独立「移出分类」（改为标签子菜单里的勾选切换）
+- **平台标记**：一级文件夹卡片**右下角**显示平台小图标（X / Pawchive，白底圆，黑色 X 标才看得见）。判定：下载历史/溯源里的 `platform` 字段优先，否则用**结构启发式**（含子文件夹≈Pawchive，直接含媒体≈X，`summarizeFolder` 里算）。图标为**内置静态资源**（`src/assets/platform-icons/x.png`、`pawchive.png`，取自各站 favicon，Vite 直接 import，**离线可用、不联网**），`components/library/PlatformBadge.tsx`
 - **属性弹窗**（`FolderProperties`）：展示 名称 / 标签 / 媒体数 / 全部文件数 / 占用空间 / 路径。占用空间由 Rust `get_folder_stats` 递归统计
 - **原推文关联（本地库）**：图片走 antd **原生全屏预览**（不改变窗口、不新开窗口），视频弹窗播放；打开媒体时右侧**独立叠加**一条推文信息条（`components/library/TweetSidebar.tsx`，单独 portal 渲染，覆盖不挤占图像）：头像 · 昵称 · @ID · 正文 · 日期。交互：**点头像/@ID → 作者主页**；**点日期 → 原推文**；条内右上角关闭。文件右键另有「打开原网页」。文件 → 推文信息按优先级解析（`utils/library/trace.ts` 的 `resolveFileTweetInfo`）：
   1. **下载历史** `downloads.jsonl`（最准，含正文/头像）；记录新增 `postUrl`/`platform`/`avatar` 字段（2026-09 起写入，旧记录无 postUrl 时按 twitter 用 `用户名+推文ID` 拼链接）
@@ -127,7 +128,7 @@ src-tauri/
   3. **文件名反解**（方向 A，离线）：把当前文件名模板转正则，抠出 `POST_ID`/`USER_SCREEN_NAME`/`POST_TIME`（模板须含这些占位符，且需与下载时一致），够显示作者/时间/链接，拿不到正文/头像（头像/昵称会按用户名 `getUser` 现拉一次并缓存）
 - **信息条与关闭按钮**：信息条会挡住 antd 预览自带的右上角关闭按钮与**右切换箭头**，故用 `body.library-tweet-bar-open` + CSS 隐藏关闭按钮、并把右切换箭头挪到信息条左侧、给**视频弹窗**（`.library-video-wrap`）加右内边距（**均保留可用**，关闭统一走信息条右上角）。信息条**左上角可折叠**（折叠后退到右边缘的小按钮）。头像来源优先级：下载历史/溯源记录 → **订阅里同用户名的头像** → 按用户名 `getUser` 现拉（内存缓存）；头像**经 Rust 后端按代理拉取**（`hooks/useRemoteImage.ts`，避免 WebView 直连被墙裂图，失败回退直连）。（曾试过「独立全屏窗口」方案，因新窗口黑屏闪屏不优雅而放弃。）
 - **联网溯源（方向 B）**：设置页「重新溯源本地库（联网）」按钮（`services/library-trace.ts` + `stores/library-trace.ts`）。流程：扫各作者文件夹 → 文件名反解出推文 ID（筛出 X 作者）→ `getUser` 拿 userId → `getUserMedias` 逐页拉取 → 用**下载模板**算出期望本地路径并 `fs.exists` 校验 → 命中写入 `library-trace.json`（增量落盘、可取消、后台常驻）。⚠️ 仅 X；文件夹名须为用户名（screen name）；每作者最多 40 页；已删除推文无法找回；Pawchive 不适用；需要 Cookie
-- **缩略图缓存**：图片不再直接加载原图，而是生成最长边 400px 的 jpg 缩略图缓存到 `%APPDATA%\p-spider\thumb-cache\<hash>.jpg`，命中即秒开（`utils/thumbnail.ts`）。生成方式：`fs.readBinaryFile` 读字节 → `createImageBitmap` 解码 → canvas 缩放 → `toBlob` → `fs.writeBinaryFile`（**避开 asset 跨源 canvas 污染**）。并发限 2 + 同路径去重；进入视口才生成（`LocalThumb` 组件 + IntersectionObserver）。⚠️ 视频暂无缩略图（仍用 `<video>` 首帧 + 播放按钮）；缓存 key 仅按路径，文件被替换需手动清缓存
+- **缩略图缓存**：图片不再直接加载原图，而是生成最长边 400px 的 jpg 缩略图缓存到 `%APPDATA%\p-spider\thumb-cache\<hash>.jpg`，命中即秒开（`utils/thumbnail.ts`）。生成方式：`fs.readBinaryFile` 读字节 → `createImageBitmap` 解码 → canvas 缩放 → `toBlob` → `fs.writeBinaryFile`（**避开 asset 跨源 canvas 污染**）。并发限 2 + 同路径去重；进入视口才生成（`LocalThumb` 组件 + IntersectionObserver）。设置页可**「一键生成缩略图缓存」**：扫描保存目录全部图片并预生成（已缓存跳过；后台任务、可取消，`services/library-thumb-cache.ts` + `stores/library-thumb-cache.ts`），完成后刷新占用显示。⚠️ 视频暂无缩略图（仍用 `<video>` 首帧 + 播放按钮）；缓存 key 仅按路径，文件被替换需手动清缓存
 - **删除文件**：文件右键「删除文件」→ `fs.removeFile` 永久删除 + 删除对应缩略图缓存，确认弹窗后执行，删完自动重扫当前目录
 - **自定义缩略图**：文件右键「设为文件夹缩略图」（仅图片）可把某张图设为所属**一级作者文件夹**的封面，覆盖默认的「文件夹内首图」。存于 store 的 `folderCovers`（一级文件夹名 → 图片路径）；文件夹右键「恢复默认缩略图」可清除
 - **排序**：一级文件夹支持「名称 A→Z / Z→A、日期 新→旧 / 旧→新、媒体数 多→少 / 少→多」（**默认 日期 新→旧**）；文件支持「名称 A→Z / Z→A、日期 新→旧 / 旧→新、类型（图片在前）」（**默认 名称 Z→A**）。排序选择为组件内 state（未持久化）。自然排序（`localeCompare` + `numeric`）
@@ -142,8 +143,12 @@ src-tauri/
   - `utils/asset.ts`：`toAssetUrl`（Tauri asset 协议，通用）
   - `services/library-actions.ts`：`deleteLibraryFiles`（删除文件 + 清缩略图，FileGrid 单删与 FolderDetail 批删共用）
   - `services/library-trace.ts`：`runLibraryTrace`（联网溯源批量任务）
+  - `services/library-thumb-cache.ts`：`runThumbCache`（一键预生成缩略图缓存批量任务）
   - `stores/library-trace.ts`：溯源进度状态（后台常驻、可取消）
+  - `stores/library-thumb-cache.ts`：缩略图缓存生成进度状态（后台常驻、可取消）
   - `hooks/useSelection.ts`：多选状态（FolderGrid / FolderDetail 共用）
+  - `hooks/useRemoteImage.ts`：远程图片经 Rust（走代理）拉取转 blob（头像用）
+  - `src/assets/platform-icons/`：平台标记图标（X / Pawchive，静态资源）
   - `src-tauri/src/fsutil.rs`：`get_path_mtimes`（批量取路径 mtime，供日期排序）、`get_folder_stats`（递归统计文件数与占用空间，供属性）
   - `utils/thumbnail.ts`：缩略图缓存（获取/生成/单删/全清 + 并发控制）
   - `utils/shell.ts`：`showInFolder`（资源管理器定位）、`openPath`（系统默认程序打开）
@@ -215,6 +220,7 @@ src-tauri/
 > **待办（下轮）**：下载层 errorCode 16 退避、缩略图/大文件下载体验细节
 > **本地库体验优化（2026-09，1.2.1）**：默认排序（一级=日期新→旧、文件夹内=名称Z→A）、文件日期排序按天+文件名辅助、文件右键「设为文件夹缩略图」（`folderCovers`）、移除卡片右上角 `⋯` 与多选按钮图标、工具栏窄窗适配、**原推文关联**（窗口内 antd 预览 + 右侧独立叠加信息条：头像/昵称/@ID/正文/日期，点头像→主页、点日期→原推文；来源：下载历史 → 联网溯源 `library-trace.json` → 文件名反解）、**设置页「重新溯源本地库（联网）」**
 > **窗口自适应（1.2.1）**：启动时 `useBootstrap` 的 `window` 流程按**当前显示器工作区**计算尺寸（宽 `min(1280, 92%)`、高 `min(920, 85%)`）并居中，解决高 DPI/多屏下默认 1280x920 超出可用高度、底部被任务栏遮挡；`tauri.conf.json` 窗口另加 `center: true`。
+> **平台标记（1.2.2，未发版）**：本地库一级文件夹卡片右下角显示 X / Pawchive 图标；判定=历史/溯源 `platform` 优先、否则结构启发式；图标为内置静态资源 `src/assets/platform-icons/`（取自各站 favicon，离线可用）。
 > **原生右键菜单屏蔽（1.2.1）**：`main.tsx` 启动时全局拦截 `contextmenu` 并 `preventDefault`（输入框/`contenteditable` 除外，保留右键粘贴），去掉 WebView 自带的「后退/刷新/另存图片」菜单；自定义菜单用 antd Dropdown 的 `contextMenu` 触发，不受影响。
 
 ## 如何发布新版
