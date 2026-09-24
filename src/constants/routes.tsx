@@ -8,9 +8,11 @@ import {
   BarChartOutlined,
   ClockCircleOutlined,
   AppstoreOutlined,
+  FolderOutlined,
 } from '@ant-design/icons';
 import { Homepage } from '../pages/Homepage';
 import { Archiver } from '../pages/Archiver';
+import { LibraryPage } from '../pages/Library';
 import { DownloadManagement } from '../pages/DownloadManagement';
 import { SubscriptionPage } from '../pages/Subscription';
 import { StatisticsPage } from '../pages/Statistics';
@@ -30,6 +32,12 @@ export const ROUTES: Route[] = [
     name: 'Pawchive',
     icon: <AppstoreOutlined />,
     element: <Archiver />,
+  },
+  {
+    id: 'library',
+    name: '本地库',
+    icon: <FolderOutlined />,
+    element: <LibraryPage />,
   },
   {
     id: 'subscription',

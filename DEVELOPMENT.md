@@ -24,6 +24,7 @@ src/
   pages/            页面组件
     Homepage.tsx        主页（X 检索 + 下载配置）
     Archiver.tsx        Pawchive 检索页
+    Library.tsx         本地库（分类 + 文件夹/文件浏览）
     Subscription.tsx    订阅管理
     Statistics.tsx      统计（柱状图 + 排行）
     Timeline.tsx        时间流（近7天下载记录）
@@ -33,12 +34,14 @@ src/
   components/       通用组件
     homepage/DownloadController.tsx  主页下载/订阅按钮
     archiver/           Pawchive 页组件（网格/批量下载）
+    library/            本地库组件（分类栏/文件夹网格/详情/文件网格）
     download-management/  下载列表
     settings/           设置项组件
   stores/           状态管理（Zustand + persist）
     subscription.ts      订阅 store + 调度循环（每1秒扫一次，到点检查）
     download.ts          下载任务 store + aria2 状态同步
     download-history.ts  下载历史（jsonl 文件）
+    library.ts           本地库分类（library.json）
     archiver-browse.ts   多源合并浏览 store
     settings.ts / app-state.ts / route.ts / homepage.ts
   twitter/
@@ -53,6 +56,7 @@ src/
   ipc/network.ts     调用 Rust 网络命令
   utils/
     aria2.ts            aria2 RPC 客户端（WebSocket）
+    library.ts          本地库扫描（一级目录/封面/递归媒体/媒体类型判断）
     log.ts              日志
 src-tauri/
   src/main.rs         Tauri 入口，注册命令
@@ -106,20 +110,37 @@ src-tauri/
 - `download.ts`：`createCreationTask`（爬虫任务，带 dateRange/媒体类型过滤）→ `batchCreateDownloadTask`（批量 addUri + tellStatus）
 - 已知边界：大批量任务时 aria2 RPC 批量状态查询可能漏项，`statusMap[gid]` 缺失时兜底为 Active（防崩溃，但状态可能短暂不准）
 
-### 本地库（规划中，未实现）
+### 本地库（已实现，2026-09）
 
-> 需求：在 p-spider 内浏览本地已下载文件并按分类管理（如"真人cos"分类下挂 `PoppaChan 🍑`、`白栎Shirly` 等作者文件夹）。
+> 需求：在 p-spider 内浏览本地已下载文件并按标签管理（如"真人cos"标签下挂 `PoppaChan 🍑`、`白栎Shirly` 等作者文件夹）。
 
-- **分类**：单级分类（分类名 → 一级文件夹列表）。管理对象 = `saveDirBase` 下的**一级文件夹**（X 是作者名，Pawchive 是创作者名）
-- **页面**「本地库」：左侧分类栏（全部/未分类/自定义，可新建/改名/删除），右侧当前分类下的文件夹卡片网格（封面取文件夹内首图 + 名称 + 归类操作）
+- **标签**：单级标签（标签名 → 一级文件夹名列表），**一个文件夹可打多个标签**。管理对象 = `saveDirBase` 下的**一级文件夹**（X 是作者名，Pawchive 是创作者名）；未打任何标签即「未打标签」
+- **页面**「本地库」：左侧标签栏（全部/未打标签/自定义，可新建/改名/删除），右侧当前标签下的文件夹卡片网格（封面取文件夹内首图 + 名称 + 媒体数 + 标签数角标）
 - **进入文件夹**：
   - 直接含媒体（X）→ 文件网格（图/视频）
-  - 含子文件夹（Pawchive `创作者/帖子标题/`）→ 顶部切换 **平铺 / 按文件夹**：平铺=递归所有媒体文件网格；按文件夹=帖子文件夹列表 → 进入看文件
-- **文件**：网格预览 + 系统资源管理器打开
-- **数据**：分类存 `%APPDATA%\p-spider\library.json`（zustand persist + createTauriFileStorage）
-- **代码落点**：`stores/library.ts`（分类 CRUD + 扫描）、`utils/library.ts`（扫描 saveDirBase/媒体类型判断/找封面）、`pages/Library.tsx` + `components/library/`、路由注册
-- **关键依赖**：本地图片显示用 `convertFileSrc`（Tauri v1 asset 协议）。`tauri.conf.json` 已加 `protocol.asset: true` + `assetScope: ["**"]`（**待验证**能否显示任意路径本地图）
-- **参考**：用户旧项目 **xibao（`E:\AIproject`）** 是成熟的标签树文件管理器（Python/Flask + 原生 JS，稳定文件 ID、无限级标签）。思路可借鉴，技术栈不同不直接复用。当前版本先做单级分类，架构预留升级空间
+  - 含子文件夹（Pawchive `创作者/帖子标题/`）→ 顶部切换 **平铺 / 按文件夹**：平铺=递归所有媒体文件网格；按文件夹=帖子文件夹列表 → 进入看文件（支持多级下钻 + 面包屑）
+- **右键菜单（统一操作入口）**：一级文件夹右键 = 打开 / 在资源管理器中打开 / 标签（子菜单，逐项勾选切换，可多标签）/ 新建标签并添加 / 属性；子文件夹右键 = 打开 / 在资源管理器中打开 / 属性；文件右键 = 打开（系统默认程序）/ 在资源管理器中打开 / 删除文件。一级文件夹卡片另保留右上角 `⋯` 按钮触发同一菜单。⚠️ 不再有独立「移出分类」（改为标签子菜单里的勾选切换，避免在「全部」下语义混乱）
+- **属性弹窗**（`FolderProperties`）：展示 名称 / 标签 / 媒体数 / 全部文件数 / 占用空间 / 路径。占用空间由 Rust `get_folder_stats` 递归统计
+- **缩略图缓存**：图片不再直接加载原图，而是生成最长边 400px 的 jpg 缩略图缓存到 `%APPDATA%\p-spider\thumb-cache\<hash>.jpg`，命中即秒开（`utils/thumbnail.ts`）。生成方式：`fs.readBinaryFile` 读字节 → `createImageBitmap` 解码 → canvas 缩放 → `toBlob` → `fs.writeBinaryFile`（**避开 asset 跨源 canvas 污染**）。并发限 2 + 同路径去重；进入视口才生成（`LocalThumb` 组件 + IntersectionObserver）。⚠️ 视频暂无缩略图（仍用 `<video>` 首帧 + 播放按钮）；缓存 key 仅按路径，文件被替换需手动清缓存
+- **删除文件**：文件右键「删除文件」→ `fs.removeFile` 永久删除 + 删除对应缩略图缓存，确认弹窗后执行，删完自动重扫当前目录
+- **排序**：一级文件夹支持「名称 A→Z / Z→A、日期 新→旧 / 旧→新、媒体数 多→少 / 少→多」；文件支持「名称 A→Z / Z→A、日期 新→旧 / 旧→新、类型（图片在前）」。排序选择为组件内 state（未持久化）。自然排序（`localeCompare` + `numeric`）
+- **日期来源**：Tauri v1 `fs` 无 stat/mtime API，故新增 Rust 命令 `get_path_mtimes(paths)`（`src-tauri/src/fsutil.rs`）批量取修改时间（毫秒）。文件夹取**目录自身 mtime**（新建文件会更新，近似「最近下载时间」），文件取文件 mtime
+- **多选批量操作**：工具栏「多选」按钮（位于排序左侧）。一级文件夹：勾选多个 → 添加标签 / 移除标签 / 清空标签（仅一级，标签只作用于一级文件夹）；文件：勾选多张 → 批量删除。支持全选/取消全选、清空选择；多选下点击卡片=勾选（文件多选时禁用图片预览），选中项高亮描边。子文件夹不支持多选（未做批量归档）
+- **文件预览**：图片走 antd `Image.PreviewGroup`（网格用小图，点开看原图），视频点击弹窗播放
+- **数据**：标签存 `%APPDATA%\p-spider\library.json`（zustand persist + `createTauriFileStorage`，version 1；多标签仍是「标签→folders[]」结构，无需迁移）
+- **代码落点**：
+  - `utils/library.ts`：`listRootFolders`（列一级目录）、`summarizeFolder(s)`（递归统计媒体数+取封面，带缓存）、`scanDirectory`（一次 `readDir(recursive:true)` 产出「递归文件 + 直接子文件夹汇总」）、`fetchMtimes`/`fetchFolderStats`（调 Rust）、`formatBytes`、`sortFolders`/`sortFiles`、媒体扩展名判断、`toAssetUrl`、`mapLimit`
+  - `src-tauri/src/fsutil.rs`：`get_path_mtimes`（批量取路径 mtime，供日期排序）、`get_folder_stats`（递归统计文件数与占用空间，供属性）
+  - `utils/thumbnail.ts`：缩略图缓存（获取/生成/单删/全清 + 并发控制）
+  - `utils/shell.ts`：`showInFolder`（资源管理器定位）、`openPath`（系统默认程序打开）
+  - `stores/library.ts`：标签 CRUD + `addFolderToCategory`/`removeFolderFromCategory`/`clearFolderCategories`/`getFolderCategoryIds`（多标签）
+  - `pages/Library.tsx` + `components/library/`（`CategorySidebar` / `FolderGrid` / `FolderDetail` / `FileGrid` / `FolderCover` / `LocalThumb` / `SortSelect` / `FolderProperties`）、路由 `library`
+  - 设置页「本地库」区块：清除缩略图缓存按钮 + 当前缓存占用显示（`Settings.tsx`，占用走 `getThumbCacheStats` → Rust `get_folder_stats`）
+- **目录判定关键点**：Tauri v1 `fs.readDir(dir, {recursive:false})` 的条目 **无法区分文件/目录**（`children` 均为 null）。因此：列一级目录时用非递归 + 按媒体扩展名过滤非目录项；判断目录一律用 `readDir(recursive:true)` 后看 `Array.isArray(entry.children)`
+- **本地图片显示**：用 `convertFileSrc`（Tauri v1 asset 协议，Windows 下 `https://asset.localhost/<编码路径>`）。`tauri.conf.json` 已加 `protocol.asset: true` + `assetScope: ["**"]`。⚠️ **浏览器预览（`pnpm dev`）下 `window.__TAURI__` 不存在，`toAssetUrl` 捕获异常返回空串 → 显示占位；需 `pnpm tauri dev` 桌面实测确认任意路径本地图能否显示**
+- **性能**：一级文件夹封面扫描 `mapLimit` 并发 4，结果按路径缓存（`clearFolderSummaryCache()` 可清）；详情页一次递归 readDir 同时得到文件与子文件夹封面，无额外扫描
+- **参考**：用户旧项目 **xibao（`E:\AIproject`）** 是成熟的标签树文件管理器，思路可借鉴。当前单级分类，架构预留升级空间
+
 
 ### 回滚点（1.1.3）
 
@@ -159,11 +180,14 @@ src-tauri/
    - 关键难点（已解决）：`DownloadTask` 改存 `PlatformPost`/`PlatformMedia`；新增平台只需实现 `PlatformAdapter`（可复用 archiver 工厂）+ 注册 `getAdapter`
 
 3. **HomeTimeline（真首页动态）未实现**：GraphQL hash 硬编码在 X 混淆 JS 里，频繁变化，第三方库维护的 hash 也易失效（实测 403）。如需实现需引入无头浏览器动态抓取 hash，工程量大且不稳定，已放弃
-4. **asset 协议本地图片**：时间流曾尝试 `convertFileSrc` 加载本地文件（F:\ 下），Tauri v1 的 asset scope 默认不含任意路径，改用推特 CDN 缩略图规避
+4. **asset 协议本地图片**：时间流曾尝试 `convertFileSrc` 加载本地文件（F:\ 下），Tauri v1 的 asset scope 默认不含任意路径，改用推特 CDN 缩略图规避。本地库已配 `protocol.asset: true` + `assetScope: ["**"]`，**待 `pnpm tauri dev` 桌面实测**本地图能否显示；若被拦需查 asset scope 匹配规则
 5. **aria2 状态批量查询**：任务量大时可能漏项（见上），如需优化应分批创建任务
 6. **Cookie 存储**：明文存在 `app-state.json`，仅本机使用可接受
 7. **订阅 store 职责偏重**：`subscription.ts` 同时依赖抓推文、aria2、下载、cookie 多模块。当前规模可接受，扩展前评估是否需要拆分调度/抓取/下载
-8. **本地 fork 继承的历史 tag 清理（待办）**：仓库本地残留 x-spider 时代的历史 tag（v1.0.3~v2.2.2 等，指向旧 commit，未 push 远端），不影响使用但较乱。清理：`git tag | ForEach-Object { git tag -d $_ }`（注意保留自己打的 release tag）。⚠️ 发布新版本前若本地存在同名旧 tag（如 v1.1.0 曾指向旧 commit），必须 `git tag -d v<ver>` 删除，否则 `gh release create` 报 "tag exists but not pushed"
+8. **本地库性能**：一级文件夹封面扫描会递归读取整个子目录树，媒体极多时首次加载偏慢（已并发 4 + 缓存）；缩略图已磁盘缓存（首次生成后秒开）。如需进一步优化可做「浅层找封面」或持久化文件夹汇总缓存
+9. **含空格路径打开资源管理器**：`utils/shell.ts` 原用 `path.split(' ')` 拼 explorer 参数，带空格路径会失效；已改为整段路径作为单个参数（Rust `Command::args` 会自行加引号）
+10. **本地库删除为永久删除**：文件右键删除走 `fs.removeFile`，不进回收站；已加确认弹窗
+11. **本地 fork 继承的历史 tag 清理（待办）**：仓库本地残留 x-spider 时代的历史 tag（v1.0.3~v2.2.2 等，指向旧 commit，未 push 远端），不影响使用但较乱。清理：`git tag | ForEach-Object { git tag -d $_ }`（注意保留自己打的 release tag）。⚠️ 发布新版本前若本地存在同名旧 tag（如 v1.1.0 曾指向旧 commit），必须 `git tag -d v<ver>` 删除，否则 `gh release create` 报 "tag exists but not pushed"
 
 > 说明：更新检查已恢复（`src/github/api.ts` + `src/hooks/useCheckUpdate.ts`），指向 `mdo730/P-spider` 的 releases，按 `tag_name`（须带 `v` 前缀）与当前版本比较。
 > 已发布：**v1.1.0**（2026-08-28，Pawchive 平台 + 下载速度 + 多项修复），GitHub Description/Topics/README 已同步。
@@ -173,6 +197,8 @@ src-tauri/
 > - creator 填充统一：`platforms/archiver.ts` 导出 `withCreator`，三处消费方统一调用（目录命名不再依赖手写 map）
 > - aria2 并发控制：`--max-concurrent-downloads=8 --max-connection-per-server=4`，缓解批量下载触发 Cloudflare 掐断（429 / Download aborted）
 > - 已知待改（建筑层，下轮）：errorCode 16 退避、缩略图/大文件下载体验细节
+> **v1.2.0（2026-09-24，本地库）**：新增「本地库」页（多标签管理 + 本地文件夹/文件浏览），落点 `stores/library.ts`、`utils/library.ts`、`utils/thumbnail.ts`、`components/library/`、`pages/Library.tsx`、路由 `library`、Rust `src-tauri/src/fsutil.rs`；含右键菜单统一操作、**多标签**、属性弹窗（文件数/占用空间）、缩略图磁盘缓存（设置页可查看占用并清除）、文件删除、排序（名称/日期/媒体数）、多选批量加/减标签与删除；顺带修复 `utils/shell.ts` 含空格路径定位。⚠️ asset 协议显示本地图建议桌面实测
+> **待办（下轮）**：本地库有界重构（抽 `services/library-actions.ts` 写操作 / `utils/asset.ts` / `useSelection` hook，拆 `utils/library.ts`）；下载层 errorCode 16 退避、缩略图/大文件下载体验细节
 
 ## 如何发布新版
 

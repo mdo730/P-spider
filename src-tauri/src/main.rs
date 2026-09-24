@@ -1,6 +1,7 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod fsutil;
 mod network;
 
 use tauri::{CustomMenuItem, Manager, SystemTray, SystemTrayEvent, SystemTrayMenu, WindowEvent};
@@ -44,6 +45,8 @@ fn main() {
           network::set_auto_start,
           network::get_auto_start,
           network::quit_app,
+          fsutil::get_path_mtimes,
+          fsutil::get_folder_stats,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,10 +1,14 @@
 /* eslint-disable react/prop-types */
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { invoke, dialog, fs } from '@tauri-apps/api';
 import { PageHeader } from '../components/PageHeader';
 import { Section } from '../components/settings/Section';
 import { Item } from '../components/settings/Item';
-import { DownloadOutlined, GlobalOutlined } from '@ant-design/icons';
+import {
+  DownloadOutlined,
+  FolderOutlined,
+  GlobalOutlined,
+} from '@ant-design/icons';
 import Joi from 'joi';
 import { SavePathSelector } from '../components/settings/SavePathSelector';
 import { App, Button, Input, Radio, Switch } from 'antd';
@@ -12,10 +16,26 @@ import { FileNameTemplateInput } from '../components/settings/FileNameTemplateIn
 import { showInFolder } from '../utils/shell';
 import { path } from '@tauri-apps/api';
 import { useSubscriptionStore } from '../stores/subscription';
+import { clearThumbCache, getThumbCacheStats } from '../utils/thumbnail';
+import { LibraryFolderStats, formatBytes } from '../utils/library';
 
 export const Settings: React.FC = () => {
   const { message } = App.useApp();
   const { exportSubscriptions, importSubscriptions } = useSubscriptionStore();
+  const [cacheStats, setCacheStats] = useState<LibraryFolderStats | null>(null);
+
+  const refreshCacheStats = async () => {
+    try {
+      setCacheStats(await getThumbCacheStats());
+    } catch (err) {
+      log.warn('读取缓存占用失败', err);
+      setCacheStats(null);
+    }
+  };
+
+  useEffect(() => {
+    refreshCacheStats();
+  }, []);
 
   const onExport = async () => {
     const json = exportSubscriptions();
@@ -123,6 +143,34 @@ export const Settings: React.FC = () => {
         >
           <Switch />
         </Item>
+      </Section>
+      <Section title="本地库" name="library" titleIcon={<FolderOutlined />}>
+        <div className="flex items-center gap-3">
+          <Button
+            danger
+            onClick={async () => {
+              try {
+                await clearThumbCache();
+                message.success('缩略图缓存已清除');
+                refreshCacheStats();
+              } catch (err: any) {
+                message.error(`清除失败：${err?.message || '未知原因'}`);
+              }
+            }}
+          >
+            清除缩略图缓存
+          </Button>
+          <span className="text-sm text-gray-500">
+            当前缓存：
+            {cacheStats
+              ? `${formatBytes(cacheStats.totalBytes)}（${cacheStats.fileCount} 个文件）`
+              : '计算中…'}
+          </span>
+        </div>
+        <p className="text-sm text-gray-400 mt-2">
+          本地库浏览时会为图片生成缩略图缓存（存于应用数据目录
+          thumb-cache）。清除后下次浏览会重新生成，不影响原始文件。
+        </p>
       </Section>
       <Section title="代理" name="proxy" titleIcon={<GlobalOutlined />}>
         <Item label="启用代理" settingKey="enable" valuePropName="checked">
