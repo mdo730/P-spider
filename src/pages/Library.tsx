@@ -15,8 +15,10 @@ import {
   buildTagIndex,
   fetchMtimes,
   listRootFolders,
+  mapLimit,
   matchesFilter,
   normalizeRel,
+  summarizeFolder,
   summarizeFolders,
   toRelPath,
 } from '../utils/library';
@@ -31,6 +33,8 @@ export const LibraryPage: React.FC = () => {
   const [filter, setFilter] = useState<LibraryFilter>(DEFAULT_LIBRARY_FILTER);
   const [rootFolders, setRootFolders] = useState<LibraryRootFolder[]>([]);
   const [loading, setLoading] = useState(false);
+  const [tagMatched, setTagMatched] = useState<LibraryRootFolder[]>([]);
+  const [tagLoading, setTagLoading] = useState(false);
   const [keyword, setKeyword] = useState('');
   const [opened, setOpened] = useState<LibraryRootFolder | null>(null);
   const [subStack, setSubStack] = useState<LibrarySubFolder[]>([]);
@@ -88,23 +92,76 @@ export const LibraryPage: React.FC = () => {
     return { all: rootFolders.length, unclassified, byId };
   }, [tags, index, rootFolders, saveDirBase]);
 
+  // 标签筛选：直接展示“命中的文件夹本身”（任意层级），而非包含命中的根文件夹
+  useEffect(() => {
+    if (filter.kind !== 'tags' || !saveDirBase) {
+      setTagMatched([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setTagLoading(true);
+      try {
+        const candidates = new Set<string>();
+        for (const id of filter.tagIds) {
+          for (const tid of index.subtreeIds(id)) {
+            const t = index.byId.get(tid);
+            if (t) t.paths.forEach((p) => candidates.add(normalizeRel(p)));
+          }
+        }
+        const matched = [...candidates].filter((p) =>
+          matchesFilter(index, filter.tagIds, filter.rule, p),
+        );
+        const base = saveDirBase.replace(/[\\/]+$/, '');
+        const absList = matched.map((rel) => ({
+          rel,
+          path: `${base}\\${rel.replace(/\//g, '\\')}`,
+        }));
+        const summaries = await mapLimit(absList, 6, async (f) => ({
+          ...f,
+          summary: await summarizeFolder(f.path),
+        }));
+        const mtimes = await fetchMtimes(summaries.map((f) => f.path));
+        const result: LibraryRootFolder[] = [];
+        summaries.forEach((f, i) => {
+          if (!f.summary) return;
+          result.push({
+            name: f.rel.split('/').pop() || f.rel,
+            path: f.path,
+            ...f.summary,
+            mtime: mtimes[i] ?? undefined,
+          });
+        });
+        if (!cancelled) setTagMatched(result);
+      } catch (err) {
+        log.error('标签筛选失败', err);
+        if (!cancelled) setTagMatched([]);
+      } finally {
+        if (!cancelled) setTagLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [filter, index, saveDirBase]);
+
   const filteredFolders = useMemo(() => {
-    let list = rootFolders;
-    if (filter.kind === 'unclassified') {
-      list = list.filter(
+    let list: LibraryRootFolder[];
+    if (filter.kind === 'tags') {
+      list = tagMatched;
+    } else if (filter.kind === 'unclassified') {
+      list = rootFolders.filter(
         (f) =>
           useLibraryStore.getState().getFolderTagIds(relOf(f.path)).length ===
           0,
       );
-    } else if (filter.kind === 'tags') {
-      list = list.filter((f) =>
-        matchesFilter(index, filter.tagIds, filter.rule, relOf(f.path)),
-      );
+    } else {
+      list = rootFolders;
     }
     const kw = keyword.trim().toLowerCase();
     if (kw) list = list.filter((f) => f.name.toLowerCase().includes(kw));
     return list;
-  }, [rootFolders, filter, index, keyword, saveDirBase]);
+  }, [rootFolders, tagMatched, filter, keyword, saveDirBase]);
 
   const currentDir = subStack.length
     ? subStack[subStack.length - 1].path
@@ -181,7 +238,7 @@ export const LibraryPage: React.FC = () => {
             ) : (
               <FolderGrid
                 folders={filteredFolders}
-                loading={loading}
+                loading={loading || tagLoading}
                 keyword={keyword}
                 onKeywordChange={setKeyword}
                 saveDirBase={saveDirBase}
