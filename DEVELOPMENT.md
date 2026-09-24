@@ -162,6 +162,27 @@ src-tauri/
 - **参考**：用户旧项目 **xibao（`E:\AIproject`）** 是成熟的标签树文件管理器，思路可借鉴。当前单级分类，架构预留升级空间
 
 
+### fig-memo 自用订阅（parukamun）
+
+> 个人自用功能，**不在通用订阅里暴露**，放设置里默认关闭，避免打扰不用的人。
+
+- **位置**：设置 →「parukamun 自用订阅」→ fig-memo（开关默认关 + 「建库」按钮 + 状态）
+- **站点**：`fig-memo-r18.site`（WordPress，REST 全开放免登录）；API 根 `/wp-json/wp/v2`
+- **模式**：
+  - **开关**：开启后记录基线（当前最新帖），**每 24h** 检查一次、下载基线之后的新帖（不回补历史）
+  - **建库**：一键下载**现存全部**文章（含 R18/非公開）
+- **存储**：`保存目录\fig-memo\<帖子标题>\`，原文件名，只下图片（`/wp-json/wp/v2/media?parent=<id>` 取原图，天然不含正文重复引用）；标题超长截断 60 字
+- **元数据**：`%APPDATA%\p-spider\figmemo.jsonl`（每帖一行：postId/标题/分类/日期/链接/图片数）
+- **状态**：`%APPDATA%\p-spider\figmemo-state.json`（enabled/基线/上次检查/每日统计/累计），**不进 subscriptions.json**
+- **分类自动打标**：站点分类落成标签树里根「分类」下的子标签，挂到对应**帖子文件夹**（只标分类，不猜厂商/动作）
+- **计入统计**：`Statistics` 页把 figmemo 作为**独立项**（柱状图 + 排行一行）；下载完成经 `onTaskCompleted` 累加
+- **进时间流**：复用下载历史（`downloads.jsonl`，platform=figmemo、postUrl=帖子链接）
+- **复用下载管线**：`batchCreateDownloadTask`（source=`figmemo`）→ aria2 队列 / 下载管理 / 统计 / 时间流自动打通；`prepareArchiverPostDir` 的「`保存目录/作者名/标题/`」结构天然适配；`aria2DownloadOptions` Referer 按源取（fig-memo 用站点域名）
+- **代码落点**：`services/figmemo.ts`（站点抓取/建库/追新/元数据/自动打标）、`stores/figmemo.ts`（状态 + 24h 调度 + 统计监听，`main.tsx` 副作用 import 常驻）；`PlatformSource` 加 `figmemo`、`PlatformBadge` 加图标
+- ⚠️ 注意：站点改版可能影响解析（都在 `services/figmemo.ts` 内，失败只影响本功能）；R18 内容自行把握
+
+
+
 ### 回滚点（1.1.3）
 
 - git 分支 `backup-1.1.3` → commit `19894a2`（本地；因 github 连接失败暂未 push 远端）
@@ -228,8 +249,9 @@ src-tauri/
 > **待办（下轮）**：下载层 errorCode 16 退避、缩略图/大文件下载体验细节
 > **本地库体验优化（2026-09，1.2.1）**：默认排序（一级=日期新→旧、文件夹内=名称Z→A）、文件日期排序按天+文件名辅助、文件右键「设为文件夹缩略图」（`folderCovers`）、移除卡片右上角 `⋯` 与多选按钮图标、工具栏窄窗适配、**原推文关联**（窗口内 antd 预览 + 右侧独立叠加信息条：头像/昵称/@ID/正文/日期，点头像→主页、点日期→原推文；来源：下载历史 → 联网溯源 `library-trace.json` → 文件名反解）、**设置页「重新溯源本地库（联网）」**
 > **窗口自适应（1.2.1）**：启动时 `useBootstrap` 的 `window` 流程按**当前显示器工作区**计算尺寸（宽 `min(1280, 92%)`、高 `min(920, 85%)`）并居中，解决高 DPI/多屏下默认 1280x920 超出可用高度、底部被任务栏遮挡；`tauri.conf.json` 窗口另加 `center: true`。
-> **平台标记（1.2.2，未发版）**：本地库一级文件夹卡片右下角显示 X / Pawchive 图标；判定=历史/溯源 `platform` 优先、否则结构启发式；图标为内置静态资源 `src/assets/platform-icons/`（取自各站 favicon，离线可用）。
-> **本地库多级标签树（1.2.2，未发版；回滚点 backup-1.2.2）**：标签改为**单父森林 + 任意文件夹**（`library.json` v2）；左栏标签树（新建/重命名/删除/「移动到…」改父级）；打标签用树形多选弹窗；展示取末端标签展开祖先链；筛选（单选默认 / 「多标签」多选 + 交集并集，含子树计数）——对齐 xibao 逻辑。
+> **平台标记（1.3.0，未发版）**：本地库一级文件夹卡片右下角显示 X / Pawchive 图标；判定=历史/溯源 `platform` 优先、否则结构启发式；图标为内置静态资源 `src/assets/platform-icons/`（取自各站 favicon，离线可用）。
+> **本地库多级标签树（1.3.0，未发版；回滚点 backup-1.2.2）**：标签改为**单父森林 + 任意文件夹**（`library.json` v2）；左栏标签树（新建/重命名/删除/「移动到…」改父级）；打标签用树形多选弹窗；展示取末端标签展开祖先链；筛选（单选默认 / 「多标签」多选 + 交集并集，含子树计数）——对齐 xibao 逻辑。
+> **fig-memo 自用订阅（1.3.0，未发版）**：设置→「parukamun 自用订阅」→ fig-memo（默认关）；开关每 24h 追新、建库按钮下现存全部；存 `保存目录\fig-memo\<标题>\`；元数据 `figmemo.jsonl`、状态 `figmemo-state.json`；分类自动落成标签；计入统计（独立项）+ 时间流。落点 `services/figmemo.ts` + `stores/figmemo.ts`。
 > **原生右键菜单屏蔽（1.2.1）**：`main.tsx` 启动时全局拦截 `contextmenu` 并 `preventDefault`（输入框/`contenteditable` 除外，保留右键粘贴），去掉 WebView 自带的「后退/刷新/另存图片」菜单；自定义菜单用 antd Dropdown 的 `contextMenu` 触发，不受影响。
 
 ## 如何发布新版

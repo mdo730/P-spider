@@ -167,9 +167,13 @@ function aria2DownloadOptions(task: DownloadTask): Record<string, any> {
     out: task.fileName,
   };
   if (task.source !== 'twitter') {
+    const referer =
+      task.source === 'figmemo'
+        ? 'https://fig-memo-r18.site/'
+        : 'https://pawchive.pw/';
     options.header = [
       'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Referer: https://pawchive.pw/',
+      `Referer: ${referer}`,
       'Accept: image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
       'Accept-Language: zh-CN,zh;q=0.9,en;q=0.8',
       'Accept-Encoding: gzip, deflate, br',

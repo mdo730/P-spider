@@ -5,7 +5,9 @@ import dayjs from 'dayjs';
 import React, { useMemo, useState } from 'react';
 import { PageHeader } from '../components/PageHeader';
 import { useSubscriptionStore } from '../stores/subscription';
+import { useFigmemoStore } from '../stores/figmemo';
 import { buildUserUrl } from '../twitter/url';
+import figmemoIcon from '../assets/platform-icons/figmemo.png';
 
 const RANGE_OPTIONS = [
   { value: 7, label: '近 7 天' },
@@ -69,6 +71,8 @@ function getNiceTicks(maxValue: number): number[] {
 export const StatisticsPage: React.FC = () => {
   const [range, setRange] = useState(30);
   const subscriptions = useSubscriptionStore((s) => s.subscriptions);
+  const figmemoStats = useFigmemoStore((s) => s.dailyStats);
+  const figmemoCount = useFigmemoStore((s) => s.downloadedCount);
 
   const dateKeys = useMemo(() => getDateKeys(range), [range]);
 
@@ -84,9 +88,14 @@ export const StatisticsPage: React.FC = () => {
           count += stat.count || 0;
         }
       }
+      const fm = figmemoStats?.[date];
+      if (fm) {
+        bytes += fm.bytes || 0;
+        count += fm.count || 0;
+      }
       return { date, bytes, count };
     });
-  }, [dateKeys, subscriptions]);
+  }, [dateKeys, subscriptions, figmemoStats]);
 
   const maxCount = useMemo(
     () => Math.max(...chartData.map((d) => d.count), 1),
@@ -98,32 +107,58 @@ export const StatisticsPage: React.FC = () => {
   const axisMax = ticks[ticks.length - 1];
 
   const tableData = useMemo(() => {
-    return subscriptions
-      .map((sub) => {
-        let rangeCount = 0;
-        let rangeBytes = 0;
-        let totalBytes = 0;
-        for (const [date, stat] of Object.entries(sub.dailyStats || {})) {
-          const isInRange = dateKeys.includes(date);
-          if (isInRange) {
-            rangeCount += stat.count || 0;
-            rangeBytes += stat.bytes || 0;
-          }
-          totalBytes += stat.bytes || 0;
+    const rows = subscriptions.map((sub) => {
+      let rangeCount = 0;
+      let rangeBytes = 0;
+      let totalBytes = 0;
+      for (const [date, stat] of Object.entries(sub.dailyStats || {})) {
+        const isInRange = dateKeys.includes(date);
+        if (isInRange) {
+          rangeCount += stat.count || 0;
+          rangeBytes += stat.bytes || 0;
         }
-        return {
-          key: sub.id,
-          username: sub.username,
-          displayName: sub.displayName,
-          avatar: sub.avatar,
-          rangeCount,
-          rangeBytes,
-          totalCount: sub.downloadedCount,
-          totalBytes,
-        };
-      })
-      .sort((a, b) => b.rangeCount - a.rangeCount);
-  }, [subscriptions, dateKeys]);
+        totalBytes += stat.bytes || 0;
+      }
+      return {
+        key: sub.id,
+        username: sub.username,
+        displayName: sub.displayName as string | undefined,
+        avatar: sub.avatar as string | undefined,
+        rangeCount,
+        rangeBytes,
+        totalCount: sub.downloadedCount,
+        totalBytes,
+        isFigmemo: false,
+      };
+    });
+
+    // fig-memo 作为独立统计项
+    let fmRangeCount = 0;
+    let fmRangeBytes = 0;
+    let fmTotalBytes = 0;
+    for (const [date, stat] of Object.entries(figmemoStats || {})) {
+      if (dateKeys.includes(date)) {
+        fmRangeCount += stat.count || 0;
+        fmRangeBytes += stat.bytes || 0;
+      }
+      fmTotalBytes += stat.bytes || 0;
+    }
+    if (figmemoCount > 0 || fmTotalBytes > 0) {
+      rows.push({
+        key: 'figmemo',
+        username: 'fig-memo',
+        displayName: 'fig-memo',
+        avatar: figmemoIcon as string | undefined,
+        rangeCount: fmRangeCount,
+        rangeBytes: fmRangeBytes,
+        totalCount: figmemoCount,
+        totalBytes: fmTotalBytes,
+        isFigmemo: true,
+      });
+    }
+
+    return rows.sort((a, b) => b.rangeCount - a.rangeCount);
+  }, [subscriptions, dateKeys, figmemoStats, figmemoCount]);
 
   const overallRangeCount = useMemo(
     () => chartData.reduce((acc, d) => acc + d.count, 0),
@@ -260,17 +295,23 @@ export const StatisticsPage: React.FC = () => {
                       alt="头像"
                       className="w-7 h-7 rounded-full mr-2 object-cover"
                     />
-                    <a
-                      href={buildUserUrl(row.username)}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="font-medium"
-                    >
-                      {row.displayName || row.username}
-                    </a>
-                    <span className="text-gray-400 text-xs ml-1">
-                      @{row.username}
-                    </span>
+                    {row.isFigmemo ? (
+                      <span className="font-medium">fig-memo</span>
+                    ) : (
+                      <>
+                        <a
+                          href={buildUserUrl(row.username)}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="font-medium"
+                        >
+                          {row.displayName || row.username}
+                        </a>
+                        <span className="text-gray-400 text-xs ml-1">
+                          @{row.username}
+                        </span>
+                      </>
+                    )}
                   </div>
                 ),
               },

@@ -3,20 +3,28 @@ import React from 'react';
 import { PlatformSource } from '../../platforms';
 import pawchiveIcon from '../../assets/platform-icons/pawchive.png';
 import xIcon from '../../assets/platform-icons/x.png';
+import figmemoIcon from '../../assets/platform-icons/figmemo.png';
 
 const ICONS: Record<PlatformSource, string> = {
   twitter: xIcon,
   pawchive: pawchiveIcon,
+  figmemo: figmemoIcon,
+};
+
+const LABELS: Record<PlatformSource, string> = {
+  twitter: 'X（推特）',
+  pawchive: 'Pawchive',
+  figmemo: 'fig-memo',
 };
 
 interface Props {
   platform?: PlatformSource;
 }
 
-/** 文件夹卡片右下角的平台标记（X / Pawchive）；图标为内置静态资源，离线可用 */
+/** 文件夹卡片右下角的平台标记（X / Pawchive / fig-memo）；图标为内置静态资源，离线可用 */
 export const PlatformBadge: React.FC<Props> = ({ platform }) => {
   if (!platform) return null;
-  const label = platform === 'pawchive' ? 'Pawchive' : 'X（推特）';
+  const label = LABELS[platform];
   return (
     <span
       title={label}

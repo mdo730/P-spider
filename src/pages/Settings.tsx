@@ -20,6 +20,8 @@ import { clearThumbCache, getThumbCacheStats } from '../utils/thumbnail';
 import { LibraryFolderStats, formatBytes } from '../utils/library';
 import { useLibraryTraceStore } from '../stores/library-trace';
 import { useThumbCacheStore } from '../stores/library-thumb-cache';
+import { useFigmemoStore } from '../stores/figmemo';
+import dayjs from 'dayjs';
 
 export const Settings: React.FC = () => {
   const { message } = App.useApp();
@@ -27,6 +29,30 @@ export const Settings: React.FC = () => {
   const [cacheStats, setCacheStats] = useState<LibraryFolderStats | null>(null);
   const trace = useLibraryTraceStore();
   const thumbCache = useThumbCacheStore();
+  const figmemo = useFigmemoStore();
+
+  const figmemoStatusText = (() => {
+    if (figmemo.running && figmemo.progress) {
+      const p = figmemo.progress;
+      const verb = p.phase === 'building' ? '建库中' : '检查中';
+      return `${verb} ${p.done}/${p.total}…`;
+    }
+    if (figmemo.lastError) return `上次出错：${figmemo.lastError}`;
+    if (figmemo.enabled) {
+      const parts: string[] = ['已开启'];
+      if (figmemo.lastCheckedAt) {
+        parts.push(
+          `上次检查 ${dayjs(figmemo.lastCheckedAt).format('MM-DD HH:mm')}`,
+        );
+      }
+      parts.push(`累计下载 ${figmemo.downloadedCount}`);
+      return parts.join(' · ');
+    }
+    if (figmemo.downloadedCount > 0) {
+      return `未开启 · 累计下载 ${figmemo.downloadedCount}`;
+    }
+    return '默认关闭';
+  })();
 
   const thumbStatusText = (() => {
     if (thumbCache.error) return `失败：${thumbCache.error}`;
@@ -314,6 +340,28 @@ export const Settings: React.FC = () => {
         >
           打开日志文件夹
         </Button>
+      </Section>
+      <Section title="parukamun 自用订阅" name="parukamun">
+        <div className="flex items-center flex-wrap gap-3">
+          <span className="font-medium">fig-memo</span>
+          <Switch
+            checked={figmemo.enabled}
+            onChange={(checked) => figmemo.setEnabled(checked)}
+          />
+          <Button
+            onClick={() => figmemo.build()}
+            loading={figmemo.running && figmemo.progress?.phase === 'building'}
+            disabled={figmemo.running}
+          >
+            建库（下载现存全部文章）
+          </Button>
+          <span className="text-sm text-gray-500">{figmemoStatusText}</span>
+        </div>
+        <p className="text-sm text-gray-400 mt-2">
+          个人自用：订阅 fig-memo（fig-memo-r18.site）。开启后每 24
+          小时检查一次，从开启时刻开始算的新文章会自动下载；「建库」则把现存全部文章下载下来。作者记为
+          fig-memo，计入统计与时间流。
+        </p>
       </Section>
     </>
   );

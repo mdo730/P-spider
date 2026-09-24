@@ -10,6 +10,8 @@ import { Logger } from './utils/log';
 // 副作用 import：确保下载历史模块常驻加载，注册 onTaskCompleted 监听，
 // 使后台订阅下载也能写入历史（时间流数据源）
 import './stores/download-history';
+// 副作用 import：fig-memo 自用订阅的后台调度（24h 追新）+ 统计监听
+import './stores/figmemo';
 
 dayjs.extend(duration);
 dayjs.locale('zh-cn');

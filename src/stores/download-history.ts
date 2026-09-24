@@ -37,8 +37,8 @@ export interface DownloadHistoryRecord {
   downloadedAt: number;
   /** 来源：subscription=订阅自动下载，manual=手动下载 */
   source: 'subscription' | 'manual';
-  /** 来源平台（twitter/pawchive），用于还原原帖链接 */
-  platform?: 'twitter' | 'pawchive';
+  /** 来源平台（twitter/pawchive/figmemo），用于还原原帖链接 */
+  platform?: 'twitter' | 'pawchive' | 'figmemo';
   /** 帖子详情页 URL */
   postUrl?: string;
 }
