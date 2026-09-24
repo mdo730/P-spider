@@ -8,6 +8,7 @@ import {
   fetchNewestPostDate,
   runFigmemoBuild,
   runFigmemoCheck,
+  syncLocalTags,
 } from '../services/figmemo';
 import { onTaskCompleted } from './download';
 import { createTauriFileStorage } from './persist/tauri-file-storage';
@@ -49,6 +50,8 @@ export interface FigmemoStore {
   }) => Promise<{ posts: number; images: number } | void>;
   /** 立即检查已开启分类的新文章（刷新按钮 / 24h 调度共用） */
   checkNow: () => Promise<void>;
+  /** 按本地文件夹同步标签（补标签按钮用） */
+  syncTags: () => Promise<number>;
 }
 
 export const useFigmemoStore = create(
@@ -157,6 +160,10 @@ export const useFigmemoStore = create(
             lastError: err?.message || '检查失败',
           });
         }
+      },
+
+      syncTags: async () => {
+        return await syncLocalTags();
       },
     }),
     {

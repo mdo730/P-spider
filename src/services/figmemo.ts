@@ -5,6 +5,7 @@ import { request } from '../ipc/network';
 import { PlatformMedia, PlatformPost } from '../platforms';
 import { useDownloadStore } from '../stores/download';
 import { useLibraryStore } from '../stores/library';
+import { useSettingsStore } from '../stores/settings';
 import { unicodeFilenamify } from '../utils/unicode';
 
 let _log: ICategoriedLogger;
@@ -313,33 +314,26 @@ function ensureChildTag(rootId: string, name: string): string {
   return child?.id || '';
 }
 
-/** 确保根标签「fig-memo」及分类子标签存在（旧「分类」根自动改名），返回 分类id → 标签id */
-async function ensureCategoryTagMap(
-  categories: Map<number, FigmemoCategory>,
-): Promise<Map<number, string>> {
-  // 兼容旧数据：把根「分类」改名为「fig-memo」
-  const tags = useLibraryStore.getState().tags;
-  const legacy = tags.find(
-    (t) => (t.parentId ?? null) === null && t.name === LEGACY_CATEGORY_ROOT,
-  );
-  const hasNew = tags.some(
-    (t) => (t.parentId ?? null) === null && t.name === FIGMEMO_TAG_ROOT,
-  );
-  if (legacy && !hasNew) {
-    try {
-      useLibraryStore.getState().renameTag(legacy.id, FIGMEMO_TAG_ROOT);
-    } catch {
-      // ignore
+/** 读取 figmemo.jsonl 全部元数据记录 */
+export async function readMetaRecords(): Promise<FigmemoMeta[]> {
+  const out: FigmemoMeta[] = [];
+  try {
+    const file = await metaFilePath();
+    if (!(await fs.exists(file))) return out;
+    const text = await fs.readTextFile(file);
+    for (const line of text.split('\n')) {
+      if (!line.trim()) continue;
+      try {
+        const r = JSON.parse(line) as FigmemoMeta;
+        if (r?.postId) out.push(r);
+      } catch {
+        // ignore bad line
+      }
     }
+  } catch (err) {
+    log().warn('读取 figmemo.jsonl 失败', err);
   }
-  const rootId = ensureRootTag(FIGMEMO_TAG_ROOT);
-
-  const map = new Map<number, string>();
-  for (const [id, cat] of categories) {
-    const childId = ensureChildTag(rootId, cat.name);
-    if (childId) map.set(id, childId);
-  }
-  return map;
+  return out;
 }
 
 /** 从标题猜厂商：取第一个「之前的文本（如 `BINDing「…」` → `BINDing`） */
@@ -350,18 +344,75 @@ function guessManufacturer(title: string): string {
   return prefix;
 }
 
-/** 确保根标签「厂商」存在，返回其 id */
-async function ensureManufacturerRoot(): Promise<string> {
-  return ensureRootTag(MANUFACTURER_ROOT);
+/**
+ * 按**本地文件夹**同步标签（分类 + 厂商）：
+ * 只给「本地确实存在文件夹」的帖子打标（基于 figmemo.jsonl 元数据 + 磁盘存在性判断），
+ * 未下载到的帖子不打标。建库/追新结束后或手动都可调用，返回打标的文件夹数。
+ */
+export async function syncLocalTags(): Promise<number> {
+  const base = useSettingsStore.getState().download.saveDirBase;
+  if (!base) return 0;
+
+  // 兼容旧数据：根「分类」→「fig-memo」
+  const tagsNow = useLibraryStore.getState().tags;
+  const legacy = tagsNow.find(
+    (t) => (t.parentId ?? null) === null && t.name === LEGACY_CATEGORY_ROOT,
+  );
+  const hasNewRoot = tagsNow.some(
+    (t) => (t.parentId ?? null) === null && t.name === FIGMEMO_TAG_ROOT,
+  );
+  if (legacy && !hasNewRoot) {
+    try {
+      useLibraryStore.getState().renameTag(legacy.id, FIGMEMO_TAG_ROOT);
+    } catch {
+      // ignore
+    }
+  }
+
+  const records = await readMetaRecords();
+  const rootId = ensureRootTag(FIGMEMO_TAG_ROOT);
+  const mfrRootId = ensureRootTag(MANUFACTURER_ROOT);
+
+  const catTagMap = new Map<number, string>();
+  const seenCat = new Set<number>();
+  for (const r of records) {
+    for (const c of r.categories || []) {
+      if (seenCat.has(c.id)) continue;
+      seenCat.add(c.id);
+      const tagId = ensureChildTag(rootId, c.name);
+      if (tagId) catTagMap.set(c.id, tagId);
+    }
+  }
+
+  const baseDir = base.replace(/[\\/]+$/, '');
+  let tagged = 0;
+  for (const r of records) {
+    const relPath = figmemoRelDir(r.title, r.date);
+    const abs = `${baseDir}\\${relPath.replace(/\//g, '\\')}`;
+    // 本地没有该文件夹 → 不建标签
+    if (!(await fs.exists(abs))) continue;
+    const tagIds = (r.categories || [])
+      .map((c) => catTagMap.get(c.id))
+      .filter((x): x is string => !!x);
+    const mfr = guessManufacturer(r.title);
+    if (mfr) {
+      const mfrTagId = ensureChildTag(mfrRootId, mfr);
+      if (mfrTagId) tagIds.push(mfrTagId);
+    }
+    if (tagIds.length) {
+      useLibraryStore.getState().addFolderTags([relPath], tagIds);
+      tagged += 1;
+    }
+  }
+  log().info('syncLocalTags', { records: records.length, tagged });
+  return tagged;
 }
 
 async function processPost(
   post: FigmemoPost,
   categories: Map<number, FigmemoCategory>,
-  catTagMap: Map<number, string>,
-  manufacturerRootId: string,
   existingIds: Set<string>,
-  /** 是否为订阅后追新的新文章（true：打标签 + 计统计；false：建库补档，不打标不计） */
+  /** 是否为订阅后追新的新文章（true：计统计；false：建库补档不计） */
   isFeed: boolean,
 ): Promise<number> {
   const images = await fetchPostImages(post.id);
@@ -381,21 +432,7 @@ async function processPost(
     existingIds.add(post.id);
   }
 
-  // 自动打标：仅订阅后追新的新文章；建库补档不打（由用户基于本地手动维护）
-  if (isFeed && images.length > 0) {
-    const relPath = figmemoRelDir(post.title, post.date);
-    const tagIds = post.categoryIds
-      .map((id) => catTagMap.get(id))
-      .filter((x): x is string => !!x);
-    const manufacturer = guessManufacturer(post.title);
-    if (manufacturer && manufacturerRootId) {
-      const mfrTagId = ensureChildTag(manufacturerRootId, manufacturer);
-      if (mfrTagId) tagIds.push(mfrTagId);
-    }
-    if (tagIds.length) {
-      useLibraryStore.getState().addFolderTags([relPath], tagIds);
-    }
-  }
+  // 标签不在此处打：统一由 syncLocalTags 基于本地文件夹同步（本地有才建）
 
   if (images.length === 0) return 0;
 
@@ -439,8 +476,6 @@ export async function runFigmemoBuild(
   signal: AbortSignal,
 ): Promise<{ posts: number; images: number }> {
   const categories = await fetchCategories();
-  const catTagMap = await ensureCategoryTagMap(categories);
-  const manufacturerRootId = await ensureManufacturerRoot();
   const existing = await readExistingMetaIds();
   let all = await fetchAllPosts(categoryIds);
   if (yearRange.fromYear || yearRange.toYear) {
@@ -458,19 +493,20 @@ export async function runFigmemoBuild(
   for (const post of all) {
     if (signal.aborted) break;
     try {
-      images += await processPost(
-        post,
-        categories,
-        catTagMap,
-        manufacturerRootId,
-        existing,
-        false,
-      );
+      images += await processPost(post, categories, existing, false);
     } catch (err) {
       log().warn('处理帖子失败', post.id, err);
     }
     done += 1;
     onProgress({ phase: 'building', total: all.length, done });
+  }
+  // 建库结束后，按本地已存在的文件夹同步标签
+  if (!signal.aborted) {
+    try {
+      await syncLocalTags();
+    } catch (err) {
+      log().warn('syncLocalTags 失败', err);
+    }
   }
   return { posts: all.length, images };
 }
@@ -483,8 +519,6 @@ export async function runFigmemoCheck(
   signal: AbortSignal,
 ): Promise<{ newestDate?: string; posts: number; images: number }> {
   const categories = await fetchCategories();
-  const catTagMap = await ensureCategoryTagMap(categories);
-  const manufacturerRootId = await ensureManufacturerRoot();
   const existing = await readExistingMetaIds();
   const posts = await fetchPostsNewerThan(baselineISO, categoryIds);
 
@@ -494,19 +528,20 @@ export async function runFigmemoCheck(
   for (const post of posts) {
     if (signal.aborted) break;
     try {
-      images += await processPost(
-        post,
-        categories,
-        catTagMap,
-        manufacturerRootId,
-        existing,
-        true,
-      );
+      images += await processPost(post, categories, existing, true);
     } catch (err) {
       log().warn('处理帖子失败', post.id, err);
     }
     done += 1;
     onProgress({ phase: 'checking', total: posts.length, done });
+  }
+  // 追新结束后，按本地已存在的文件夹同步标签
+  if (!signal.aborted) {
+    try {
+      await syncLocalTags();
+    } catch (err) {
+      log().warn('syncLocalTags 失败', err);
+    }
   }
   return { newestDate: posts[0]?.date, posts: posts.length, images };
 }
