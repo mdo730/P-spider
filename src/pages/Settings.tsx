@@ -11,7 +11,7 @@ import {
 } from '@ant-design/icons';
 import Joi from 'joi';
 import { SavePathSelector } from '../components/settings/SavePathSelector';
-import { App, Button, Input, Radio, Switch } from 'antd';
+import { App, Button, DatePicker, Input, Radio, Switch } from 'antd';
 import { FileNameTemplateInput } from '../components/settings/FileNameTemplateInput';
 import { showInFolder } from '../utils/shell';
 import { path } from '@tauri-apps/api';
@@ -22,7 +22,7 @@ import { useLibraryTraceStore } from '../stores/library-trace';
 import { useThumbCacheStore } from '../stores/library-thumb-cache';
 import { useFigmemoStore } from '../stores/figmemo';
 import { FigmemoCategory, fetchCategories } from '../services/figmemo';
-import dayjs from 'dayjs';
+import dayjs, { Dayjs } from 'dayjs';
 
 export const Settings: React.FC = () => {
   const { message } = App.useApp();
@@ -34,6 +34,7 @@ export const Settings: React.FC = () => {
   const [figmemoCategories, setFigmemoCategories] = useState<FigmemoCategory[]>(
     [],
   );
+  const [buildYears, setBuildYears] = useState<[Dayjs, Dayjs] | null>(null);
 
   useEffect(() => {
     fetchCategories()
@@ -357,12 +358,24 @@ export const Settings: React.FC = () => {
         <div className="flex items-center flex-wrap gap-3">
           <span className="font-medium">fig-memo</span>
           <Button
-            onClick={() => figmemo.build()}
+            onClick={() =>
+              figmemo.build({
+                fromYear: buildYears?.[0]?.year(),
+                toYear: buildYears?.[1]?.year(),
+              })
+            }
             loading={figmemo.running && figmemo.progress?.phase === 'building'}
             disabled={figmemo.running}
           >
             建库
           </Button>
+          <DatePicker.RangePicker
+            picker="year"
+            allowEmpty={[true, true]}
+            value={buildYears as any}
+            onChange={(v) => setBuildYears(v as [Dayjs, Dayjs] | null)}
+            placeholder={['起始年', '结束年']}
+          />
           <Button
             onClick={() => figmemo.checkNow()}
             loading={figmemo.running && figmemo.progress?.phase === 'checking'}

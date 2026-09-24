@@ -25,8 +25,12 @@ export const FIGMEMO_SOURCE = 'figmemo' as const;
 export const FIGMEMO_AUTHOR = 'fig-memo';
 /** 追新任务标记（用于统计只计新文章、不计建库） */
 export const FIGMEMO_FEED_ID = 'figmemo-feed';
-/** 站点分类自动落成标签时的根标签名 */
-const CATEGORY_ROOT = '分类';
+/** 站点分类自动落成标签时的根标签名（fig-memo 下挂分类） */
+const FIGMEMO_TAG_ROOT = 'fig-memo';
+/** 厂商标签的根标签名 */
+const MANUFACTURER_ROOT = '厂商';
+/** 旧版分类根标签名（迁移用） */
+const LEGACY_CATEGORY_ROOT = '分类';
 
 export interface FigmemoPost {
   id: string;
@@ -242,42 +246,90 @@ export async function appendMeta(record: FigmemoMeta): Promise<void> {
   await fs.writeTextFile(file, `${JSON.stringify(record)}\n`, { append: true });
 }
 
-/** 确保根标签「分类」及分类子标签存在，返回 分类id → 标签id */
+/** 取/建根标签，返回其 id */
+function ensureRootTag(name: string): string {
+  const find = () =>
+    useLibraryStore
+      .getState()
+      .tags.find((t) => (t.parentId ?? null) === null && t.name === name);
+  let root = find();
+  if (!root) {
+    try {
+      useLibraryStore.getState().addTag(name, null);
+    } catch {
+      // ignore
+    }
+    root = find();
+  }
+  return root?.id || '';
+}
+
+/** 取/建某根标签下的子标签，返回其 id */
+function ensureChildTag(rootId: string, name: string): string {
+  if (!rootId) return '';
+  const find = () =>
+    useLibraryStore
+      .getState()
+      .tags.find((t) => (t.parentId ?? null) === rootId && t.name === name);
+  let child = find();
+  if (!child) {
+    try {
+      useLibraryStore.getState().addTag(name, rootId);
+    } catch {
+      // ignore
+    }
+    child = find();
+  }
+  return child?.id || '';
+}
+
+/** 确保根标签「fig-memo」及分类子标签存在（旧「分类」根自动改名），返回 分类id → 标签id */
 async function ensureCategoryTagMap(
   categories: Map<number, FigmemoCategory>,
 ): Promise<Map<number, string>> {
-  const store = useLibraryStore.getState();
-  const root = store.tags.find(
-    (t) => (t.parentId ?? null) === null && t.name === CATEGORY_ROOT,
+  // 兼容旧数据：把根「分类」改名为「fig-memo」
+  const tags = useLibraryStore.getState().tags;
+  const legacy = tags.find(
+    (t) => (t.parentId ?? null) === null && t.name === LEGACY_CATEGORY_ROOT,
   );
-  const rootId = root ? root.id : store.addTag(CATEGORY_ROOT, null);
+  const hasNew = tags.some(
+    (t) => (t.parentId ?? null) === null && t.name === FIGMEMO_TAG_ROOT,
+  );
+  if (legacy && !hasNew) {
+    try {
+      useLibraryStore.getState().renameTag(legacy.id, FIGMEMO_TAG_ROOT);
+    } catch {
+      // ignore
+    }
+  }
+  const rootId = ensureRootTag(FIGMEMO_TAG_ROOT);
 
   const map = new Map<number, string>();
   for (const [id, cat] of categories) {
-    const find = () =>
-      useLibraryStore
-        .getState()
-        .tags.find(
-          (t) => (t.parentId ?? null) === rootId && t.name === cat.name,
-        );
-    let child = find();
-    if (!child) {
-      try {
-        useLibraryStore.getState().addTag(cat.name, rootId);
-      } catch {
-        // 同名已存在，忽略
-      }
-      child = find();
-    }
-    if (child) map.set(id, child.id);
+    const childId = ensureChildTag(rootId, cat.name);
+    if (childId) map.set(id, childId);
   }
   return map;
+}
+
+/** 从标题猜厂商：取第一个「之前的文本（如 `BINDing「…」` → `BINDing`） */
+function guessManufacturer(title: string): string {
+  const idx = title.indexOf('「');
+  const prefix = (idx > 0 ? title.slice(0, idx) : title).trim();
+  if (!prefix || prefix.length > 30) return '';
+  return prefix;
+}
+
+/** 确保根标签「厂商」存在，返回其 id */
+async function ensureManufacturerRoot(): Promise<string> {
+  return ensureRootTag(MANUFACTURER_ROOT);
 }
 
 async function processPost(
   post: FigmemoPost,
   categories: Map<number, FigmemoCategory>,
   catTagMap: Map<number, string>,
+  manufacturerRootId: string,
   existingIds: Set<string>,
   countStats: boolean,
 ): Promise<number> {
@@ -296,12 +348,19 @@ async function processPost(
       imageCount: images.length,
     });
     existingIds.add(post.id);
+  }
 
-    // 站点分类自动落成标签，挂到帖子文件夹
+  // 标签：fig-memo > 站点分类；厂商 > 标题前缀（每次处理都确保，追加幂等）
+  {
     const relPath = figmemoRelDir(post.title, post.date);
     const tagIds = post.categoryIds
       .map((id) => catTagMap.get(id))
       .filter((x): x is string => !!x);
+    const manufacturer = guessManufacturer(post.title);
+    if (manufacturer && manufacturerRootId) {
+      const mfrTagId = ensureChildTag(manufacturerRootId, manufacturer);
+      if (mfrTagId) tagIds.push(mfrTagId);
+    }
     if (tagIds.length) {
       useLibraryStore.getState().addFolderTags([relPath], tagIds);
     }
@@ -335,16 +394,32 @@ async function processPost(
   return images.length;
 }
 
-/** 建库：下载现存文章（categoryIds 非空时只下这些分类） */
+/** 建库范围：年份（含起止）；不填=不限 */
+export interface FigmemoYearRange {
+  fromYear?: number;
+  toYear?: number;
+}
+
+/** 建库：下载现存文章（categoryIds 非空时只下这些分类；yearRange 限定年份） */
 export async function runFigmemoBuild(
   categoryIds: number[],
+  yearRange: FigmemoYearRange,
   onProgress: (p: FigmemoProgress) => void,
   signal: AbortSignal,
 ): Promise<{ posts: number; images: number }> {
   const categories = await fetchCategories();
   const catTagMap = await ensureCategoryTagMap(categories);
+  const manufacturerRootId = await ensureManufacturerRoot();
   const existing = await readExistingMetaIds();
-  const all = await fetchAllPosts(categoryIds);
+  let all = await fetchAllPosts(categoryIds);
+  if (yearRange.fromYear || yearRange.toYear) {
+    all = all.filter((p) => {
+      const y = dayjs(p.date).year();
+      if (yearRange.fromYear && y < yearRange.fromYear) return false;
+      if (yearRange.toYear && y > yearRange.toYear) return false;
+      return true;
+    });
+  }
 
   let images = 0;
   let done = 0;
@@ -352,7 +427,14 @@ export async function runFigmemoBuild(
   for (const post of all) {
     if (signal.aborted) break;
     try {
-      images += await processPost(post, categories, catTagMap, existing, false);
+      images += await processPost(
+        post,
+        categories,
+        catTagMap,
+        manufacturerRootId,
+        existing,
+        false,
+      );
     } catch (err) {
       log().warn('处理帖子失败', post.id, err);
     }
@@ -371,6 +453,7 @@ export async function runFigmemoCheck(
 ): Promise<{ newestDate?: string; posts: number; images: number }> {
   const categories = await fetchCategories();
   const catTagMap = await ensureCategoryTagMap(categories);
+  const manufacturerRootId = await ensureManufacturerRoot();
   const existing = await readExistingMetaIds();
   const posts = await fetchPostsNewerThan(baselineISO, categoryIds);
 
@@ -380,7 +463,14 @@ export async function runFigmemoCheck(
   for (const post of posts) {
     if (signal.aborted) break;
     try {
-      images += await processPost(post, categories, catTagMap, existing, true);
+      images += await processPost(
+        post,
+        categories,
+        catTagMap,
+        manufacturerRootId,
+        existing,
+        true,
+      );
     } catch (err) {
       log().warn('处理帖子失败', post.id, err);
     }

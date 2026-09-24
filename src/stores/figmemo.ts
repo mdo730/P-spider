@@ -42,8 +42,11 @@ export interface FigmemoStore {
 
   /** 开启/关闭某分类的订阅 */
   setCategoryEnabled: (categoryId: number, enabled: boolean) => Promise<void>;
-  /** 建库：下载已开启分类的现存文章 */
-  build: () => Promise<{ posts: number; images: number } | void>;
+  /** 建库：下载已开启分类的现存文章（可限定年份） */
+  build: (opts?: {
+    fromYear?: number;
+    toYear?: number;
+  }) => Promise<{ posts: number; images: number } | void>;
   /** 立即检查已开启分类的新文章（刷新按钮 / 24h 调度共用） */
   checkNow: () => Promise<void>;
 }
@@ -83,7 +86,7 @@ export const useFigmemoStore = create(
         }
       },
 
-      build: async () => {
+      build: async (opts) => {
         if (get().running) return;
         const ids = get().enabledCategories;
         if (ids.length === 0) {
@@ -98,6 +101,7 @@ export const useFigmemoStore = create(
         try {
           const result = await runFigmemoBuild(
             ids,
+            { fromYear: opts?.fromYear, toYear: opts?.toYear },
             (p) => set({ progress: p }),
             new AbortController().signal,
           );
