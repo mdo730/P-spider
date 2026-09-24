@@ -2,6 +2,7 @@ import dayjs from 'dayjs';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import {
+  FIGMEMO_FEED_ID,
   FIGMEMO_SOURCE,
   FigmemoProgress,
   fetchNewestPostDate,
@@ -23,8 +24,9 @@ function log() {
 const CHECK_INTERVAL = 24 * 60 * 60 * 1000;
 
 export interface FigmemoStore {
-  enabled: boolean;
-  /** 开启时间基线 */
+  /** 已开启的分类（开关=订阅该分类） */
+  enabledCategories: number[];
+  /** 首次开启的时间基线 */
   startedAt: number | null;
   /** 上次检查时间 */
   lastCheckedAt: number | null;
@@ -38,14 +40,18 @@ export interface FigmemoStore {
   running: boolean;
   progress: FigmemoProgress | null;
 
-  setEnabled: (enabled: boolean) => Promise<void>;
+  /** 开启/关闭某分类的订阅 */
+  setCategoryEnabled: (categoryId: number, enabled: boolean) => Promise<void>;
+  /** 建库：下载已开启分类的现存文章 */
   build: () => Promise<{ posts: number; images: number } | void>;
+  /** 立即检查已开启分类的新文章（刷新按钮 / 24h 调度共用） */
+  checkNow: () => Promise<void>;
 }
 
 export const useFigmemoStore = create(
   persist<FigmemoStore>(
     (set, get) => ({
-      enabled: false,
+      enabledCategories: [],
       startedAt: null,
       lastCheckedAt: null,
       baselineDate: null,
@@ -55,39 +61,45 @@ export const useFigmemoStore = create(
       running: false,
       progress: null,
 
-      setEnabled: async (enabled) => {
-        if (!enabled) {
-          set({ enabled: false });
-          return;
-        }
-        // 开启：记录基线（当前最新帖），从此刻起算，不回补历史
-        set({
-          enabled: true,
-          startedAt: Date.now(),
-          lastCheckedAt: Date.now(),
-          lastError: null,
-        });
-        try {
-          const newest = await fetchNewestPostDate();
-          set({ baselineDate: newest });
-        } catch (err: any) {
-          log().error('fig-memo 初始化基线失败', err);
-          set({ lastError: err?.message || '初始化失败' });
+      setCategoryEnabled: async (categoryId, enabled) => {
+        const cur = get().enabledCategories;
+        const next = enabled
+          ? cur.includes(categoryId)
+            ? cur
+            : [...cur, categoryId]
+          : cur.filter((id) => id !== categoryId);
+        const wasEmpty = cur.length === 0;
+        set({ enabledCategories: next, lastError: null });
+        // 首次开启：记录基线（从此刻起算新文章，不回补历史）
+        if (enabled && wasEmpty) {
+          set({ startedAt: Date.now(), lastCheckedAt: Date.now() });
+          try {
+            const newest = await fetchNewestPostDate();
+            set({ baselineDate: newest });
+          } catch (err: any) {
+            log().error('fig-memo 初始化基线失败', err);
+            set({ lastError: err?.message || '初始化失败' });
+          }
         }
       },
 
       build: async () => {
         if (get().running) return;
+        const ids = get().enabledCategories;
+        if (ids.length === 0) {
+          set({ lastError: '请先开启至少一个分类' });
+          return;
+        }
         set({
           running: true,
           lastError: null,
           progress: { phase: 'building', total: 0, done: 0 },
         });
-        const controller = new AbortController();
         try {
           const result = await runFigmemoBuild(
+            ids,
             (p) => set({ progress: p }),
-            controller.signal,
+            new AbortController().signal,
           );
           const newest = await fetchNewestPostDate().catch(() => null);
           set({
@@ -106,6 +118,42 @@ export const useFigmemoStore = create(
           });
         }
       },
+
+      checkNow: async () => {
+        if (get().running) return;
+        const ids = get().enabledCategories;
+        if (ids.length === 0) {
+          set({ lastError: '请先开启至少一个分类' });
+          return;
+        }
+        set({
+          running: true,
+          lastError: null,
+          progress: { phase: 'checking', total: 0, done: 0 },
+        });
+        try {
+          const res = await runFigmemoCheck(
+            get().baselineDate,
+            ids,
+            (p) => set({ progress: p }),
+            new AbortController().signal,
+          );
+          set({
+            running: false,
+            progress: null,
+            lastCheckedAt: Date.now(),
+            baselineDate: res.newestDate ?? get().baselineDate,
+          });
+        } catch (err: any) {
+          log().error('fig-memo 追新失败', err);
+          set({
+            running: false,
+            progress: null,
+            lastCheckedAt: Date.now(),
+            lastError: err?.message || '检查失败',
+          });
+        }
+      },
     }),
     {
       name: 'figmemo-state',
@@ -113,7 +161,7 @@ export const useFigmemoStore = create(
       version: 1,
       partialize: (state) =>
         ({
-          enabled: state.enabled,
+          enabledCategories: state.enabledCategories,
           startedAt: state.startedAt,
           lastCheckedAt: state.lastCheckedAt,
           baselineDate: state.baselineDate,
@@ -125,9 +173,14 @@ export const useFigmemoStore = create(
   ),
 );
 
-// 下载完成 → 计入 fig-memo 统计（独立项）
+// 下载完成 → 计入 fig-memo 统计（只计「追新」任务，建库不计）
 onTaskCompleted.listen((task) => {
-  if (task.source !== FIGMEMO_SOURCE) return;
+  if (
+    task.source !== FIGMEMO_SOURCE ||
+    task.subscriptionId !== FIGMEMO_FEED_ID
+  ) {
+    return;
+  }
   const key = dayjs(task.updatedAt).format('YYYY-MM-DD');
   const state = useFigmemoStore.getState();
   const daily = { ...state.dailyStats };
@@ -145,38 +198,12 @@ onTaskCompleted.listen((task) => {
 // 后台调度：每分钟看一次是否到点（24h）
 async function tick() {
   const state = useFigmemoStore.getState();
-  if (state.enabled && !state.running) {
+  if (state.enabledCategories.length > 0 && !state.running) {
     const due =
       !state.lastCheckedAt ||
       Date.now() - state.lastCheckedAt >= CHECK_INTERVAL;
     if (due) {
-      useFigmemoStore.setState({
-        running: true,
-        lastError: null,
-        progress: { phase: 'checking', total: 0, done: 0 },
-      });
-      const controller = new AbortController();
-      try {
-        const res = await runFigmemoCheck(
-          state.baselineDate,
-          (p) => useFigmemoStore.setState({ progress: p }),
-          controller.signal,
-        );
-        useFigmemoStore.setState({
-          running: false,
-          progress: null,
-          lastCheckedAt: Date.now(),
-          baselineDate: res.newestDate ?? state.baselineDate,
-        });
-      } catch (err: any) {
-        log().error('fig-memo 追新失败', err);
-        useFigmemoStore.setState({
-          running: false,
-          progress: null,
-          lastCheckedAt: Date.now(),
-          lastError: err?.message || '检查失败',
-        });
-      }
+      await state.checkNow();
     }
   }
   setTimeout(tick, 60 * 1000);

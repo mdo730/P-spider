@@ -115,7 +115,23 @@ export async function prepareDownloadTask({
   let dir: string;
   let fileName: string;
 
-  if (source !== 'twitter') {
+  if (source === 'figmemo') {
+    // fig-memo：saveDirBase/fig-memo/<日期 标题>/<日期 原文件名>
+    const creatorName = unicodeFilenamify(
+      post.creator?.name || post.creator?.username || 'fig-memo',
+    );
+    const datePrefix = post.publishedAt
+      ? post.publishedAt.format('YYYY-MM-DD')
+      : '';
+    const title = unicodeFilenamify(post.text || post.id || 'untitled');
+    dir = await path.join(
+      settings.download.saveDirBase,
+      creatorName,
+      `${datePrefix} ${title}`.trim(),
+    );
+    const baseName = media.fileName || `file-${media.id || Date.now()}`;
+    fileName = `${datePrefix} ${baseName}`.trim();
+  } else if (source !== 'twitter') {
     // 归档站（pawchive）：固定两级目录，附件保留原始文件名
     const { dir: archiverDir } = await prepareArchiverPostDir(post);
     dir = archiverDir;

@@ -23,6 +23,8 @@ const MAX_TITLE = 60;
 
 export const FIGMEMO_SOURCE = 'figmemo' as const;
 export const FIGMEMO_AUTHOR = 'fig-memo';
+/** 追新任务标记（用于统计只计新文章、不计建库） */
+export const FIGMEMO_FEED_ID = 'figmemo-feed';
 /** 站点分类自动落成标签时的根标签名 */
 const CATEGORY_ROOT = '分类';
 
@@ -38,6 +40,7 @@ export interface FigmemoCategory {
   id: number;
   name: string;
   slug: string;
+  count: number;
 }
 
 export interface FigmemoMeta {
@@ -60,9 +63,11 @@ function truncateTitle(title: string): string {
   return arr.length > MAX_TITLE ? arr.slice(0, MAX_TITLE).join('') : title;
 }
 
-/** 帖子相对 saveDirBase 的目录（与下载管线 prepareArchiverPostDir 一致） */
-export function figmemoRelDir(title: string): string {
-  return `${FIGMEMO_AUTHOR}/${unicodeFilenamify(truncateTitle(title))}`;
+/** 帖子相对 saveDirBase 的目录（与下载管线一致：fig-memo/<日期 标题>） */
+export function figmemoRelDir(title: string, date?: string): string {
+  const prefix = date ? dayjs(date).format('YYYY-MM-DD') : '';
+  const name = unicodeFilenamify(truncateTitle(title));
+  return `${FIGMEMO_AUTHOR}/${`${prefix} ${name}`.trim()}`;
 }
 
 async function getJson(
@@ -84,25 +89,37 @@ async function getJson(
 export async function fetchCategories(): Promise<Map<number, FigmemoCategory>> {
   const body = await getJson(`${API}/categories`, {
     per_page: '100',
-    _fields: 'id,name,slug',
+    _fields: 'id,name,slug,count',
   });
   const map = new Map<number, FigmemoCategory>();
   for (const c of (body || []) as any[]) {
-    map.set(c.id, { id: c.id, name: c.name, slug: c.slug });
+    map.set(c.id, {
+      id: c.id,
+      name: c.name,
+      slug: c.slug,
+      count: c.count || 0,
+    });
   }
   return map;
 }
 
-async function fetchPostsPage(page: number): Promise<FigmemoPost[]> {
+async function fetchPostsPage(
+  page: number,
+  categoryIds?: number[],
+): Promise<FigmemoPost[]> {
   let body: any;
   try {
-    body = await getJson(`${API}/posts`, {
+    const query: Record<string, string> = {
       per_page: String(PER_PAGE),
       page: String(page),
       orderby: 'date',
       order: 'desc',
       _fields: 'id,date,link,title,categories',
-    });
+    };
+    if (categoryIds && categoryIds.length) {
+      query.categories = categoryIds.join(',');
+    }
+    body = await getJson(`${API}/posts`, query);
   } catch {
     // 页码越界（WP 返回 400）视为结束
     return [];
@@ -122,25 +139,28 @@ export async function fetchNewestPostDate(): Promise<string | null> {
   return posts[0]?.date || null;
 }
 
-/** 全部帖子（建库用） */
-export async function fetchAllPosts(): Promise<FigmemoPost[]> {
+/** 全部帖子（建库用；categoryIds 非空时只取这些分类） */
+export async function fetchAllPosts(
+  categoryIds?: number[],
+): Promise<FigmemoPost[]> {
   const out: FigmemoPost[] = [];
   for (let page = 1; page <= 1000; page += 1) {
-    const posts = await fetchPostsPage(page);
+    const posts = await fetchPostsPage(page, categoryIds);
     out.push(...posts);
     if (posts.length < PER_PAGE) break;
   }
   return out;
 }
 
-/** 基线之后的新帖（追新用，最新在前） */
+/** 基线之后的新帖（追新用，最新在前；可限定分类） */
 export async function fetchPostsNewerThan(
   baselineISO: string | null,
+  categoryIds?: number[],
 ): Promise<FigmemoPost[]> {
   const out: FigmemoPost[] = [];
   const base = baselineISO ? dayjs(baselineISO) : null;
   for (let page = 1; page <= 50; page += 1) {
-    const posts = await fetchPostsPage(page);
+    const posts = await fetchPostsPage(page, categoryIds);
     if (posts.length === 0) break;
     let reachedOld = false;
     for (const p of posts) {
@@ -259,6 +279,7 @@ async function processPost(
   categories: Map<number, FigmemoCategory>,
   catTagMap: Map<number, string>,
   existingIds: Set<string>,
+  countStats: boolean,
 ): Promise<number> {
   const images = await fetchPostImages(post.id);
 
@@ -277,7 +298,7 @@ async function processPost(
     existingIds.add(post.id);
 
     // 站点分类自动落成标签，挂到帖子文件夹
-    const relPath = figmemoRelDir(post.title);
+    const relPath = figmemoRelDir(post.title, post.date);
     const tagIds = post.categoryIds
       .map((id) => catTagMap.get(id))
       .filter((x): x is string => !!x);
@@ -308,20 +329,22 @@ async function processPost(
       source: FIGMEMO_SOURCE,
       post: platformPost,
       media,
+      subscriptionId: countStats ? FIGMEMO_FEED_ID : undefined,
     })),
   );
   return images.length;
 }
 
-/** 建库：下载现存全部文章 */
+/** 建库：下载现存文章（categoryIds 非空时只下这些分类） */
 export async function runFigmemoBuild(
+  categoryIds: number[],
   onProgress: (p: FigmemoProgress) => void,
   signal: AbortSignal,
 ): Promise<{ posts: number; images: number }> {
   const categories = await fetchCategories();
   const catTagMap = await ensureCategoryTagMap(categories);
   const existing = await readExistingMetaIds();
-  const all = await fetchAllPosts();
+  const all = await fetchAllPosts(categoryIds);
 
   let images = 0;
   let done = 0;
@@ -329,7 +352,7 @@ export async function runFigmemoBuild(
   for (const post of all) {
     if (signal.aborted) break;
     try {
-      images += await processPost(post, categories, catTagMap, existing);
+      images += await processPost(post, categories, catTagMap, existing, false);
     } catch (err) {
       log().warn('处理帖子失败', post.id, err);
     }
@@ -339,16 +362,17 @@ export async function runFigmemoBuild(
   return { posts: all.length, images };
 }
 
-/** 追新：下载基线之后的新文章 */
+/** 追新：下载基线之后的新文章（可限定分类）；计统计 */
 export async function runFigmemoCheck(
   baselineISO: string | null,
+  categoryIds: number[],
   onProgress: (p: FigmemoProgress) => void,
   signal: AbortSignal,
 ): Promise<{ newestDate?: string; posts: number; images: number }> {
   const categories = await fetchCategories();
   const catTagMap = await ensureCategoryTagMap(categories);
   const existing = await readExistingMetaIds();
-  const posts = await fetchPostsNewerThan(baselineISO);
+  const posts = await fetchPostsNewerThan(baselineISO, categoryIds);
 
   let images = 0;
   let done = 0;
@@ -356,7 +380,7 @@ export async function runFigmemoCheck(
   for (const post of posts) {
     if (signal.aborted) break;
     try {
-      images += await processPost(post, categories, catTagMap, existing);
+      images += await processPost(post, categories, catTagMap, existing, true);
     } catch (err) {
       log().warn('处理帖子失败', post.id, err);
     }

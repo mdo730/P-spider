@@ -21,6 +21,7 @@ import { LibraryFolderStats, formatBytes } from '../utils/library';
 import { useLibraryTraceStore } from '../stores/library-trace';
 import { useThumbCacheStore } from '../stores/library-thumb-cache';
 import { useFigmemoStore } from '../stores/figmemo';
+import { FigmemoCategory, fetchCategories } from '../services/figmemo';
 import dayjs from 'dayjs';
 
 export const Settings: React.FC = () => {
@@ -30,6 +31,15 @@ export const Settings: React.FC = () => {
   const trace = useLibraryTraceStore();
   const thumbCache = useThumbCacheStore();
   const figmemo = useFigmemoStore();
+  const [figmemoCategories, setFigmemoCategories] = useState<FigmemoCategory[]>(
+    [],
+  );
+
+  useEffect(() => {
+    fetchCategories()
+      .then((map) => setFigmemoCategories([...map.values()]))
+      .catch((err) => log.warn('读取 fig-memo 分类失败', err));
+  }, []);
 
   const figmemoStatusText = (() => {
     if (figmemo.running && figmemo.progress) {
@@ -38,8 +48,10 @@ export const Settings: React.FC = () => {
       return `${verb} ${p.done}/${p.total}…`;
     }
     if (figmemo.lastError) return `上次出错：${figmemo.lastError}`;
-    if (figmemo.enabled) {
-      const parts: string[] = ['已开启'];
+    if (figmemo.enabledCategories.length > 0) {
+      const parts: string[] = [
+        `已订阅 ${figmemo.enabledCategories.length} 个分类`,
+      ];
       if (figmemo.lastCheckedAt) {
         parts.push(
           `上次检查 ${dayjs(figmemo.lastCheckedAt).format('MM-DD HH:mm')}`,
@@ -49,7 +61,7 @@ export const Settings: React.FC = () => {
       return parts.join(' · ');
     }
     if (figmemo.downloadedCount > 0) {
-      return `未开启 · 累计下载 ${figmemo.downloadedCount}`;
+      return `未订阅 · 累计下载 ${figmemo.downloadedCount}`;
     }
     return '默认关闭';
   })();
@@ -344,23 +356,53 @@ export const Settings: React.FC = () => {
       <Section title="parukamun 自用订阅" name="parukamun">
         <div className="flex items-center flex-wrap gap-3">
           <span className="font-medium">fig-memo</span>
-          <Switch
-            checked={figmemo.enabled}
-            onChange={(checked) => figmemo.setEnabled(checked)}
-          />
           <Button
             onClick={() => figmemo.build()}
             loading={figmemo.running && figmemo.progress?.phase === 'building'}
             disabled={figmemo.running}
           >
-            建库（下载现存全部文章）
+            建库
+          </Button>
+          <Button
+            onClick={() => figmemo.checkNow()}
+            loading={figmemo.running && figmemo.progress?.phase === 'checking'}
+            disabled={figmemo.running}
+          >
+            刷新
           </Button>
           <span className="text-sm text-gray-500">{figmemoStatusText}</span>
         </div>
+        <div className="mt-3">
+          <div className="text-sm text-gray-500 mb-1">
+            分类订阅（开关 = 接收该类新文章；「建库」只建已开启的分类）
+          </div>
+          {figmemoCategories.length === 0 ? (
+            <p className="text-xs text-gray-300">读取分类中…</p>
+          ) : (
+            <ul className="space-y-1">
+              {figmemoCategories.map((c) => (
+                <li key={c.id} className="flex items-center gap-2 text-sm">
+                  <Switch
+                    size="small"
+                    checked={figmemo.enabledCategories.includes(c.id)}
+                    onChange={(checked) =>
+                      figmemo.setCategoryEnabled(c.id, checked)
+                    }
+                  />
+                  <span>{c.name}</span>
+                  <span className="text-xs text-gray-400">
+                    （{c.count} 篇）
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
         <p className="text-sm text-gray-400 mt-2">
-          个人自用：订阅 fig-memo（fig-memo-r18.site）。开启后每 24
-          小时检查一次，从开启时刻开始算的新文章会自动下载；「建库」则把现存全部文章下载下来。作者记为
-          fig-memo，计入统计与时间流。
+          个人自用：订阅 fig-memo（fig-memo-r18.site）。开启某分类后，每 24
+          小时自动检查一次该分类的新文章；「刷新」立即检查；「建库」把已开启分类的现存文章下载下来（⚠️
+          量大，如「レビュー（R18）」约 787 篇 /
+          数万张）。新文章计入统计，建库不计入。
         </p>
       </Section>
     </>
