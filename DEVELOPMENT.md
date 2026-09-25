@@ -261,6 +261,7 @@ src-tauri/
     - 「只生成文件夹封面缓存」独立按钮（若需要）
     - 站点改版兜底：解析逻辑集中 `services/figmemo.ts`，失败只影响本功能
 13. **部署/验证环境备忘**：本机 `git push` 需带代理 `git -c http.proxy=http://127.0.0.1:7897 -c https.proxy=http://127.0.0.1:7897 push origin master`；`gh` 前设 `$env:HTTPS_PROXY='http://127.0.0.1:7897'`；测试产物目录 `<测试目录>`（`P-Spider.exe` 与 `aria2c.exe` 必须同目录）。⚠️ 用 PowerShell 读写源码会破坏 UTF-8，请用 `[IO.File]::ReadAllText/WriteAllText(..., UTF8Encoding($false))`，git 取文件用 `cmd /c "git show <ref>:<path> > <out>"`
+14. **aria2c 残留进程（待办）**：崩溃/强杀后可能残留 `aria2c.exe`，新实例连上旧进程会 `aria2.changeGlobalOption ... Unauthorized`（token 不匹配），需手动结束进程。可考虑启动时检测端口 6802 / 清理孤儿。
 
 > 说明：更新检查已恢复（`src/github/api.ts` + `src/hooks/useCheckUpdate.ts`），指向 `mdo730/P-spider` 的 releases，按 `tag_name`（须带 `v` 前缀）与当前版本比较。
 > 已发布：**v1.1.0**（2026-08-28，Pawchive 平台 + 下载速度 + 多项修复），GitHub Description/Topics/README 已同步。

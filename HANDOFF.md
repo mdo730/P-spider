@@ -32,7 +32,7 @@ P-Spider（fork 自 x-spider）**v1.3.1 已发布（2026-09-25，GitHub Release 
 - `figmemo-site.json`（站点缓存：posts/categories/featured/postCovers）
 - `figmemo-state.json`（订阅基线/统计）、`figmemo-favorites.json`（收藏 postId）、`downloads.jsonl`、`subscriptions.json`、`library-trace.json`
 
-## 本轮已完成（2026-09-25）
+## 已完成（1.3.0 / 1.3.1，v1.3.1 已发布 2026-09-25）
 
 1. **fig-memo 独立选项卡**：路由 `figmemo`；设置里「启用 fig-memo 功能」开关（`featureEnabled`）控制显隐，与分类订阅解耦。标签树数据分家（`figmemo-tags.json`）。
 2. **列表含未下载文章**：拉站点全站文章 + 本地状态合并；**列表始终显示全站文章**（1.3.1 起与订阅分类解耦）；未下载也有封面缩略图、可看详情、「保存该文章」。
@@ -61,9 +61,10 @@ P-Spider（fork 自 x-spider）**v1.3.1 已发布（2026-09-25，GitHub Release 
 ## 待办（下一步候选，按优先级）
 
 1. `download.ts` 的 `if (source === 'figmemo')` 命名分支 → 抽「按源命名钩子」去泄漏
-2. fig-memo 长列表虚拟滚动 / 封面 IntersectionObserver 懒加载（点标签卡顿已修：counts 线性化 + 详情页早退）
-3. 站点改版风险：解析逻辑都在 `services/figmemo.ts`，失败只影响本功能
-4. （历史遗留）下载层 errorCode 16 退避、缩略图/大文件体验、asset 桌面实测
+2. fig-memo 长列表虚拟滚动 / 封面懒加载（点标签卡顿、切换慢已修；首次进仍一次性渲染 ~1688 卡）
+3. 崩溃/强杀后残留 `aria2c.exe` + 端口占用不会自动清理（可加启动检测/清理或提示）
+4. 站点改版风险：解析逻辑都在 `services/figmemo.ts`，失败只影响本功能
+5. （历史遗留）下载层 errorCode 16 退避、缩略图/大文件体验、asset 桌面实测
 
 ## 关键文件
 
@@ -80,14 +81,15 @@ P-Spider（fork 自 x-spider）**v1.3.1 已发布（2026-09-25，GitHub Release 
 
 ```
 我在开发 P-Spider（fork 自 x-spider 的桌面下载器），仓库在 <项目路径>，
-Tauri v1 + React18 + TS + Vite + Tailwind + antd5 + Zustand，当前版本 1.3.1（未发版）。
+Tauri v1 + React18 + TS + Vite + Tailwind + antd5 + Zustand，当前版本 1.3.1（已发布）。
 请先读 项目根目录的 DEVELOPMENT.md 和 HANDOFF.md 了解现状，再开始。
 
 约定：
 - 改完跑 pnpm typeCheck + npx eslint ./src（必要时 pnpm build）；除非我说“打包”，否则别 pnpm tauri build。
 - 打包后把 P-Spider.exe / aria2c.exe / test-P-Spider_1.3.1_x64-setup.exe 拷到 <测试目录>（app 开着会被占用，需先退出）。
-- git push 要走代理：git -c http.proxy=http://127.0.0.1:7897 -c https.proxy=http://127.0.0.1:7897 push origin master。
+- git push 要走代理：git -c http.proxy=http://127.0.0.1:7897 -c https.proxy=http://127.0.0.1:7897 push origin master；发 Release 前设 $env:HTTPS_PROXY='http://127.0.0.1:7897' 再用 gh。
 - 别用 PowerShell 直接读写源码（破坏 UTF-8中文）；用 .NET [IO.File] + UTF8Encoding($false)。
+- 用户数据（标签/收藏/订阅/历史/设置）都在 %APPDATA%\p-spider\，仓库里不放任何数据文件。
 
-当前进度见 HANDOFF.md「本轮已完成 / 待办」。我这轮要处理的问题是：<在这里写你的需求>
+当前进度见 HANDOFF.md「已完成 / 待办」，发布流程见 DEVELOPMENT.md「如何发布新版」。我这轮要处理的问题是：<在这里写你的需求>
 ```
