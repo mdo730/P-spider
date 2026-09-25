@@ -39,6 +39,39 @@ const VIDEO_EXTENSIONS = new Set([
   'mpg',
 ]);
 
+/** 明确是「文件」而非文件夹的扩展名：saveDirBase 下偶有散落文件，避免被当文件夹扫描 */
+const NON_FOLDER_EXTENSIONS = new Set([
+  'json',
+  'jsonl',
+  'txt',
+  'log',
+  'md',
+  'ini',
+  'cfg',
+  'conf',
+  'db',
+  'sqlite',
+  'zip',
+  'rar',
+  '7z',
+  'tar',
+  'gz',
+  'bak',
+  'tmp',
+  'temp',
+  'part',
+  'aria2',
+  'exe',
+  'msi',
+  'dll',
+  'lnk',
+  'url',
+  'html',
+  'htm',
+  'xml',
+  'csv',
+]);
+
 /** 同步取路径末段（Tauri 的 path.basename 是异步的，扫描时不便使用） */
 export function baseName(p: string): string {
   const parts = p.split(/[\\/]/);
@@ -160,14 +193,26 @@ export function clearFolderSummaryCache(): void {
   folderSummaryCache.clear();
 }
 
-/** 列出 saveDirBase 下的一级文件夹（非递归；非媒体文件在此被过滤） */
+/**
+ * 从「本地库」排除的外部根目录：fig-memo 有独立选项卡 + 独立标签树/收藏，
+ * 只是物理上保存在 saveDirBase 下，不应混入本地库（文件夹网格 / 一键缩略图 / 联网溯源）。
+ * 排除点收敛在 `listRootFolders`，上述三个入口都会调用它。
+ */
+const EXCLUDED_ROOT_FOLDERS = new Set(['fig-memo']);
+
+/** 列出 saveDirBase 下的一级文件夹（非递归；非媒体文件与 fig-memo 在此被过滤） */
 export async function listRootFolders(
   rootDir: string,
 ): Promise<{ name: string; path: string }[]> {
   const entries = await fs.readDir(rootDir, { recursive: false });
   return entries
     .map((entry) => ({ name: entryName(entry), path: entry.path }))
-    .filter((folder) => !isMediaFile(folder.name));
+    .filter(
+      (folder) =>
+        !isMediaFile(folder.name) &&
+        !NON_FOLDER_EXTENSIONS.has(getExtension(folder.name)) &&
+        !EXCLUDED_ROOT_FOLDERS.has(folder.name.toLowerCase()),
+    );
 }
 
 /** 汇总某个文件夹（递归统计媒体数 + 取封面），失败（非目录/无权限）返回 null */

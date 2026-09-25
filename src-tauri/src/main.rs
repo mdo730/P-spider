@@ -50,6 +50,8 @@ fn main() {
           network::quit_app,
           fsutil::get_path_mtimes,
           fsutil::get_folder_stats,
+          fsutil::generate_thumbnail,
+          fsutil::copy_files_to_clipboard,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -8,10 +8,20 @@ import {
   DownloadOutlined,
   FolderOutlined,
   GlobalOutlined,
+  ScissorOutlined,
 } from '@ant-design/icons';
 import Joi from 'joi';
 import { SavePathSelector } from '../components/settings/SavePathSelector';
-import { App, Button, DatePicker, Input, Radio, Switch } from 'antd';
+import {
+  App,
+  Button,
+  DatePicker,
+  Input,
+  InputNumber,
+  Radio,
+  Segmented,
+  Switch,
+} from 'antd';
 import { FileNameTemplateInput } from '../components/settings/FileNameTemplateInput';
 import { showInFolder } from '../utils/shell';
 import { path } from '@tauri-apps/api';
@@ -281,6 +291,27 @@ export const Settings: React.FC = () => {
             <span className="text-sm text-gray-500">{traceStatusText}</span>
           </div>
         </div>
+      </Section>
+      <Section title="图片切割" name="split" titleIcon={<ScissorOutlined />}>
+        <Item
+          settingKey="direction"
+          label="切割方向"
+          description="左右切得到竖条；上下切得到横条"
+        >
+          <Segmented
+            options={[
+              { label: '左右切（竖条）', value: 'horizontal' },
+              { label: '上下切（横条）', value: 'vertical' },
+            ]}
+          />
+        </Item>
+        <Item
+          settingKey="parts"
+          label="切割条数"
+          description="本地库 / fig-memo / 时间流 右键图片「复制切割图像」时按此预设切割；结果以文件形式进剪贴板（临时文件，粘贴即 N 张图）"
+        >
+          <InputNumber min={2} max={20} />
+        </Item>
       </Section>
       <Section title="代理" name="proxy" titleIcon={<GlobalOutlined />}>
         <Item label="启用代理" settingKey="enable" valuePropName="checked">

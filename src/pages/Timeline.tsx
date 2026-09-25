@@ -1,14 +1,20 @@
 /* eslint-disable react/prop-types */
-import { Empty, Image, Spin } from 'antd';
+import { App, Dropdown, Empty, Image, MenuProps, Spin } from 'antd';
 import dayjs from 'dayjs';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { PageHeader } from '../components/PageHeader';
+import { LocalThumb } from '../components/library/LocalThumb';
 import {
   getMediaOriginalUrl,
   getMediaThumbUrl,
   getTimelineGroups,
   TimelineGroup,
 } from '../stores/download-history';
+import {
+  handleImageMenuKey,
+  imageMenuItems,
+  ImageMenuCtx,
+} from '../utils/image-menu';
 import { buildUserUrl } from '../twitter/url';
 
 const PAGE_SIZE = 25;
@@ -99,10 +105,19 @@ export const TimelinePage: React.FC = () => {
 };
 
 const TimelineItem: React.FC<{ group: TimelineGroup }> = ({ group }) => {
+  const { message } = App.useApp();
   const first = group.records[0];
   const url = first?.username
     ? buildUserUrl(first.username)
     : 'javascript:void(0);';
+
+  const menuFor = (ctx: ImageMenuCtx): MenuProps => ({
+    items: imageMenuItems(ctx),
+    onClick: async ({ key, domEvent }) => {
+      domEvent.stopPropagation();
+      await handleImageMenuKey(key, ctx, message);
+    },
+  });
 
   return (
     <li className="bg-white rounded-md border-[1px] p-4">
@@ -135,21 +150,55 @@ const TimelineItem: React.FC<{ group: TimelineGroup }> = ({ group }) => {
 
       <div className="flex flex-wrap gap-2">
         {group.records.map((record, idx) => {
+          // 本地优先：照片有本地文件时用本地缩略图（缓存秒开）+ 本地预览，不联网；
+          // 视频/GIF（本地是 mp4，无本地缩略图）仍走 CDN 预览图。
+          if (record.mediaType === 'photo' && record.filePath) {
+            return (
+              <Dropdown
+                key={`${record.postId}-${idx}`}
+                trigger={['contextMenu']}
+                menu={menuFor({
+                  localPath: record.filePath,
+                  postUrl: record.postUrl,
+                })}
+              >
+                <div className="inline-block">
+                  <LocalThumb
+                    filePath={record.filePath}
+                    alt={record.fileName}
+                    className="object-cover w-full h-full rounded-md"
+                    wrapperClassName="w-40 h-40"
+                    preview
+                  />
+                </div>
+              </Dropdown>
+            );
+          }
           const thumbUrl = getMediaThumbUrl(record);
           const originalUrl = getMediaOriginalUrl(record);
           return (
-            <Image
+            <Dropdown
               key={`${record.postId}-${idx}`}
-              src={thumbUrl}
-              alt={record.fileName}
-              className="object-cover rounded-md"
-              width={160}
-              height={160}
-              preview={{
-                mask: MEDIA_TYPE_LABEL[record.mediaType] || '查看',
-                src: originalUrl,
-              }}
-            />
+              trigger={['contextMenu']}
+              menu={menuFor({
+                remoteUrl: originalUrl,
+                postUrl: record.postUrl,
+              })}
+            >
+              <div className="inline-block">
+                <Image
+                  src={thumbUrl}
+                  alt={record.fileName}
+                  className="object-cover rounded-md"
+                  width={160}
+                  height={160}
+                  preview={{
+                    mask: MEDIA_TYPE_LABEL[record.mediaType] || '查看',
+                    src: originalUrl,
+                  }}
+                />
+              </div>
+            </Dropdown>
           );
         })}
       </div>

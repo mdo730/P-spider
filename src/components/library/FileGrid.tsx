@@ -7,7 +7,7 @@ import {
   PictureOutlined,
   PlayCircleFilled,
 } from '@ant-design/icons';
-import { App, Checkbox, Dropdown, Image, MenuProps, Modal } from 'antd';
+import { App, Checkbox, Dropdown, MenuProps, Modal } from 'antd';
 import React, { useState } from 'react';
 import { deleteLibraryFiles } from '../../services/library-actions';
 import {
@@ -22,12 +22,21 @@ import {
   resolveFileTweetInfo,
 } from '../../utils/library';
 import { toAssetUrl } from '../../utils/asset';
+import { handleImageMenuKey, imageMenuItems } from '../../utils/image-menu';
 import { openPath, openUrl, showInFolder } from '../../utils/shell';
+import { ImageViewer } from './ImageViewer';
 import { LocalThumb } from './LocalThumb';
 import { TweetSidebar } from './TweetSidebar';
 
 const EMPTY_HISTORY_MAP = new Map<string, DownloadHistoryRecord>();
 const EMPTY_TRACE_MAP = new Map<string, TracedRecord>();
+
+/** 右键菜单能用到的最小文件信息 */
+interface FileRef {
+  path: string;
+  name: string;
+  kind?: 'image' | 'video';
+}
 
 interface Props {
   files: LibraryFile[];
@@ -45,8 +54,8 @@ interface Props {
 }
 
 /**
- * 本地文件网格：图片走 antd 原生全屏预览（不改变窗口），视频弹窗播放；
- * 打开媒体时右侧叠加一条独立的推文信息条（TweetSidebar，单独渲染）。
+ * 本地文件网格：图片点击打开自研查看器（ImageViewer），视频弹窗播放；
+ * 查看媒体时右侧叠加一条独立的推文信息条（TweetSidebar）。
  */
 export const FileGrid: React.FC<Props> = ({
   files,
@@ -62,14 +71,14 @@ export const FileGrid: React.FC<Props> = ({
   const setFolderCover = useLibraryStore((s) => s.setFolderCover);
   const fileNameTemplate = useSettingsStore((s) => s.download.fileNameTemplate);
   const [videoFile, setVideoFile] = useState<LibraryFile | null>(null);
-  const [previewVisible, setPreviewVisible] = useState(false);
-  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [viewerIndex, setViewerIndex] = useState(0);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const imageFiles = files.filter((file) => file.kind === 'image');
   const imageIndexMap = new Map(imageFiles.map((file, i) => [file.path, i]));
 
-  const getInfo = (file?: LibraryFile): FileTweetInfo | undefined =>
+  const getInfo = (file?: FileRef): FileTweetInfo | undefined =>
     file
       ? resolveFileTweetInfo(
           file.path,
@@ -81,22 +90,16 @@ export const FileGrid: React.FC<Props> = ({
         )
       : undefined;
 
-  const getPostUrl = (file?: LibraryFile) => getInfo(file)?.url;
+  const getPostUrl = (file?: FileRef) => getInfo(file)?.url;
 
-  // 右侧信息条对应的当前文件（视频优先，其次全屏预览的当前图片）
+  // 右侧信息条对应的当前文件（视频优先，其次查看器里的当前图片）
   const sidebarFile = videoFile
     ? videoFile
-    : previewVisible
-      ? imageFiles[currentImageIndex]
+    : viewerOpen
+      ? imageFiles[viewerIndex]
       : undefined;
 
-  const previewConfig = {
-    visible: previewVisible,
-    onVisibleChange: (visible: boolean) => setPreviewVisible(visible),
-    onChange: (next: number) => setCurrentImageIndex(next),
-  } as any;
-
-  const reveal = async (file: LibraryFile) => {
+  const reveal = async (file: FileRef) => {
     try {
       await showInFolder(file.path, true);
     } catch (err: any) {
@@ -104,7 +107,7 @@ export const FileGrid: React.FC<Props> = ({
     }
   };
 
-  const openWithSystem = async (file: LibraryFile) => {
+  const openWithSystem = async (file: FileRef) => {
     try {
       await openPath(file.path);
     } catch (err: any) {
@@ -112,7 +115,7 @@ export const FileGrid: React.FC<Props> = ({
     }
   };
 
-  const confirmDelete = (file: LibraryFile) => {
+  const confirmDelete = (file: FileRef) => {
     modal.confirm({
       title: '删除文件？',
       content: `将永久删除「${file.name}」，删除后不可恢复。`,
@@ -131,18 +134,15 @@ export const FileGrid: React.FC<Props> = ({
     });
   };
 
-  return (
-    <>
-      <Image.PreviewGroup preview={previewConfig}>
-        <ul
-          className="grid grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] gap-2"
-          onContextMenu={(e) => e.preventDefault()}
-        >
-          {files.map((file) => {
-            const isSelected = selected.has(file.path);
-            const postUrl = getPostUrl(file);
-            const menuItems: MenuProps['items'] = [
-              { key: 'open', label: '打开', icon: <FileOutlined /> },
+  // 统一右键菜单（网格卡片与查看器共用）
+  const menuFor = (file: FileRef): MenuProps => {
+    const postUrl = getPostUrl(file);
+    const isVideo = file.kind === 'video';
+    return {
+      items: [
+        ...(!isVideo
+          ? imageMenuItems({ localPath: file.path, postUrl })
+          : [
               {
                 key: 'reveal',
                 label: '在资源管理器中打开',
@@ -157,109 +157,145 @@ export const FileGrid: React.FC<Props> = ({
                     },
                   ]
                 : []),
-              ...(file.kind === 'image' && coverFolderName
-                ? [
-                    {
-                      key: 'setCover',
-                      label: '设为文件夹缩略图',
-                      icon: <PictureOutlined />,
-                    },
-                  ]
-                : []),
-              { type: 'divider' },
+            ]),
+        { type: 'divider' },
+        { key: 'open', label: '打开', icon: <FileOutlined /> },
+        ...(coverFolderName && !isVideo
+          ? [
               {
-                key: 'delete',
-                label: '删除文件',
-                icon: <DeleteOutlined />,
-                danger: true,
+                key: 'setCover',
+                label: '设为文件夹缩略图',
+                icon: <PictureOutlined />,
               },
-            ];
-            const onMenuClick: MenuProps['onClick'] = ({ key, domEvent }) => {
-              domEvent.stopPropagation();
-              if (key === 'open') return openWithSystem(file);
-              if (key === 'reveal') return reveal(file);
-              if (key === 'openPost' && postUrl) {
-                openUrl(postUrl);
-                return;
-              }
-              if (key === 'setCover' && coverFolderName) {
-                setFolderCover(coverFolderName, file.path);
-                message.success('已设为文件夹缩略图');
-                return;
-              }
-              if (key === 'delete') return confirmDelete(file);
-            };
+            ]
+          : []),
+        { type: 'divider' },
+        {
+          key: 'delete',
+          label: '删除文件',
+          icon: <DeleteOutlined />,
+          danger: true,
+        },
+      ],
+      onClick: async ({ key, domEvent }) => {
+        domEvent.stopPropagation();
+        if (
+          !isVideo &&
+          (await handleImageMenuKey(
+            key,
+            { localPath: file.path, postUrl },
+            message,
+          ))
+        ) {
+          return;
+        }
+        if (key === 'open') return openWithSystem(file);
+        if (key === 'reveal') return reveal(file);
+        if (key === 'openPost' && postUrl) {
+          openUrl(postUrl);
+          return;
+        }
+        if (key === 'setCover' && coverFolderName) {
+          setFolderCover(coverFolderName, file.path);
+          message.success('已设为文件夹缩略图');
+          return;
+        }
+        if (key === 'delete') return confirmDelete(file);
+      },
+    };
+  };
 
-            return (
-              <Dropdown
-                key={file.path}
-                trigger={['contextMenu']}
-                menu={{ items: menuItems, onClick: onMenuClick }}
+  return (
+    <>
+      <ul
+        className="grid grid-cols-[repeat(auto-fill,minmax(8rem,9rem))] gap-2"
+        onContextMenu={(e) => e.preventDefault()}
+      >
+        {files.map((file) => {
+          const isSelected = selected.has(file.path);
+          return (
+            <Dropdown
+              key={file.path}
+              trigger={['contextMenu']}
+              menu={menuFor(file)}
+            >
+              <li
+                className={`lib-card-cv relative aspect-square bg-white rounded-md overflow-hidden group border-[1px] cursor-pointer ${
+                  selectMode && isSelected
+                    ? 'border-ant-color-primary ring-1 ring-ant-color-primary'
+                    : 'border-gray-100'
+                }`}
+                onClick={
+                  selectMode
+                    ? () => onToggle(file.path)
+                    : file.kind === 'video'
+                      ? () => {
+                          setSidebarCollapsed(false);
+                          setVideoFile(file);
+                        }
+                      : () => {
+                          const i = imageIndexMap.get(file.path);
+                          if (i != null) setViewerIndex(i);
+                          setSidebarCollapsed(false);
+                          setViewerOpen(true);
+                        }
+                }
+                title={file.name}
               >
-                <li
-                  className={`relative aspect-square bg-white rounded-md overflow-hidden group border-[1px] cursor-pointer ${
-                    selectMode && isSelected
-                      ? 'border-ant-color-primary ring-1 ring-ant-color-primary'
-                      : 'border-gray-100'
-                  }`}
-                  onClick={
-                    selectMode
-                      ? () => onToggle(file.path)
-                      : file.kind === 'video'
-                        ? () => {
-                            setSidebarCollapsed(false);
-                            setVideoFile(file);
-                          }
-                        : () => {
-                            const i = imageIndexMap.get(file.path);
-                            if (i != null) setCurrentImageIndex(i);
-                            setSidebarCollapsed(false);
-                          }
-                  }
-                  title={file.name}
-                >
-                  {file.kind === 'image' ? (
-                    <LocalThumb
-                      filePath={file.path}
-                      alt={file.name}
-                      preview={!selectMode}
-                      wrapperClassName="w-full h-full"
-                      className="object-cover w-full h-full"
+                {file.kind === 'image' ? (
+                  <LocalThumb
+                    filePath={file.path}
+                    alt={file.name}
+                    wrapperClassName="w-full h-full"
+                    className="object-cover w-full h-full"
+                  />
+                ) : (
+                  <>
+                    <video
+                      src={toAssetUrl(file.path)}
+                      preload="metadata"
+                      muted
+                      className="w-full h-full object-cover bg-gray-900"
                     />
-                  ) : (
-                    <>
-                      <video
-                        src={toAssetUrl(file.path)}
-                        preload="metadata"
-                        muted
-                        className="w-full h-full object-cover bg-gray-900"
-                      />
-                      <PlayCircleFilled className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-4xl text-white/90" />
-                    </>
-                  )}
-                  {selectMode && (
-                    <span className="absolute left-1 top-1">
-                      <Checkbox
-                        checked={isSelected}
-                        className="pointer-events-none"
-                      />
-                    </span>
-                  )}
-                </li>
-              </Dropdown>
-            );
-          })}
-        </ul>
-      </Image.PreviewGroup>
+                    <PlayCircleFilled className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-4xl text-white/90" />
+                  </>
+                )}
+                {selectMode && (
+                  <span className="absolute left-1 top-1">
+                    <Checkbox
+                      checked={isSelected}
+                      className="pointer-events-none"
+                    />
+                  </span>
+                )}
+              </li>
+            </Dropdown>
+          );
+        })}
+      </ul>
 
-      {(previewVisible || !!videoFile) && (
+      {viewerOpen && imageFiles.length > 0 && (
+        <ImageViewer
+          images={imageFiles.map((file) => ({
+            path: file.path,
+            name: file.name,
+          }))}
+          index={viewerIndex}
+          onIndexChange={setViewerIndex}
+          onClose={() => setViewerOpen(false)}
+          rightInset={sidebarCollapsed ? 0 : 320}
+          menuFor={menuFor}
+        />
+      )}
+
+      {(viewerOpen || !!videoFile) && (
         <TweetSidebar
           info={getInfo(sidebarFile)}
           fileName={sidebarFile?.name}
           collapsed={sidebarCollapsed}
           onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
           onClose={() => {
-            setPreviewVisible(false);
+            setViewerOpen(false);
             setVideoFile(null);
           }}
         />

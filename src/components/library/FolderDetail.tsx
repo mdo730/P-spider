@@ -7,7 +7,13 @@ import {
   ReloadOutlined,
 } from '@ant-design/icons';
 import { App, Button, Dropdown, Empty, MenuProps, Segmented, Spin } from 'antd';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { deleteLibraryFiles } from '../../services/library-actions';
 import {
   DownloadHistoryRecord,
@@ -77,15 +83,20 @@ export const FolderDetail: React.FC<Props> = ({
     };
   }, []);
 
+  const loadSeq = useRef(0);
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
     setLoading(true);
     try {
       const data = await scanDirectory(dir);
+      // 已切到别的目录（快速连点/返回）时丢弃过期结果
+      if (seq !== loadSeq.current) return data;
       const paths = [
         ...data.folders.map((f) => f.path),
         ...data.files.map((f) => f.path),
       ];
       const mtimes = await fetchMtimes(paths);
+      if (seq !== loadSeq.current) return data;
       const folders = data.folders.map((folder, index) => ({
         ...folder,
         mtime: mtimes[index] ?? undefined,
@@ -101,16 +112,18 @@ export const FolderDetail: React.FC<Props> = ({
       }
       return data;
     } catch (err: any) {
+      if (seq !== loadSeq.current) return;
       log.error(err);
       message.error(err?.message || '读取文件夹失败');
       setContent(null);
     } finally {
-      setLoading(false);
+      if (seq === loadSeq.current) setLoading(false);
     }
   }, [dir, message]);
 
-  // 切换目录时重置视图（选择在下方 hook 就绪后一并清空）
+  // 切换目录时重置视图 + 清空旧内容（避免慢加载期间残留上一个目录的数据）
   useEffect(() => {
+    setContent(null);
     setViewMode('folder');
     setSelectMode(false);
   }, [dir]);
@@ -276,7 +289,7 @@ export const FolderDetail: React.FC<Props> = ({
           </div>
         ) : inFolderView ? (
           <ul
-            className="grid grid-cols-[repeat(auto-fill,minmax(12rem,1fr))] gap-3"
+            className="grid grid-cols-[repeat(auto-fill,minmax(9rem,10rem))] gap-3"
             onContextMenu={(e) => e.preventDefault()}
           >
             {sortedFolders.map((folder) => {
@@ -298,7 +311,7 @@ export const FolderDetail: React.FC<Props> = ({
                   trigger={['contextMenu']}
                   menu={{ items: menuItems, onClick: onMenuClick }}
                 >
-                  <li className="bg-white rounded-md border-[1px] border-gray-100 overflow-hidden group">
+                  <li className="lib-card-cv bg-white rounded-md border-[1px] border-gray-100 overflow-hidden group">
                     <button
                       className="block w-full text-left"
                       title={folder.name}
@@ -308,7 +321,7 @@ export const FolderDetail: React.FC<Props> = ({
                         name={folder.name}
                         coverPath={folder.coverPath}
                         coverKind={folder.coverKind}
-                        wrapperClassName="w-full h-[10rem]"
+                        wrapperClassName="w-full h-[9rem]"
                         className="object-cover w-full h-full transition-transform group-hover:scale-105"
                       />
                       <div className="px-2 py-2">

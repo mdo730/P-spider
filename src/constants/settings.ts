@@ -19,6 +19,10 @@ export const DEFAULT_SETTINGS: Settings = {
     closeAction: 'minimize',
     rememberCloseChoice: true,
   },
+  split: {
+    direction: 'horizontal',
+    parts: 4,
+  },
 };
 
-export const CURRENT_SETTINGS_VERSION = 2;
+export const CURRENT_SETTINGS_VERSION = 3;

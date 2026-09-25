@@ -149,29 +149,34 @@ export const useFigmemoTagsStore = create(
       },
 
       setFolderTags: (relPath, tagIds) => {
-        set({
-          tags: get().tags.map((t) => {
-            const should = tagIds.includes(t.id);
-            const has = t.paths.includes(relPath);
-            if (should && !has) return { ...t, paths: [...t.paths, relPath] };
-            if (!should && has) {
-              return { ...t, paths: t.paths.filter((p) => p !== relPath) };
-            }
-            return t;
-          }),
+        let changed = false;
+        const next = get().tags.map((t) => {
+          const should = tagIds.includes(t.id);
+          const has = t.paths.includes(relPath);
+          if (should && !has) {
+            changed = true;
+            return { ...t, paths: [...t.paths, relPath] };
+          }
+          if (!should && has) {
+            changed = true;
+            return { ...t, paths: t.paths.filter((p) => p !== relPath) };
+          }
+          return t;
         });
+        if (changed) set({ tags: next });
       },
 
       addFolderTags: (relPaths, tagIds) => {
         if (relPaths.length === 0 || tagIds.length === 0) return;
-        set({
-          tags: get().tags.map((t) => {
-            if (!tagIds.includes(t.id)) return t;
-            const missing = relPaths.filter((p) => !t.paths.includes(p));
-            if (missing.length === 0) return t;
-            return { ...t, paths: [...t.paths, ...missing] };
-          }),
+        let changed = false;
+        const next = get().tags.map((t) => {
+          if (!tagIds.includes(t.id)) return t;
+          const missing = relPaths.filter((p) => !t.paths.includes(p));
+          if (missing.length === 0) return t;
+          changed = true;
+          return { ...t, paths: [...t.paths, ...missing] };
         });
+        if (changed) set({ tags: next });
       },
 
       getFolderTagIds: (relPath) =>
@@ -216,28 +221,34 @@ export const useFigmemoTagsStore = create(
 
       applyFolderTags: (entries) => {
         if (entries.length === 0) return;
-        set({
-          tags: get().tags.map((t) => {
-            const adds: string[] = [];
-            for (const e of entries) {
-              if (e.tagIds.includes(t.id) && !t.paths.includes(e.relPath)) {
-                adds.push(e.relPath);
-              }
+        let changed = false;
+        const next = get().tags.map((t) => {
+          const adds: string[] = [];
+          for (const e of entries) {
+            if (e.tagIds.includes(t.id) && !t.paths.includes(e.relPath)) {
+              adds.push(e.relPath);
             }
-            return adds.length ? { ...t, paths: [...t.paths, ...adds] } : t;
-          }),
+          }
+          if (adds.length) {
+            changed = true;
+            return { ...t, paths: [...t.paths, ...adds] };
+          }
+          return t;
         });
+        if (changed) set({ tags: next });
       },
 
       removeFolderTags: (relPaths, tagIds) => {
         if (relPaths.length === 0 || tagIds.length === 0) return;
-        set({
-          tags: get().tags.map((t) => {
-            if (!tagIds.includes(t.id)) return t;
-            const next = t.paths.filter((p) => !relPaths.includes(p));
-            return next.length === t.paths.length ? t : { ...t, paths: next };
-          }),
+        let changed = false;
+        const next = get().tags.map((t) => {
+          if (!tagIds.includes(t.id)) return t;
+          const filtered = t.paths.filter((p) => !relPaths.includes(p));
+          if (filtered.length === t.paths.length) return t;
+          changed = true;
+          return { ...t, paths: filtered };
         });
+        if (changed) set({ tags: next });
       },
 
       setFolderCover: (folderName, filePath) => {

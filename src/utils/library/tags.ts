@@ -122,6 +122,8 @@ export interface LibraryFilter {
   multi: boolean;
   /** 只看「未打（手动）标签」的文章；与 tagIds 叠加生效 */
   unclassifiedOnly: boolean;
+  /** 只看「已收藏」的文章（fig-memo）；与其它条件叠加生效 */
+  favoritesOnly: boolean;
 }
 
 export const DEFAULT_LIBRARY_FILTER: LibraryFilter = {
@@ -129,6 +131,7 @@ export const DEFAULT_LIBRARY_FILTER: LibraryFilter = {
   rule: 'intersect',
   multi: false,
   unclassifiedOnly: false,
+  favoritesOnly: false,
 };
 
 /** 某文件夹命中的「手动标签」id 列表（排除 分类/厂商/年份 等自动根） */
@@ -143,6 +146,86 @@ export function folderManualTagIds(index: TagIndex, relPath: string): string[] {
     out.push(t.id);
   }
   return out;
+}
+
+export interface TagCounts {
+  all: number;
+  unclassified: number;
+  byId: Record<string, number>;
+}
+
+/** 路径「自身 + 所有祖先目录」前缀（如 a/b/c → a, a/b, a/b/c） */
+function pathWithAncestors(np: string): string[] {
+  const parts = np.split('/');
+  const out: string[] = [];
+  for (let i = 1; i <= parts.length; i += 1) {
+    out.push(parts.slice(0, i).join('/'));
+  }
+  return out;
+}
+
+/**
+ * 一次性统计「每个标签（含子孙）覆盖的路径数」+「未打手动标签的路径数」。
+ * 相比「对每个标签都全量过滤路径」，复杂度从 O(标签数 × 路径数) 降到近似线性。
+ */
+export function computeTagCounts(
+  index: TagIndex,
+  relPaths: string[],
+): TagCounts {
+  // 扩张路径（自身 + 祖先目录）→ 直接挂载其上的标签 id
+  const directByPath = new Map<string, string[]>();
+  // 精确路径 → 直接挂载其上的标签 id（用于「未打手动标签」判定）
+  const exactByPath = new Map<string, string[]>();
+  const push = (m: Map<string, string[]>, key: string, id: string) => {
+    const arr = m.get(key);
+    if (arr) {
+      if (!arr.includes(id)) arr.push(id);
+    } else {
+      m.set(key, [id]);
+    }
+  };
+  for (const t of index.byId.values()) {
+    for (const raw of t.paths) {
+      const np = normalizeRel(raw);
+      if (!np) continue;
+      for (const key of pathWithAncestors(np)) push(directByPath, key, t.id);
+      push(exactByPath, np, t.id);
+    }
+  }
+
+  const nonCount = new Set(NON_COUNTING_TAG_ROOTS);
+  const isManual = (id: string) => {
+    const rootName = index.chainNames(id)[0];
+    return !(rootName && nonCount.has(rootName));
+  };
+
+  const byId: Record<string, number> = {};
+  for (const id of index.byId.keys()) byId[id] = 0;
+
+  let unclassified = 0;
+  for (const raw of relPaths) {
+    const np = normalizeRel(raw);
+    if (!np) continue;
+
+    // 命中标签：该路径是某个被打标路径（含其子孙标签的路径）或该路径的祖先
+    // （directByPath 的 key 已包含「打标路径 + 其全部祖先目录」）
+    // 同一路径可能经多个子标签命中同一祖先，用 set 去重，保证每个标签每路径只 +1
+    const hits = directByPath.get(np);
+    if (hits) {
+      const bump = new Set<string>();
+      for (const id of hits) {
+        bump.add(id);
+        for (const anc of index.ancestorIds(id)) bump.add(anc);
+      }
+      for (const id of bump) byId[id] = (byId[id] || 0) + 1;
+    }
+
+    // 未打「手动标签」= 该精确路径上没有非 分类/厂商/年份 的标签
+    const ex = exactByPath.get(np);
+    if (!(ex && ex.some(isManual))) unclassified += 1;
+  }
+
+  return { all: relPaths.length, unclassified, byId };
 }
 
 /** 单文件夹是否命中标签筛选（union=任一命中，intersect=全部命中，默认 intersect） */

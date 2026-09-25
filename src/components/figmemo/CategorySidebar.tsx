@@ -1,5 +1,11 @@
 /* eslint-disable react/prop-types */
-import { DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
+import {
+  DeleteOutlined,
+  EditOutlined,
+  HeartFilled,
+  HeartOutlined,
+  PlusOutlined,
+} from '@ant-design/icons';
 import {
   App,
   Button,
@@ -25,6 +31,8 @@ import {
 interface Props {
   filter: LibraryFilter;
   counts: { all: number; unclassified: number; byId: Record<string, number> };
+  /** 已收藏文章数（当前列表范围） */
+  favoriteCount: number;
   onChange: (filter: LibraryFilter) => void;
 }
 
@@ -40,6 +48,7 @@ function toTreeData(nodes: TagNode[]): DataNode[] {
 export const CategorySidebar: React.FC<Props> = ({
   filter,
   counts,
+  favoriteCount,
   onChange,
 }) => {
   const { modal, message } = App.useApp();
@@ -210,11 +219,19 @@ export const CategorySidebar: React.FC<Props> = ({
         <Button
           size="small"
           type={
-            !filter.unclassifiedOnly && filter.tagIds.length === 0
+            !filter.unclassifiedOnly &&
+            !filter.favoritesOnly &&
+            filter.tagIds.length === 0
               ? 'primary'
               : 'default'
           }
-          onClick={() => setFilter({ tagIds: [], unclassifiedOnly: false })}
+          onClick={() =>
+            setFilter({
+              tagIds: [],
+              unclassifiedOnly: false,
+              favoritesOnly: false,
+            })
+          }
         >
           全部 <span className="opacity-60 ml-1">{counts.all}</span>
         </Button>
@@ -227,6 +244,20 @@ export const CategorySidebar: React.FC<Props> = ({
         >
           未打标签{' '}
           <span className="opacity-60 ml-1">{counts.unclassified}</span>
+        </Button>
+        <Button
+          size="small"
+          type={filter.favoritesOnly ? 'primary' : 'default'}
+          icon={
+            filter.favoritesOnly ? (
+              <HeartFilled className="text-rose-500" />
+            ) : (
+              <HeartOutlined />
+            )
+          }
+          onClick={() => setFilter({ favoritesOnly: !filter.favoritesOnly })}
+        >
+          收藏 <span className="opacity-60 ml-1">{favoriteCount}</span>
         </Button>
       </div>
 

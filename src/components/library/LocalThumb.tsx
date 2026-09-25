@@ -20,6 +20,42 @@ interface Props {
 }
 
 /**
+ * 全局共享的 IntersectionObserver：避免「每张缩略图一个 observer」（长列表可达上千个）。
+ * 元素进入视口即回调一次并停止观察。
+ */
+type VisibleCb = () => void;
+const visibleCallbacks = new Map<Element, VisibleCb>();
+let sharedObserver: IntersectionObserver | null = null;
+
+function getSharedObserver(): IntersectionObserver {
+  if (sharedObserver) return sharedObserver;
+  sharedObserver = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        const cb = visibleCallbacks.get(entry.target);
+        if (cb) {
+          visibleCallbacks.delete(entry.target);
+          sharedObserver?.unobserve(entry.target);
+          cb();
+        }
+      }
+    },
+    { rootMargin: '400px' },
+  );
+  return sharedObserver;
+}
+
+function observeOnce(el: Element, cb: VisibleCb): () => void {
+  visibleCallbacks.set(el, cb);
+  getSharedObserver().observe(el);
+  return () => {
+    visibleCallbacks.delete(el);
+    sharedObserver?.unobserve(el);
+  };
+}
+
+/**
  * 本地图片缩略图：优先用磁盘缓存，命中即秒开；
  * 未命中时进入视口才解码生成（并发受限），并写回缓存目录。
  *
@@ -43,17 +79,7 @@ export const LocalThumb: React.FC<Props> = ({
     if (!filePath) return;
     const el = containerRef.current;
     if (!el) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting) {
-          setVisible(true);
-          observer.disconnect();
-        }
-      },
-      { rootMargin: '400px' },
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
+    return observeOnce(el, () => setVisible(true));
   }, [filePath]);
 
   useEffect(() => {

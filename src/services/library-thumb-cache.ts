@@ -79,17 +79,24 @@ export async function runThumbCache(
     const cached = await getCachedThumbUrl(path);
     if (cached) {
       skipped += 1;
+    } else if (await generateImageThumbUrl(path)) {
+      generated += 1;
     } else {
-      const url = await generateImageThumbUrl(path);
-      if (url) generated += 1;
-      else failed += 1;
+      failed += 1;
     }
     progress.processedFiles += 1;
-    progress.generated = generated;
-    progress.skipped = skipped;
-    progress.failed = failed;
-    onProgress({ ...progress });
+    // 每 5 个才推一次进度，避免上千次无谓的 store 更新/React 重渲染
+    if (progress.processedFiles % 5 === 0) {
+      progress.generated = generated;
+      progress.skipped = skipped;
+      progress.failed = failed;
+      onProgress({ ...progress });
+    }
   }
+  progress.generated = generated;
+  progress.skipped = skipped;
+  progress.failed = failed;
+  onProgress({ ...progress });
 
   return {
     total: images.length,

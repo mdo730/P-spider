@@ -214,6 +214,17 @@ async function fetchContentImages(postId: string): Promise<PlatformMedia[]> {
   }));
 }
 
+/** 从 WP 媒体 media_details 里挑一个适中尺寸做大图网格缩略图（省流量、秒开） */
+function pickThumbUrl(details: any, fallback: string): string {
+  const sizes = details?.sizes;
+  if (!sizes) return fallback;
+  for (const key of ['medium', 'medium_large', 'large', 'thumbnail']) {
+    const s = sizes[key];
+    if (s?.source_url) return String(s.source_url);
+  }
+  return fallback;
+}
+
 /** 某帖的图片原图：优先媒体附件，为空则回退正文解析（覆盖老帖） */
 export async function fetchPostImages(
   postId: string,
@@ -226,7 +237,7 @@ export async function fetchPostImages(
         parent: String(postId),
         per_page: String(PER_PAGE),
         page: String(page),
-        _fields: 'id,source_url,mime_type',
+        _fields: 'id,source_url,mime_type,media_details',
       });
     } catch {
       break;
@@ -240,7 +251,7 @@ export async function fetchPostImages(
         id: String(m.id),
         type: MediaType.Photo,
         url,
-        thumbUrl: url,
+        thumbUrl: pickThumbUrl(m.media_details, url),
         downloadUrl: url,
         fileName:
           decodeURIComponent(url.split('/').pop() || '') || `figmemo-${m.id}`,
@@ -283,6 +294,38 @@ export async function readExistingMetaIds(): Promise<Set<string>> {
 export async function appendMeta(record: FigmemoMeta): Promise<void> {
   const file = await metaFilePath();
   await fs.writeTextFile(file, `${JSON.stringify(record)}\n`, { append: true });
+}
+
+/** 新建或更新某篇文章元数据的 imageCount（保留已有文章级标签等字段） */
+export async function upsertMetaImageCount(
+  post: {
+    postId: string;
+    title: string;
+    date: string;
+    link: string;
+    categories: { id: number; name: string; slug: string }[];
+  },
+  imageCount: number,
+): Promise<void> {
+  const records = await readMetaRecords();
+  const idx = records.findIndex(
+    (r) => String(r.postId) === String(post.postId),
+  );
+  if (idx >= 0) {
+    records[idx] = {
+      ...records[idx],
+      title: post.title,
+      date: post.date,
+      link: post.link,
+      categories: post.categories,
+      imageCount,
+    };
+  } else {
+    records.push({ ...post, imageCount });
+  }
+  const file = await metaFilePath();
+  const text = records.map((r) => JSON.stringify(r)).join('\n');
+  await fs.writeTextFile(file, text ? `${text}\n` : '');
 }
 
 /**
@@ -747,6 +790,15 @@ async function firstImageIn(dir: string): Promise<string | undefined> {
   return undefined;
 }
 
+/** 本地封面路径的会话缓存（首次加载会构建两次列表，避免重复 readDir） */
+const localCoverCache = new Map<string, string | undefined>();
+async function firstImageInCached(dir: string): Promise<string | undefined> {
+  if (localCoverCache.has(dir)) return localCoverCache.get(dir);
+  const value = await firstImageIn(dir);
+  localCoverCache.set(dir, value);
+  return value;
+}
+
 /**
  * 本地文章列表：读 figmemo.jsonl 元数据（不扫整盘），按需取本地文件夹封面；按发布时间倒序。
  */
@@ -875,13 +927,16 @@ async function buildItems(
     const folderPath = `${baseDir}\\fig-memo\\${folderName}`;
     const exists = dirSet.has(folderName);
     const meta = metaById.get(p.id);
-    const coverUrl =
+    const networkCover =
       (p.featuredMedia && featured.get(p.featuredMedia)) ||
       postCovers.get(p.id) ||
       undefined;
-    // 有封面就不必扫本地；仅缺封面且已下载时才回退本地首图
-    const coverPath =
-      !coverUrl && exists ? await firstImageIn(folderPath) : undefined;
+    // 本地优先：已下载就用本地首图（走缩略图缓存，秒开），没有才回退站点封面 URL
+    const localCover = exists
+      ? await firstImageInCached(folderPath)
+      : undefined;
+    const coverPath = localCover;
+    const coverUrl = localCover ? undefined : networkCover;
     return {
       postId: p.id,
       title: p.title,
@@ -1116,17 +1171,16 @@ async function resolveFeaturedChunk(
 export async function saveFigmemoPost(item: FigmemoListItem): Promise<number> {
   const images = await fetchPostImages(item.postId);
   if (images.length === 0) return 0;
-  const existing = await readExistingMetaIds();
-  if (!existing.has(item.postId)) {
-    await appendMeta({
+  await upsertMetaImageCount(
+    {
       postId: item.postId,
       title: item.title,
       date: item.date,
       link: item.link,
       categories: item.categories,
-      imageCount: images.length,
-    });
-  }
+    },
+    images.length,
+  );
   const platformPost: PlatformPost = {
     id: item.postId,
     creator: {

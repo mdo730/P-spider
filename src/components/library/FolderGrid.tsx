@@ -283,7 +283,7 @@ export const FolderGrid: React.FC<Props> = ({
           />
         ) : (
           <ul
-            className="grid grid-cols-[repeat(auto-fill,minmax(12rem,1fr))] gap-3"
+            className="grid grid-cols-[repeat(auto-fill,minmax(9rem,10rem))] gap-3"
             onContextMenu={(e) => e.preventDefault()}
           >
             {sortedFolders.map((folder) => (
@@ -311,7 +311,7 @@ export const FolderGrid: React.FC<Props> = ({
               />
             ))}
             {loading && (
-              <li className="h-[14rem] flex items-center justify-center bg-white rounded-md border-[1px] border-gray-100">
+              <li className="h-[11rem] flex items-center justify-center bg-white rounded-md border-[1px] border-gray-100">
                 <LoadingOutlined className="text-4xl text-ant-color-primary" />
               </li>
             )}
@@ -447,7 +447,7 @@ const FolderCard: React.FC<FolderCardProps> = ({
   return (
     <Dropdown trigger={['contextMenu']} menu={menu}>
       <li
-        className={`relative bg-white rounded-md border-[1px] overflow-hidden group ${
+        className={`lib-card-cv relative bg-white rounded-md border-[1px] overflow-hidden group ${
           selectMode && selected
             ? 'border-ant-color-primary ring-1 ring-ant-color-primary'
             : 'border-gray-100'
@@ -462,7 +462,7 @@ const FolderCard: React.FC<FolderCardProps> = ({
             name={folder.name}
             coverPath={coverOverride || folder.coverPath}
             coverKind={coverOverride ? 'image' : folder.coverKind}
-            wrapperClassName="w-full h-[12rem]"
+            wrapperClassName="w-full h-[9rem]"
             className="object-cover w-full h-full transition-transform group-hover:scale-105"
           />
           <div className="px-2 py-2">

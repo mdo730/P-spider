@@ -51,6 +51,9 @@ export const useSettingsStore = create(
         if (version === 1) {
           delete state.download.savePath;
         }
+        if (version < 3) {
+          state.split = { direction: 'horizontal', parts: 4 };
+        }
 
         return state;
       },

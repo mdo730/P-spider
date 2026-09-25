@@ -138,11 +138,14 @@ export async function getTimelineGroups(
   );
 }
 
-/** 生成媒体缩略图 URL（复用下载管理页方案：直接走推特 CDN 缩略图） */
+/** 生成媒体缩略图 URL（推特走 CDN 缩略图参数；其它平台原图即缩略图） */
 export function getMediaThumbUrl(record: DownloadHistoryRecord): string {
   if (record.mediaUrl) {
-    // 视频/GIF 的 url 也是 pbs.twimg.com 的预览图，可正常加缩略图参数
-    return `${record.mediaUrl}?format=jpg&name=thumb`;
+    // 仅推特 CDN 支持 ?format=jpg&name=thumb；fig-memo/pawchive 的 mediaUrl 已是图本身
+    if (!record.platform || record.platform === 'twitter') {
+      return `${record.mediaUrl}?format=jpg&name=thumb`;
+    }
+    return record.mediaUrl;
   }
   if (record.filePath) {
     try {

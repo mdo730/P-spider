@@ -1,4 +1,4 @@
-import { fs, path } from '@tauri-apps/api';
+import { fs, invoke, path } from '@tauri-apps/api';
 import { toAssetUrl } from './asset';
 import { LibraryFolderStats, fetchFolderStats } from './library';
 
@@ -10,8 +10,8 @@ function log() {
   return _log;
 }
 
-/** 缩略图最长边（px） */
-const MAX_THUMB_SIZE = 400;
+/** 缩略图边长（px）。正方形居中裁剪，匹配卡片 object-cover 展示；改此值会随缓存 key 失效重生成 */
+const MAX_THUMB_SIZE = 200;
 /** 同时进行的解码/生成数量（避免大图批量解码卡顿） */
 const MAX_CONCURRENCY = 2;
 
@@ -43,11 +43,13 @@ async function getCacheDir(): Promise<string> {
 }
 
 function hashPath(p: string): string {
+  // 把缩略图尺寸并入 key，改尺寸后旧缓存自动失效、重新生成
+  const key = `${MAX_THUMB_SIZE}:${p}`;
   let h = 5381;
-  for (let i = 0; i < p.length; i += 1) {
-    h = ((h << 5) + h + p.charCodeAt(i)) | 0;
+  for (let i = 0; i < key.length; i += 1) {
+    h = ((h << 5) + h + key.charCodeAt(i)) | 0;
   }
-  return `${(h >>> 0).toString(16)}${p.length.toString(16)}`;
+  return `${(h >>> 0).toString(16)}${key.length.toString(16)}`;
 }
 
 async function thumbFilePath(filePath: string): Promise<string> {
@@ -73,6 +75,41 @@ export async function getCachedThumbUrl(
   return null;
 }
 
+/** 是否在 Tauri 桌面环境（v1 注入 __TAURI__，v2 注入 __TAURI_INTERNALS__） */
+function isTauriEnv(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    ('__TAURI__' in window || '__TAURI_INTERNALS__' in window)
+  );
+}
+
+/** 浏览器回退（无 Tauri 时）：canvas 生成 200×200 居中裁剪缩略图 */
+async function generateViaCanvas(filePath: string, out: string): Promise<void> {
+  const bytes = await fs.readBinaryFile(filePath);
+  const bitmap = await createImageBitmap(new Blob([bytes]));
+  const size = Math.min(MAX_THUMB_SIZE, Math.min(bitmap.width, bitmap.height));
+  const scale = Math.max(size / bitmap.width, size / bitmap.height);
+  const sw = size / scale;
+  const sh = size / scale;
+  const sx = (bitmap.width - sw) / 2;
+  const sy = (bitmap.height - sh) / 2;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('无法创建 canvas 上下文');
+  ctx.drawImage(bitmap, sx, sy, sw, sh, 0, 0, size, size);
+  bitmap.close?.();
+  const outBlob = await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob(
+      (b) => (b ? resolve(b) : reject(new Error('toBlob 失败'))),
+      'image/jpeg',
+      0.82,
+    );
+  });
+  await fs.writeBinaryFile(out, new Uint8Array(await outBlob.arrayBuffer()));
+}
+
 /** 生成并缓存图片缩略图，返回 asset URL；失败返回 null */
 export async function generateImageThumbUrl(
   filePath: string,
@@ -91,37 +128,21 @@ export async function generateImageThumbUrl(
         await fs.createDir(dir, { recursive: true });
       }
       const out = await thumbFilePath(filePath);
-      const bytes = await fs.readBinaryFile(filePath);
-      const blob = new Blob([bytes]);
-      const bitmap = await createImageBitmap(blob);
-      const scale = Math.min(
-        1,
-        MAX_THUMB_SIZE / Math.max(bitmap.width, bitmap.height),
-      );
-      const width = Math.max(1, Math.round(bitmap.width * scale));
-      const height = Math.max(1, Math.round(bitmap.height * scale));
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) throw new Error('无法创建 canvas 上下文');
-      ctx.drawImage(bitmap, 0, 0, width, height);
-      bitmap.close?.();
-      const outBlob = await new Promise<Blob>((resolve, reject) => {
-        canvas.toBlob(
-          (b) => (b ? resolve(b) : reject(new Error('toBlob 失败'))),
-          'image/jpeg',
-          0.82,
-        );
-      });
-      await fs.writeBinaryFile(
-        out,
-        new Uint8Array(await outBlob.arrayBuffer()),
-      );
+      if (isTauriEnv()) {
+        // 优先在 Rust 端生成（不占用 WebView 主线程/内存；超大图会直接被拒）
+        await invoke('generate_thumbnail', {
+          src: filePath,
+          dst: out,
+          size: MAX_THUMB_SIZE,
+        });
+      } else {
+        await generateViaCanvas(filePath, out);
+      }
       const url = toAssetUrl(out);
       memoryCache.set(filePath, url);
       return url;
     } catch (err) {
+      // 失败（格式不支持/过大/损坏）→ 返回 null，调用方回退显示原图
       log().warn('generateImageThumbUrl failed', filePath, err);
       return null;
     } finally {
