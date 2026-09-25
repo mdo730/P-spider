@@ -37,7 +37,7 @@ const Item: React.FC<SideBarItemProps> = ({ route, active }) => {
 
 export const SideBar: React.FC = () => {
   const current = useRouteStore((state) => state.route);
-  const figmemoEnabled = useFigmemoStore((s) => s.enabledCategories.length > 0);
+  const figmemoEnabled = useFigmemoStore((s) => s.featureEnabled);
 
   if (!current) return null;
 

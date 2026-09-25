@@ -628,3 +628,82 @@ export async function fetchPostDetail(
     link: body?.link || '',
   };
 }
+
+/**
+ * 站点文章列表（云端，含未下载）+ 本地下载状态/封面合并；按发布时间倒序。
+ */
+export async function listSitePosts(
+  categoryIds?: number[],
+): Promise<FigmemoListItem[]> {
+  const base = useSettingsStore.getState().download.saveDirBase || '';
+  const baseDir = base.replace(/[\\/]+$/, '');
+  const [posts, cats, metaRecords] = await Promise.all([
+    fetchAllPosts(categoryIds && categoryIds.length ? categoryIds : undefined),
+    fetchCategories(),
+    readMetaRecords(),
+  ]);
+  const metaById = new Map(metaRecords.map((r) => [r.postId, r]));
+  posts.sort((a, b) => (a.date < b.date ? 1 : -1));
+  return await mapLimit(posts, 8, async (p) => {
+    const folderName = `${p.date.slice(0, 10)} ${unicodeFilenamify(
+      truncateTitle(p.title),
+    )}`;
+    const folderPath = `${baseDir}\\fig-memo\\${folderName}`;
+    const exists = await fs.exists(folderPath);
+    const meta = metaById.get(p.id);
+    return {
+      postId: p.id,
+      title: p.title,
+      date: p.date,
+      link: p.link,
+      categories: p.categoryIds
+        .map((id) => cats.get(id))
+        .filter((c): c is FigmemoCategory => !!c)
+        .map((c) => ({ id: c.id, name: c.name, slug: c.slug })),
+      imageCount: meta?.imageCount || 0,
+      folderName,
+      folderPath,
+      exists,
+      coverPath: exists ? await firstImageIn(folderPath) : undefined,
+    };
+  });
+}
+
+/** 保存单篇文章到本地（手动保存：不计统计、不打标；调用方随后可 syncLocalTags） */
+export async function saveFigmemoPost(item: FigmemoListItem): Promise<number> {
+  const images = await fetchPostImages(item.postId);
+  if (images.length === 0) return 0;
+  const existing = await readExistingMetaIds();
+  if (!existing.has(item.postId)) {
+    await appendMeta({
+      postId: item.postId,
+      title: item.title,
+      date: item.date,
+      link: item.link,
+      categories: item.categories,
+      imageCount: images.length,
+    });
+  }
+  const platformPost: PlatformPost = {
+    id: item.postId,
+    creator: {
+      id: FIGMEMO_SOURCE,
+      name: FIGMEMO_AUTHOR,
+      username: FIGMEMO_AUTHOR,
+    },
+    publishedAt: dayjs(item.date),
+    text: truncateTitle(item.title),
+    medias: images,
+    links: [],
+    postUrl: item.link,
+    source: FIGMEMO_SOURCE,
+  };
+  await useDownloadStore.getState().batchCreateDownloadTask(
+    images.map((media) => ({
+      source: FIGMEMO_SOURCE,
+      post: platformPost,
+      media,
+    })),
+  );
+  return images.length;
+}

@@ -355,6 +355,16 @@ export const Settings: React.FC = () => {
         </Button>
       </Section>
       <Section title="parukamun 自用订阅" name="parukamun">
+        <div className="flex items-center gap-2 mb-3">
+          <span className="font-medium">启用 fig-memo 功能</span>
+          <Switch
+            checked={figmemo.featureEnabled}
+            onChange={(v) => figmemo.setFeatureEnabled(v)}
+          />
+          <span className="text-sm text-gray-400">
+            开启后左侧显示「fig-memo」选项卡
+          </span>
+        </div>
         <div className="flex items-center flex-wrap gap-3">
           <span className="font-medium">fig-memo</span>
           <Button

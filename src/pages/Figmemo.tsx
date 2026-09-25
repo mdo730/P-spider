@@ -2,6 +2,7 @@
 import {
   ArrowLeftOutlined,
   CopyOutlined,
+  DownloadOutlined,
   ExportOutlined,
   LinkOutlined,
   ReloadOutlined,
@@ -26,8 +27,11 @@ import {
   FigmemoListItem,
   fetchPostDetail,
   fetchPostImages,
-  listLocalPosts,
+  listSitePosts,
+  saveFigmemoPost,
+  syncLocalTags,
 } from '../services/figmemo';
+import { useFigmemoStore } from '../stores/figmemo';
 import { useFigmemoTagsStore } from '../stores/figmemo-tags';
 import {
   DEFAULT_LIBRARY_FILTER,
@@ -61,13 +65,15 @@ export const FigmemoPage: React.FC = () => {
   const [detail, setDetail] = useState<PostDetail | null>(null);
   const [images, setImages] = useState<PlatformMedia[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const relOf = (item: FigmemoListItem) => `fig-memo/${item.folderName}`;
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      setItems(await listLocalPosts());
+      const enabledCategories = useFigmemoStore.getState().enabledCategories;
+      setItems(await listSitePosts(enabledCategories));
     } catch (err: any) {
       log.error(err);
       message.error(err?.message || '读取文章列表失败');
@@ -97,6 +103,25 @@ export const FigmemoPage: React.FC = () => {
       message.error(err?.message || '读取文章详情失败');
     } finally {
       setDetailLoading(false);
+    }
+  };
+
+  const savePost = async () => {
+    if (!selected) return;
+    setSaving(true);
+    try {
+      const n = await saveFigmemoPost(selected);
+      if (n > 0) {
+        await syncLocalTags();
+        message.success(`已加入下载队列（${n} 个附件）`);
+      } else {
+        message.info('该文章没有可下载的图片');
+      }
+      await load();
+    } catch (err: any) {
+      message.error(err?.message || '保存失败');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -180,6 +205,15 @@ export const FigmemoPage: React.FC = () => {
           >
             在原站打开
           </a>
+          <Button
+            className="ml-auto"
+            type="primary"
+            icon={<DownloadOutlined />}
+            loading={saving}
+            onClick={savePost}
+          >
+            保存该文章
+          </Button>
         </div>
         <div className="flex-1 overflow-y-auto pb-10">
           <article className="bg-white rounded-md border-[1px] border-gray-200 max-w-4xl mx-auto p-6">

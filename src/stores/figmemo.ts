@@ -25,6 +25,8 @@ function log() {
 const CHECK_INTERVAL = 24 * 60 * 60 * 1000;
 
 export interface FigmemoStore {
+  /** 是否启用 fig-memo 功能（决定左侧选项卡是否显示） */
+  featureEnabled: boolean;
   /** 已开启的分类（开关=订阅该分类） */
   enabledCategories: number[];
   /** 首次开启的时间基线 */
@@ -43,6 +45,8 @@ export interface FigmemoStore {
 
   /** 开启/关闭某分类的订阅 */
   setCategoryEnabled: (categoryId: number, enabled: boolean) => Promise<void>;
+  /** 启用/停用 fig-memo 功能（选项卡显隐） */
+  setFeatureEnabled: (enabled: boolean) => void;
   /** 建库：下载已开启分类的现存文章（可限定年份） */
   build: (opts?: {
     fromYear?: number;
@@ -57,6 +61,7 @@ export interface FigmemoStore {
 export const useFigmemoStore = create(
   persist<FigmemoStore>(
     (set, get) => ({
+      featureEnabled: false,
       enabledCategories: [],
       startedAt: null,
       lastCheckedAt: null,
@@ -66,6 +71,10 @@ export const useFigmemoStore = create(
       lastError: null,
       running: false,
       progress: null,
+
+      setFeatureEnabled: (enabled) => {
+        set({ featureEnabled: enabled });
+      },
 
       setCategoryEnabled: async (categoryId, enabled) => {
         const cur = get().enabledCategories;
@@ -172,6 +181,7 @@ export const useFigmemoStore = create(
       version: 1,
       partialize: (state) =>
         ({
+          featureEnabled: state.featureEnabled,
           enabledCategories: state.enabledCategories,
           startedAt: state.startedAt,
           lastCheckedAt: state.lastCheckedAt,
