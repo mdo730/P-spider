@@ -2,7 +2,7 @@
 import { Modal, Tree } from 'antd';
 import type { DataNode, TreeProps } from 'antd/es/tree';
 import React, { useEffect, useMemo, useState } from 'react';
-import { useLibraryStore } from '../../stores/library';
+import { useFigmemoTagsStore } from '../../stores/figmemo-tags';
 import { TagNode, buildTagIndex } from '../../utils/library';
 
 interface Props {
@@ -32,14 +32,14 @@ export const TagAssignModal: React.FC<Props> = ({
   label,
   onClose,
 }) => {
-  const tags = useLibraryStore((s) => s.tags);
+  const tags = useFigmemoTagsStore((s) => s.tags);
   const index = useMemo(() => buildTagIndex(tags), [tags]);
   const treeData = useMemo(() => toCheckData(index.roots), [index]);
   const [checked, setChecked] = useState<string[]>([]);
 
   useEffect(() => {
     if (!open) return;
-    const store = useLibraryStore.getState();
+    const store = useFigmemoTagsStore.getState();
     let ids: string[];
     if (targets.length <= 1) {
       ids = targets[0] ? store.getFolderTagIds(targets[0]) : [];
@@ -58,7 +58,7 @@ export const TagAssignModal: React.FC<Props> = ({
   };
 
   const onOk = () => {
-    const store = useLibraryStore.getState();
+    const store = useFigmemoTagsStore.getState();
     const ids = checked.map((k) => k.slice(2));
     if (targets.length <= 1) {
       if (targets[0]) store.setFolderTags(targets[0], ids);

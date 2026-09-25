@@ -5,6 +5,7 @@ import {
   FolderOpenOutlined,
   InfoCircleOutlined,
   ReloadOutlined,
+  TagsOutlined,
 } from '@ant-design/icons';
 import { App, Button, Dropdown, Empty, MenuProps, Segmented, Spin } from 'antd';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -13,6 +14,7 @@ import {
   DownloadHistoryRecord,
   getDownloadHistoryMap,
 } from '../../stores/download-history';
+import { useFigmemoTagsStore } from '../../stores/figmemo-tags';
 import { readTraceMap, TracedRecord } from '../../utils/library';
 import {
   DirectoryContent,
@@ -25,25 +27,29 @@ import {
   scanDirectory,
   sortFiles,
   sortFolders,
+  toRelPath,
 } from '../../utils/library';
 import { showInFolder } from '../../utils/shell';
 import { useSelection } from '../../hooks/useSelection';
-import { FileGrid } from './FileGrid';
-import { FolderCover } from './FolderCover';
+import { FileGrid } from '../library/FileGrid';
+import { FolderCover } from '../library/FolderCover';
 import { FolderProperties } from './FolderProperties';
-import { SortSelect } from './SortSelect';
+import { SortSelect } from '../library/SortSelect';
+import { TagAssignModal } from './TagAssignModal';
 
 interface Props {
   dir: string;
   /** 最外层一级文件夹名（用于「设为文件夹缩略图」） */
   rootFolderName?: string;
+  saveDirBase: string;
   onOpenFolder: (folder: LibrarySubFolder) => void;
 }
 
-/** 文件夹详情：平铺/按文件夹切换、排序、文件多选批量删除、右键菜单/属性 */
+/** 文件夹详情：平铺/按文件夹切换、排序、子文件夹打标签、文件多选批量删除、右键菜单/属性 */
 export const FolderDetail: React.FC<Props> = ({
   dir,
   rootFolderName,
+  saveDirBase,
   onOpenFolder,
 }) => {
   const { message, modal } = App.useApp();
@@ -55,6 +61,8 @@ export const FolderDetail: React.FC<Props> = ({
   const [fileSort, setFileSort] = useState<FileSortKey>('name-desc');
   const [selectMode, setSelectMode] = useState(false);
   const [propsTarget, setPropsTarget] = useState<LibrarySubFolder | null>(null);
+  const [assignTargets, setAssignTargets] = useState<string[] | null>(null);
+  const [assignLabel, setAssignLabel] = useState<string | undefined>();
   const [historyMap, setHistoryMap] = useState<
     Map<string, DownloadHistoryRecord>
   >(new Map());
@@ -86,19 +94,17 @@ export const FolderDetail: React.FC<Props> = ({
         ...data.files.map((f) => f.path),
       ];
       const mtimes = await fetchMtimes(paths);
-      const folders = data.folders.map((folder, index) => ({
+      const folders = data.folders.map((folder, i) => ({
         ...folder,
-        mtime: mtimes[index] ?? undefined,
+        mtime: mtimes[i] ?? undefined,
       }));
-      const files = data.files.map((file, index) => ({
+      const files = data.files.map((file, i) => ({
         ...file,
-        mtime: mtimes[data.folders.length + index] ?? undefined,
+        mtime: mtimes[data.folders.length + i] ?? undefined,
       }));
       setContent({ folders, files });
       // 无子文件夹时只能是平铺；有子文件夹时保留用户当前选择
-      if (data.folders.length === 0) {
-        setViewMode('flat');
-      }
+      if (data.folders.length === 0) setViewMode('flat');
       return data;
     } catch (err: any) {
       log.error(err);
@@ -118,6 +124,11 @@ export const FolderDetail: React.FC<Props> = ({
   useEffect(() => {
     load();
   }, [load]);
+
+  const relOf = useCallback(
+    (folder: LibrarySubFolder) => toRelPath(folder.path, saveDirBase),
+    [saveDirBase],
+  );
 
   const hasFolders = (content?.folders.length || 0) > 0;
   const sortedFolders = useMemo(
@@ -280,16 +291,26 @@ export const FolderDetail: React.FC<Props> = ({
             onContextMenu={(e) => e.preventDefault()}
           >
             {sortedFolders.map((folder) => {
+              const relPath = relOf(folder);
+              const tagCount = useFigmemoTagsStore
+                .getState()
+                .getFolderTagIds(relPath).length;
               const menuItems: MenuProps['items'] = [
                 { key: 'open', label: '打开', icon: <FolderOpenOutlined /> },
                 { key: 'reveal', label: '在资源管理器中打开' },
                 { type: 'divider' },
+                { key: 'tags', label: '标签…', icon: <TagsOutlined /> },
                 { key: 'props', label: '属性', icon: <InfoCircleOutlined /> },
               ];
               const onMenuClick: MenuProps['onClick'] = ({ key, domEvent }) => {
                 domEvent.stopPropagation();
                 if (key === 'open') return onOpenFolder(folder);
                 if (key === 'reveal') return revealFolder(folder);
+                if (key === 'tags') {
+                  setAssignLabel(folder.name);
+                  setAssignTargets([relPath]);
+                  return;
+                }
                 if (key === 'props') return setPropsTarget(folder);
               };
               return (
@@ -317,6 +338,7 @@ export const FolderDetail: React.FC<Props> = ({
                         </p>
                         <p className="text-xs text-gray-400 mt-0.5">
                           {folder.mediaCount} 个媒体
+                          {tagCount > 0 ? ` · ${tagCount} 标签` : ''}
                         </p>
                       </div>
                     </button>
@@ -341,9 +363,17 @@ export const FolderDetail: React.FC<Props> = ({
         )}
       </div>
 
+      <TagAssignModal
+        open={!!assignTargets}
+        targets={assignTargets || []}
+        label={assignLabel}
+        onClose={() => setAssignTargets(null)}
+      />
+
       <FolderProperties
         open={!!propsTarget}
         folderName={propsTarget?.name || ''}
+        relPath={propsTarget ? relOf(propsTarget) : undefined}
         folderPath={propsTarget?.path}
         mediaCount={propsTarget?.mediaCount}
         onClose={() => setPropsTarget(null)}

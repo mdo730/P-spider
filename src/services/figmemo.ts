@@ -4,7 +4,7 @@ import MediaType from '../enums/MediaType';
 import { request } from '../ipc/network';
 import { PlatformMedia, PlatformPost } from '../platforms';
 import { useDownloadStore } from '../stores/download';
-import { useLibraryStore } from '../stores/library';
+import { useFigmemoTagsStore } from '../stores/figmemo-tags';
 import { useSettingsStore } from '../stores/settings';
 import { unicodeFilenamify } from '../utils/unicode';
 
@@ -280,13 +280,13 @@ export async function appendMeta(record: FigmemoMeta): Promise<void> {
 /** 取/建根标签，返回其 id */
 function ensureRootTag(name: string): string {
   const find = () =>
-    useLibraryStore
+    useFigmemoTagsStore
       .getState()
       .tags.find((t) => (t.parentId ?? null) === null && t.name === name);
   let root = find();
   if (!root) {
     try {
-      useLibraryStore.getState().addTag(name, null);
+      useFigmemoTagsStore.getState().addTag(name, null);
     } catch {
       // ignore
     }
@@ -299,13 +299,13 @@ function ensureRootTag(name: string): string {
 function ensureChildTag(rootId: string, name: string): string {
   if (!rootId) return '';
   const find = () =>
-    useLibraryStore
+    useFigmemoTagsStore
       .getState()
       .tags.find((t) => (t.parentId ?? null) === rootId && t.name === name);
   let child = find();
   if (!child) {
     try {
-      useLibraryStore.getState().addTag(name, rootId);
+      useFigmemoTagsStore.getState().addTag(name, rootId);
     } catch {
       // ignore
     }
@@ -354,7 +354,7 @@ export async function syncLocalTags(): Promise<number> {
   if (!base) return 0;
 
   // 兼容旧数据：根「分类」→「fig-memo」
-  const tagsNow = useLibraryStore.getState().tags;
+  const tagsNow = useFigmemoTagsStore.getState().tags;
   const legacy = tagsNow.find(
     (t) => (t.parentId ?? null) === null && t.name === LEGACY_CATEGORY_ROOT,
   );
@@ -363,7 +363,7 @@ export async function syncLocalTags(): Promise<number> {
   );
   if (legacy && !hasNewRoot) {
     try {
-      useLibraryStore.getState().renameTag(legacy.id, FIGMEMO_TAG_ROOT);
+      useFigmemoTagsStore.getState().renameTag(legacy.id, FIGMEMO_TAG_ROOT);
     } catch {
       // ignore
     }
@@ -400,7 +400,7 @@ export async function syncLocalTags(): Promise<number> {
       if (mfrTagId) tagIds.push(mfrTagId);
     }
     if (tagIds.length) {
-      useLibraryStore.getState().addFolderTags([relPath], tagIds);
+      useFigmemoTagsStore.getState().addFolderTags([relPath], tagIds);
       tagged += 1;
     }
   }

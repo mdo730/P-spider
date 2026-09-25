@@ -1,4 +1,4 @@
-import { LibraryTag } from '../../stores/library';
+import { LibraryTag } from '../../stores/figmemo-tags';
 
 /** 路径归一：反斜杠→正斜杠、去首尾斜杠 */
 export function normalizeRel(p: string): string {

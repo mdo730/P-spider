@@ -3,173 +3,98 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { createTauriFileStorage } from './persist/tauri-file-storage';
 
-/** 本地库标签（多级树） */
-export interface LibraryTag {
+/** 本地库标签/分类：标签名 → 一级文件夹名列表（saveDirBase 下的一级目录） */
+export interface LibraryCategory {
   id: string;
   name: string;
-  /** 父标签 id；null = 根标签 */
-  parentId: string | null;
-  /** 直接挂到该标签的文件夹（相对 saveDirBase 的正斜杠路径，可含子文件夹） */
-  paths: string[];
-  /** 同级排序 */
-  sortOrder: number;
+  folders: string[];
 }
 
 export interface LibraryStore {
-  tags: LibraryTag[];
+  categories: LibraryCategory[];
   /** 自定义缩略图：一级文件夹名 → 用作封面的图片绝对路径 */
   folderCovers: Record<string, string>;
-
-  /** 新建标签（parentId 为 null 表示根标签）；同级重名报错 */
-  addTag: (name: string, parentId?: string | null) => string;
-  renameTag: (id: string, name: string) => void;
-  /** 删除标签（含其所有子孙标签及关联） */
-  removeTag: (id: string) => void;
-  /** 移动标签到新父级 + 同级位置（order 为 0-based） */
-  moveTag: (id: string, parentId: string | null, order: number) => void;
-
-  /** 覆盖某文件夹（相对路径）的标签集合 */
-  setFolderTags: (relPath: string, tagIds: string[]) => void;
-  /** 批量给文件夹追加标签（多选追加=并集） */
-  addFolderTags: (relPaths: string[], tagIds: string[]) => void;
-  /** 取某文件夹（相对路径）的标签 id 列表 */
-  getFolderTagIds: (relPath: string) => string[];
-
+  addCategory: (name: string) => string;
+  renameCategory: (id: string, name: string) => void;
+  removeCategory: (id: string) => void;
+  /** 给文件夹添加一个标签（可多标签） */
+  addFolderToCategory: (folderName: string, categoryId: string) => void;
+  /** 移除文件夹的某个标签 */
+  removeFolderFromCategory: (folderName: string, categoryId: string) => void;
+  /** 清空文件夹的全部标签 */
+  clearFolderCategories: (folderName: string) => void;
+  /** 取文件夹所属的全部标签 id */
+  getFolderCategoryIds: (folderName: string) => string[];
   /** 设置一级文件夹的自定义缩略图（传 null 恢复默认） */
   setFolderCover: (folderName: string, filePath: string | null) => void;
   /** 取一级文件夹的自定义缩略图路径 */
   getFolderCover: (folderName: string) => string | undefined;
 }
 
-/** 取某标签及其全部子孙的 id 集合（含自身） */
-function descendantIds(tags: LibraryTag[], id: string): Set<string> {
-  const childrenOf = new Map<string | null, string[]>();
-  for (const t of tags) {
-    const key = t.parentId ?? null;
-    if (!childrenOf.has(key)) childrenOf.set(key, []);
-    childrenOf.get(key)!.push(t.id);
-  }
-  const out = new Set<string>();
-  const stack = [id];
-  while (stack.length) {
-    const cur = stack.pop()!;
-    if (out.has(cur)) continue;
-    out.add(cur);
-    for (const c of childrenOf.get(cur) || []) stack.push(c);
-  }
-  return out;
-}
-
 export const useLibraryStore = create(
   persist<LibraryStore>(
     (set, get) => ({
-      tags: [],
+      categories: [],
       folderCovers: {},
-
-      addTag: (name, parentId = null) => {
+      addCategory: (name) => {
         const trimmed = name.trim();
         if (!trimmed) throw new Error('标签名不能为空');
-        const pid = parentId ?? null;
-        const siblings = get().tags.filter((t) => (t.parentId ?? null) === pid);
-        if (siblings.some((t) => t.name === trimmed)) {
-          throw new Error('同级已存在同名标签');
-        }
+        const exists = get().categories.some((c) => c.name === trimmed);
+        if (exists) throw new Error('已存在同名标签');
         const id = nanoid();
-        const sortOrder = siblings.length
-          ? Math.max(...siblings.map((t) => t.sortOrder)) + 1
-          : 0;
         set({
-          tags: [
-            ...get().tags,
-            { id, name: trimmed, parentId: pid, paths: [], sortOrder },
-          ],
+          categories: [...get().categories, { id, name: trimmed, folders: [] }],
         });
         return id;
       },
-
-      renameTag: (id, name) => {
+      renameCategory: (id, name) => {
         const trimmed = name.trim();
         if (!trimmed) throw new Error('标签名不能为空');
-        const node = get().tags.find((t) => t.id === id);
-        if (!node) return;
-        const pid = node.parentId ?? null;
-        const duplicated = get().tags.some(
-          (t) =>
-            t.id !== id && (t.parentId ?? null) === pid && t.name === trimmed,
+        const duplicated = get().categories.some(
+          (c) => c.id !== id && c.name === trimmed,
         );
-        if (duplicated) throw new Error('同级已存在同名标签');
+        if (duplicated) throw new Error('已存在同名标签');
         set({
-          tags: get().tags.map((t) =>
-            t.id === id ? { ...t, name: trimmed } : t,
+          categories: get().categories.map((c) =>
+            c.id === id ? { ...c, name: trimmed } : c,
           ),
         });
       },
-
-      removeTag: (id) => {
-        const ids = descendantIds(get().tags, id);
-        set({ tags: get().tags.filter((t) => !ids.has(t.id)) });
+      removeCategory: (id) => {
+        set({ categories: get().categories.filter((c) => c.id !== id) });
       },
-
-      moveTag: (id, parentId, order) => {
-        const tags = get().tags;
-        const node = tags.find((t) => t.id === id);
-        if (!node) return;
-        const pid = parentId ?? null;
-        if (pid) {
-          if (pid === id || descendantIds(tags, id).has(pid)) {
-            throw new Error('不能移动到自身或其子标签下');
-          }
-        }
-        const siblings = tags
-          .filter((t) => t.id !== id && (t.parentId ?? null) === pid)
-          .sort((a, b) => a.sortOrder - b.sortOrder);
-        const insertAt = Math.max(0, Math.min(order, siblings.length));
-        siblings.splice(insertAt, 0, node);
-        const orderMap = new Map(siblings.map((t, i) => [t.id, i]));
+      addFolderToCategory: (folderName, categoryId) => {
         set({
-          tags: tags.map((t) => {
-            if (t.id === id) {
-              return { ...t, parentId: pid, sortOrder: orderMap.get(id) ?? 0 };
-            }
-            if (orderMap.has(t.id)) {
-              return { ...t, sortOrder: orderMap.get(t.id)! };
-            }
-            return t;
+          categories: get().categories.map((c) => {
+            if (c.id !== categoryId) return c;
+            if (c.folders.includes(folderName)) return c;
+            return { ...c, folders: [...c.folders, folderName] };
           }),
         });
       },
-
-      setFolderTags: (relPath, tagIds) => {
+      removeFolderFromCategory: (folderName, categoryId) => {
         set({
-          tags: get().tags.map((t) => {
-            const should = tagIds.includes(t.id);
-            const has = t.paths.includes(relPath);
-            if (should && !has) return { ...t, paths: [...t.paths, relPath] };
-            if (!should && has) {
-              return { ...t, paths: t.paths.filter((p) => p !== relPath) };
-            }
-            return t;
+          categories: get().categories.map((c) => {
+            if (c.id !== categoryId) return c;
+            if (!c.folders.includes(folderName)) return c;
+            return { ...c, folders: c.folders.filter((f) => f !== folderName) };
           }),
         });
       },
-
-      addFolderTags: (relPaths, tagIds) => {
-        if (relPaths.length === 0 || tagIds.length === 0) return;
+      clearFolderCategories: (folderName) => {
         set({
-          tags: get().tags.map((t) => {
-            if (!tagIds.includes(t.id)) return t;
-            const missing = relPaths.filter((p) => !t.paths.includes(p));
-            if (missing.length === 0) return t;
-            return { ...t, paths: [...t.paths, ...missing] };
-          }),
+          categories: get().categories.map((c) =>
+            c.folders.includes(folderName)
+              ? { ...c, folders: c.folders.filter((f) => f !== folderName) }
+              : c,
+          ),
         });
       },
-
-      getFolderTagIds: (relPath) =>
-        get()
-          .tags.filter((t) => t.paths.includes(relPath))
-          .map((t) => t.id),
-
+      getFolderCategoryIds: (folderName) => {
+        return get()
+          .categories.filter((c) => c.folders.includes(folderName))
+          .map((c) => c.id);
+      },
       setFolderCover: (folderName, filePath) => {
         set((state) => {
           const next = { ...state.folderCovers };
@@ -183,22 +108,7 @@ export const useLibraryStore = create(
     {
       name: 'library',
       storage: createTauriFileStorage(),
-      version: 2,
-      migrate(state: any, version) {
-        if (version < 2) {
-          state.tags = (state.categories || []).map(
-            (c: any, index: number) => ({
-              id: c.id,
-              name: c.name,
-              parentId: null,
-              paths: c.folders || [],
-              sortOrder: index,
-            }),
-          );
-          delete state.categories;
-        }
-        return state;
-      },
+      version: 1,
     },
   ),
 );

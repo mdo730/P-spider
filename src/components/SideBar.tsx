@@ -4,6 +4,7 @@ import React from 'react';
 import { ROUTES } from '../constants/routes';
 import { Route } from '../interfaces/Route';
 import { useRouteStore } from '../stores/route';
+import { useFigmemoStore } from '../stores/figmemo';
 import { Account } from './Account';
 
 interface SideBarItemProps {
@@ -36,8 +37,11 @@ const Item: React.FC<SideBarItemProps> = ({ route, active }) => {
 
 export const SideBar: React.FC = () => {
   const current = useRouteStore((state) => state.route);
+  const figmemoEnabled = useFigmemoStore((s) => s.enabledCategories.length > 0);
 
   if (!current) return null;
+
+  const routes = ROUTES.filter((r) => r.id !== 'figmemo' || figmemoEnabled);
 
   return (
     <aside
@@ -47,7 +51,7 @@ export const SideBar: React.FC = () => {
       <Account />
       <nav aria-label="页面导航">
         <ul className="pt-6 space-y-2">
-          {ROUTES.map((route) => (
+          {routes.map((route) => (
             <Item
               key={route.id}
               route={route}

@@ -2,39 +2,32 @@
 import { App, Breadcrumb, Button, Empty } from 'antd';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { PageHeader } from '../components/PageHeader';
-import { CategorySidebar } from '../components/library/CategorySidebar';
+import {
+  ALL_CATEGORY_ID,
+  CategorySidebar,
+  UNCLASSIFIED_CATEGORY_ID,
+} from '../components/library/CategorySidebar';
 import { FolderDetail } from '../components/library/FolderDetail';
 import { FolderGrid } from '../components/library/FolderGrid';
 import { useLibraryStore } from '../stores/library';
 import { useSettingsStore } from '../stores/settings';
 import {
-  DEFAULT_LIBRARY_FILTER,
-  LibraryFilter,
   LibraryRootFolder,
   LibrarySubFolder,
-  buildTagIndex,
   fetchMtimes,
   listRootFolders,
-  mapLimit,
-  matchesFilter,
-  normalizeRel,
-  summarizeFolder,
   summarizeFolders,
-  toRelPath,
 } from '../utils/library';
 
-/** 本地库：多级标签管理 saveDirBase 下的文件夹（含子文件夹），按标签浏览 */
+/** 本地库：分类管理 saveDirBase 下的一级文件夹，浏览已下载媒体 */
 export const LibraryPage: React.FC = () => {
   const { message } = App.useApp();
   const saveDirBase = useSettingsStore((s) => s.download.saveDirBase);
-  const tags = useLibraryStore((s) => s.tags);
-  const index = useMemo(() => buildTagIndex(tags), [tags]);
+  const categories = useLibraryStore((s) => s.categories);
 
-  const [filter, setFilter] = useState<LibraryFilter>(DEFAULT_LIBRARY_FILTER);
+  const [selectedId, setSelectedId] = useState<string>(ALL_CATEGORY_ID);
   const [rootFolders, setRootFolders] = useState<LibraryRootFolder[]>([]);
   const [loading, setLoading] = useState(false);
-  const [tagMatched, setTagMatched] = useState<LibraryRootFolder[]>([]);
-  const [tagLoading, setTagLoading] = useState(false);
   const [keyword, setKeyword] = useState('');
   const [opened, setOpened] = useState<LibraryRootFolder | null>(null);
   const [subStack, setSubStack] = useState<LibrarySubFolder[]>([]);
@@ -51,9 +44,9 @@ export const LibraryPage: React.FC = () => {
         const summarized = await summarizeFolders(listed, refresh);
         const mtimes = await fetchMtimes(summarized.map((f) => f.path));
         setRootFolders(
-          summarized.map((folder, i) => ({
+          summarized.map((folder, index) => ({
             ...folder,
-            mtime: mtimes[i] ?? undefined,
+            mtime: mtimes[index] ?? undefined,
           })),
         );
       } catch (err: any) {
@@ -73,95 +66,42 @@ export const LibraryPage: React.FC = () => {
     loadFolders(false);
   }, [loadFolders]);
 
-  const relOf = (path: string) => toRelPath(path, saveDirBase);
-
   const counts = useMemo(() => {
+    const assigned = new Set(categories.flatMap((c) => c.folders));
     const byId: Record<string, number> = {};
-    for (const t of tags) {
-      const set = new Set<string>();
-      for (const tid of index.subtreeIds(t.id)) {
-        const tag = index.byId.get(tid);
-        if (tag) tag.paths.forEach((p) => set.add(normalizeRel(p)));
-      }
-      byId[t.id] = set.size;
+    for (const category of categories) {
+      byId[category.id] = category.folders.length;
     }
-    const unclassified = rootFolders.filter(
-      (f) =>
-        useLibraryStore.getState().getFolderTagIds(relOf(f.path)).length === 0,
-    ).length;
-    return { all: rootFolders.length, unclassified, byId };
-  }, [tags, index, rootFolders, saveDirBase]);
-
-  // 标签筛选：直接展示“命中的文件夹本身”（任意层级），而非包含命中的根文件夹
-  useEffect(() => {
-    if (filter.kind !== 'tags' || !saveDirBase) {
-      setTagMatched([]);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      setTagLoading(true);
-      try {
-        const candidates = new Set<string>();
-        for (const id of filter.tagIds) {
-          for (const tid of index.subtreeIds(id)) {
-            const t = index.byId.get(tid);
-            if (t) t.paths.forEach((p) => candidates.add(normalizeRel(p)));
-          }
-        }
-        const matched = [...candidates].filter((p) =>
-          matchesFilter(index, filter.tagIds, filter.rule, p),
-        );
-        const base = saveDirBase.replace(/[\\/]+$/, '');
-        const absList = matched.map((rel) => ({
-          rel,
-          path: `${base}\\${rel.replace(/\//g, '\\')}`,
-        }));
-        const summaries = await mapLimit(absList, 6, async (f) => ({
-          ...f,
-          summary: await summarizeFolder(f.path),
-        }));
-        const mtimes = await fetchMtimes(summaries.map((f) => f.path));
-        const result: LibraryRootFolder[] = [];
-        summaries.forEach((f, i) => {
-          if (!f.summary) return;
-          result.push({
-            name: f.rel.split('/').pop() || f.rel,
-            path: f.path,
-            ...f.summary,
-            mtime: mtimes[i] ?? undefined,
-          });
-        });
-        if (!cancelled) setTagMatched(result);
-      } catch (err) {
-        log.error('标签筛选失败', err);
-        if (!cancelled) setTagMatched([]);
-      } finally {
-        if (!cancelled) setTagLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
+    return {
+      all: rootFolders.length,
+      unclassified: rootFolders.filter((f) => !assigned.has(f.name)).length,
+      byId,
     };
-  }, [filter, index, saveDirBase]);
+  }, [rootFolders, categories]);
 
   const filteredFolders = useMemo(() => {
-    let list: LibraryRootFolder[];
-    if (filter.kind === 'tags') {
-      list = tagMatched;
-    } else if (filter.kind === 'unclassified') {
-      list = rootFolders.filter(
-        (f) =>
-          useLibraryStore.getState().getFolderTagIds(relOf(f.path)).length ===
-          0,
-      );
-    } else {
-      list = rootFolders;
+    let list = rootFolders;
+    if (selectedId === UNCLASSIFIED_CATEGORY_ID) {
+      const assigned = new Set(categories.flatMap((c) => c.folders));
+      list = list.filter((f) => !assigned.has(f.name));
+    } else if (selectedId !== ALL_CATEGORY_ID) {
+      const category = categories.find((c) => c.id === selectedId);
+      list = category
+        ? list.filter((f) => category.folders.includes(f.name))
+        : [];
     }
     const kw = keyword.trim().toLowerCase();
-    if (kw) list = list.filter((f) => f.name.toLowerCase().includes(kw));
+    if (kw) {
+      list = list.filter((f) => f.name.toLowerCase().includes(kw));
+    }
     return list;
-  }, [rootFolders, tagMatched, filter, keyword, saveDirBase]);
+  }, [rootFolders, categories, selectedId, keyword]);
+
+  const handleSelectCategory = (id: string) => {
+    setSelectedId(id);
+    setOpened(null);
+    setSubStack([]);
+  };
 
   const currentDir = subStack.length
     ? subStack[subStack.length - 1].path
@@ -180,12 +120,12 @@ export const LibraryPage: React.FC = () => {
         </a>
       ),
     },
-    ...subStack.map((folder, i) => ({
+    ...subStack.map((folder, index) => ({
       title:
-        i === subStack.length - 1 ? (
+        index === subStack.length - 1 ? (
           folder.name
         ) : (
-          <a onClick={() => setSubStack((prev) => prev.slice(0, i + 1))}>
+          <a onClick={() => setSubStack((prev) => prev.slice(0, index + 1))}>
             {folder.name}
           </a>
         ),
@@ -203,9 +143,9 @@ export const LibraryPage: React.FC = () => {
       ) : (
         <div className="flex-1 min-h-0 flex gap-4 pb-4">
           <CategorySidebar
-            filter={filter}
+            selectedId={selectedId}
+            onSelect={handleSelectCategory}
             counts={counts}
-            onChange={setFilter}
           />
           <section
             className="flex-1 min-w-0 flex flex-col"
@@ -230,7 +170,6 @@ export const LibraryPage: React.FC = () => {
               <FolderDetail
                 dir={currentDir}
                 rootFolderName={opened.name}
-                saveDirBase={saveDirBase}
                 onOpenFolder={(folder) =>
                   setSubStack((prev) => [...prev, folder])
                 }
@@ -238,10 +177,9 @@ export const LibraryPage: React.FC = () => {
             ) : (
               <FolderGrid
                 folders={filteredFolders}
-                loading={loading || tagLoading}
+                loading={loading}
                 keyword={keyword}
                 onKeywordChange={setKeyword}
-                saveDirBase={saveDirBase}
                 onOpen={(folder) => {
                   setOpened(folder);
                   setSubStack([]);

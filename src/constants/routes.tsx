@@ -9,10 +9,12 @@ import {
   ClockCircleOutlined,
   AppstoreOutlined,
   FolderOutlined,
+  PictureOutlined,
 } from '@ant-design/icons';
 import { Homepage } from '../pages/Homepage';
 import { Archiver } from '../pages/Archiver';
 import { LibraryPage } from '../pages/Library';
+import { FigmemoPage } from '../pages/Figmemo';
 import { DownloadManagement } from '../pages/DownloadManagement';
 import { SubscriptionPage } from '../pages/Subscription';
 import { StatisticsPage } from '../pages/Statistics';
@@ -38,6 +40,12 @@ export const ROUTES: Route[] = [
     name: '本地库',
     icon: <FolderOutlined />,
     element: <LibraryPage />,
+  },
+  {
+    id: 'figmemo',
+    name: 'fig-memo',
+    icon: <PictureOutlined />,
+    element: <FigmemoPage />,
   },
   {
     id: 'subscription',

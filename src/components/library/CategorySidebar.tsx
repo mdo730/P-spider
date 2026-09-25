@@ -1,157 +1,59 @@
 /* eslint-disable react/prop-types */
-import { DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
 import {
-  App,
-  Button,
-  Dropdown,
-  Input,
-  Modal,
-  Segmented,
-  Tag,
-  Tree,
-  TreeSelect,
-} from 'antd';
-import type { DataNode, TreeProps } from 'antd/es/tree';
-import React, { useMemo, useState } from 'react';
-import { useLibraryStore } from '../../stores/library';
-import {
-  FilterRule,
-  LibraryFilter,
-  TagNode,
-  buildTagIndex,
-  dedupeTagSelection,
-} from '../../utils/library';
+  AppstoreOutlined,
+  DeleteOutlined,
+  EditOutlined,
+  InboxOutlined,
+  PlusOutlined,
+} from '@ant-design/icons';
+import { App, Button, Dropdown, Input, Modal } from 'antd';
+import clsx from 'clsx';
+import React, { useState } from 'react';
+import { LibraryCategory, useLibraryStore } from '../../stores/library';
+
+export const ALL_CATEGORY_ID = 'all';
+export const UNCLASSIFIED_CATEGORY_ID = 'unclassified';
 
 interface Props {
-  filter: LibraryFilter;
+  selectedId: string;
+  onSelect: (id: string) => void;
   counts: { all: number; unclassified: number; byId: Record<string, number> };
-  onChange: (filter: LibraryFilter) => void;
 }
 
-function toTreeData(nodes: TagNode[]): DataNode[] {
-  return nodes.map((n) => ({
-    key: `t_${n.id}`,
-    title: n.name,
-    children: n.children.length ? toTreeData(n.children) : undefined,
-  }));
-}
-
-/** 本地库左栏：标签树（多级、可拖拽改父级）+ 全部/未打标签 + 多选筛选（交集/并集） */
 export const CategorySidebar: React.FC<Props> = ({
-  filter,
+  selectedId,
+  onSelect,
   counts,
-  onChange,
 }) => {
   const { modal, message } = App.useApp();
-  const tags = useLibraryStore((s) => s.tags);
-  const addTag = useLibraryStore((s) => s.addTag);
-  const renameTag = useLibraryStore((s) => s.renameTag);
-  const removeTag = useLibraryStore((s) => s.removeTag);
-  const moveTag = useLibraryStore((s) => s.moveTag);
-
-  const index = useMemo(() => buildTagIndex(tags), [tags]);
-  const treeData = useMemo(() => toTreeData(index.roots), [index]);
+  const categories = useLibraryStore((s) => s.categories);
+  const addCategory = useLibraryStore((s) => s.addCategory);
+  const renameCategory = useLibraryStore((s) => s.renameCategory);
+  const removeCategory = useLibraryStore((s) => s.removeCategory);
 
   const [editModal, setEditModal] = useState<
-    | { mode: 'create'; parentId: string | null }
-    | { mode: 'rename'; id: string; initial: string }
-    | null
+    { mode: 'create' } | { mode: 'rename'; category: LibraryCategory } | null
   >(null);
   const [nameInput, setNameInput] = useState('');
-  const [moveId, setMoveId] = useState<string | null>(null);
-  const [moveParent, setMoveParent] = useState<string | null>(null);
 
-  const setFilter = (patch: Partial<LibraryFilter>) =>
-    onChange({ ...filter, ...patch });
-
-  const selectedKeys =
-    filter.kind === 'tags' ? filter.tagIds.map((id) => `t_${id}`) : [];
-
-  const onSelect: TreeProps['onSelect'] = (keys) => {
-    const ids = (keys as string[]).map((k) => String(k).slice(2));
-    if (filter.multi) {
-      const deduped = dedupeTagSelection(index, ids);
-      setFilter({ kind: deduped.length ? 'tags' : 'all', tagIds: deduped });
-    } else {
-      const one = ids.length ? [ids[ids.length - 1]] : [];
-      setFilter({ kind: one.length ? 'tags' : 'all', tagIds: one });
-    }
-  };
-
-  // 「移动到…」可选的目标父级（排除自身及其子孙）
-  const moveOptions = useMemo(() => {
-    if (!moveId) return [];
-    const exclude = index.subtreeIds(moveId);
-    const build = (nodes: TagNode[]): any[] =>
-      nodes
-        .filter((n) => !exclude.has(n.id))
-        .map((n) => ({
-          value: n.id,
-          title: n.name,
-          children: n.children.length ? build(n.children) : undefined,
-        }));
-    return build(index.roots);
-  }, [moveId, index]);
-
-  const confirmMove = () => {
-    if (!moveId) return;
-    try {
-      const childCount = tags.filter(
-        (t) => (t.parentId ?? null) === moveParent,
-      ).length;
-      moveTag(moveId, moveParent, childCount);
-      setMoveId(null);
-    } catch (err: any) {
-      message.error(err?.message || '移动失败');
-    }
-  };
-
-  const confirmDelete = (id: string) => {
-    const node = index.byId.get(id);
-    modal.confirm({
-      title: `删除标签「${node?.name || ''}」？`,
-      content: '将同时删除其所有子标签；文件夹本身不会被删除。',
-      okText: '删除',
-      okButtonProps: { danger: true },
-      cancelText: '取消',
-      onOk: () => {
-        const removed = index.subtreeIds(id);
-        removeTag(id);
-        if (filter.tagIds.some((tid) => removed.has(tid))) {
-          setFilter({ kind: 'all', tagIds: [] });
-        }
-      },
-    });
-  };
-
-  const openCreateRoot = () => {
+  const openCreate = () => {
     setNameInput('');
-    setEditModal({ mode: 'create', parentId: null });
+    setEditModal({ mode: 'create' });
   };
 
-  const onNodeAction = (key: string, id: string) => {
-    if (key === 'child') {
-      setNameInput('');
-      setEditModal({ mode: 'create', parentId: id });
-    } else if (key === 'rename') {
-      const node = index.byId.get(id);
-      setNameInput(node?.name || '');
-      setEditModal({ mode: 'rename', id, initial: node?.name || '' });
-    } else if (key === 'move') {
-      setMoveParent(index.byId.get(id)?.parentId ?? null);
-      setMoveId(id);
-    } else if (key === 'delete') {
-      confirmDelete(id);
-    }
+  const openRename = (category: LibraryCategory) => {
+    setNameInput(category.name);
+    setEditModal({ mode: 'rename', category });
   };
 
   const confirmEdit = () => {
     if (!editModal) return;
     try {
       if (editModal.mode === 'create') {
-        addTag(nameInput, editModal.parentId);
+        const id = addCategory(nameInput);
+        onSelect(id);
       } else {
-        renameTag(editModal.id, nameInput);
+        renameCategory(editModal.category.id, nameInput);
       }
       setEditModal(null);
     } catch (err: any) {
@@ -159,136 +61,98 @@ export const CategorySidebar: React.FC<Props> = ({
     }
   };
 
-  const renderTitle: TreeProps['titleRender'] = (node) => {
-    const id = String(node.key).slice(2);
-    const name = index.byId.get(id)?.name || '';
-    const count = counts.byId[id] || 0;
-    return (
-      <span className="group flex w-full items-center gap-1 pr-1 min-w-0">
-        <span className="truncate" title={name}>
-          {name}
-        </span>
-        {count > 0 && <span className="text-xs text-gray-400">{count}</span>}
-        <Dropdown
-          trigger={['click']}
-          menu={{
-            items: [
-              { key: 'child', label: '新建子标签', icon: <PlusOutlined /> },
-              { key: 'rename', label: '重命名', icon: <EditOutlined /> },
-              { key: 'move', label: '移动到…' },
-              { type: 'divider' },
-              {
-                key: 'delete',
-                label: '删除',
-                icon: <DeleteOutlined />,
-                danger: true,
-              },
-            ],
-            onClick: ({ key, domEvent }) => {
-              domEvent.stopPropagation();
-              onNodeAction(key, id);
-            },
-          }}
-        >
-          <button
-            aria-label="标签操作"
-            className="ml-auto opacity-0 group-hover:opacity-100 text-gray-400 hover:text-gray-700"
-            onClick={(e) => e.stopPropagation()}
-          >
-            ⋯
-          </button>
-        </Dropdown>
-      </span>
-    );
+  const confirmDelete = (category: LibraryCategory) => {
+    modal.confirm({
+      title: `删除标签「${category.name}」？`,
+      content: '仅删除标签，文件夹本身不会被删除。',
+      okText: '删除',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: () => {
+        removeCategory(category.id);
+        if (selectedId === category.id) onSelect(ALL_CATEGORY_ID);
+      },
+    });
   };
 
   return (
     <aside
       aria-label="本地库标签"
-      className="w-60 shrink-0 flex flex-col bg-white border-[1px] border-gray-200 rounded-md overflow-hidden"
+      className="w-56 shrink-0 flex flex-col bg-white border-[1px] border-gray-200 rounded-md overflow-hidden"
     >
-      <div className="p-2 flex items-center gap-1 flex-wrap border-b-[1px] border-gray-100">
-        <Button
-          size="small"
-          type={filter.kind === 'all' ? 'primary' : 'default'}
-          onClick={() => setFilter({ kind: 'all', tagIds: [] })}
-        >
-          全部 <span className="opacity-60 ml-1">{counts.all}</span>
-        </Button>
-        <Button
-          size="small"
-          type={filter.kind === 'unclassified' ? 'primary' : 'default'}
-          onClick={() => setFilter({ kind: 'unclassified' })}
-        >
-          未打标签{' '}
-          <span className="opacity-60 ml-1">{counts.unclassified}</span>
-        </Button>
-      </div>
-
-      <div className="p-2 flex items-center gap-1 flex-wrap border-b-[1px] border-gray-100">
-        <Button size="small" icon={<PlusOutlined />} onClick={openCreateRoot}>
+      <ul className="flex-1 overflow-y-auto py-2">
+        <li>
+          <CategoryItem
+            active={selectedId === ALL_CATEGORY_ID}
+            icon={<AppstoreOutlined />}
+            name="全部"
+            count={counts.all}
+            onClick={() => onSelect(ALL_CATEGORY_ID)}
+          />
+        </li>
+        <li>
+          <CategoryItem
+            active={selectedId === UNCLASSIFIED_CATEGORY_ID}
+            icon={<InboxOutlined />}
+            name="未打标签"
+            count={counts.unclassified}
+            onClick={() => onSelect(UNCLASSIFIED_CATEGORY_ID)}
+          />
+        </li>
+        <li className="px-3 pt-3 pb-1 text-xs text-gray-400">自定义标签</li>
+        {categories.map((category) => (
+          <li key={category.id}>
+            <CategoryItem
+              active={selectedId === category.id}
+              icon={<AppstoreOutlined />}
+              name={category.name}
+              count={counts.byId[category.id] || 0}
+              onClick={() => onSelect(category.id)}
+              actions={
+                <Dropdown
+                  trigger={['click']}
+                  menu={{
+                    items: [
+                      {
+                        key: 'rename',
+                        label: '重命名',
+                        icon: <EditOutlined />,
+                      },
+                      {
+                        key: 'delete',
+                        label: '删除',
+                        icon: <DeleteOutlined />,
+                        danger: true,
+                      },
+                    ],
+                    onClick: ({ key, domEvent }) => {
+                      domEvent.stopPropagation();
+                      if (key === 'rename') openRename(category);
+                      if (key === 'delete') confirmDelete(category);
+                    },
+                  }}
+                >
+                  <button
+                    aria-label="标签操作"
+                    className="px-1 text-gray-400 hover:text-gray-700"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    ⋯
+                  </button>
+                </Dropdown>
+              }
+            />
+          </li>
+        ))}
+        {categories.length === 0 && (
+          <li className="px-3 py-1 text-xs text-gray-300">暂无标签</li>
+        )}
+      </ul>
+      <div className="p-3 border-t-[1px] border-gray-100">
+        <Button block icon={<PlusOutlined />} onClick={openCreate}>
           新建标签
         </Button>
-        <Button
-          size="small"
-          type={filter.multi ? 'primary' : 'default'}
-          onClick={() => {
-            const nextMulti = !filter.multi;
-            const tagIds =
-              !nextMulti && filter.tagIds.length > 1
-                ? [filter.tagIds[filter.tagIds.length - 1]]
-                : filter.tagIds;
-            setFilter({ multi: nextMulti, tagIds });
-          }}
-        >
-          多标签
-        </Button>
-        {filter.multi && (
-          <Segmented
-            size="small"
-            value={filter.rule}
-            onChange={(v) => setFilter({ rule: v as FilterRule })}
-            options={[
-              { label: '交集', value: 'intersect' },
-              { label: '并集', value: 'union' },
-            ]}
-          />
-        )}
       </div>
-
-      <div className="flex-1 overflow-y-auto py-1">
-        {index.roots.length === 0 ? (
-          <p className="px-3 py-2 text-xs text-gray-300">暂无标签</p>
-        ) : (
-          <Tree
-            blockNode
-            multiple={filter.multi}
-            selectable
-            selectedKeys={selectedKeys}
-            treeData={treeData}
-            titleRender={renderTitle}
-            onSelect={onSelect}
-          />
-        )}
-      </div>
-
-      {filter.multi && filter.tagIds.length > 0 && (
-        <div className="p-2 border-t-[1px] border-gray-100 flex flex-wrap gap-1">
-          {filter.tagIds.map((id) => (
-            <Tag
-              key={id}
-              closable
-              onClose={(e) => {
-                e.preventDefault();
-                const next = filter.tagIds.filter((x) => x !== id);
-                setFilter({ kind: next.length ? 'tags' : 'all', tagIds: next });
-              }}
-            >
-              {index.byId.get(id)?.name}
-            </Tag>
-          ))}
-        </div>
-      )}
 
       <Modal
         open={!!editModal}
@@ -302,29 +166,52 @@ export const CategorySidebar: React.FC<Props> = ({
         <Input
           autoFocus
           value={nameInput}
-          placeholder="标签名，如 ALTER"
+          placeholder="分类名，如 真人cos"
           onChange={(e) => setNameInput(e.target.value)}
           onPressEnter={confirmEdit}
         />
       </Modal>
-
-      <Modal
-        open={!!moveId}
-        title={`移动「${moveId ? index.byId.get(moveId)?.name : ''}」到`}
-        okText="移动"
-        cancelText="取消"
-        onOk={confirmMove}
-        onCancel={() => setMoveId(null)}
-        destroyOnClose
-      >
-        <TreeSelect
-          style={{ width: '100%' }}
-          value={moveParent ?? '__root__'}
-          treeDefaultExpandAll
-          treeData={[{ value: '__root__', title: '（顶层）' }, ...moveOptions]}
-          onChange={(v) => setMoveParent(v === '__root__' ? null : v)}
-        />
-      </Modal>
     </aside>
+  );
+};
+
+interface CategoryItemProps {
+  active: boolean;
+  icon: React.ReactNode;
+  name: string;
+  count: number;
+  onClick: () => void;
+  actions?: React.ReactNode;
+}
+
+const CategoryItem: React.FC<CategoryItemProps> = ({
+  active,
+  icon,
+  name,
+  count,
+  onClick,
+  actions,
+}) => {
+  return (
+    <button
+      onClick={onClick}
+      className={clsx(
+        'group w-full flex items-center px-3 py-2 text-sm transition-colors',
+        active
+          ? 'bg-ant-color-primary-bg text-ant-color-primary'
+          : 'hover:bg-gray-50 text-gray-700',
+      )}
+    >
+      <span className="mr-2 text-gray-400">{icon}</span>
+      <span className="flex-1 text-left truncate" title={name}>
+        {name}
+      </span>
+      <span className="text-xs text-gray-400 ml-1">{count}</span>
+      {actions && (
+        <span className="ml-1 opacity-0 group-hover:opacity-100">
+          {actions}
+        </span>
+      )}
+    </button>
   );
 };
