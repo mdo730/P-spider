@@ -35,6 +35,13 @@ export interface LibraryStore {
   /** 取某文件夹（相对路径）的标签 id 列表 */
   getFolderTagIds: (relPath: string) => string[];
 
+  /** 批量取/建标签（已存在则复用），返回 `parentId\u0000name` → id */
+  addTagsBatch: (
+    specs: { name: string; parentId: string | null }[],
+  ) => Record<string, string>;
+  /** 批量设置文件夹→标签关系（一次写入，取并集） */
+  applyFolderTags: (entries: { relPath: string; tagIds: string[] }[]) => void;
+
   /** 设置一级文件夹的自定义缩略图（传 null 恢复默认） */
   setFolderCover: (folderName: string, filePath: string | null) => void;
   /** 取一级文件夹的自定义缩略图路径 */
@@ -169,6 +176,56 @@ export const useFigmemoTagsStore = create(
         get()
           .tags.filter((t) => t.paths.includes(relPath))
           .map((t) => t.id),
+
+      addTagsBatch: (specs) => {
+        const tagKey = (pid: string | null, name: string) =>
+          `${pid ?? ''}\u0000${name}`;
+        const tags = get().tags;
+        const result: Record<string, string> = {};
+        const byKey = new Map<string, string>();
+        for (const t of tags) {
+          byKey.set(tagKey(t.parentId ?? null, t.name), t.id);
+        }
+        const nextOrder = new Map<string | null, number>();
+        for (const t of tags) {
+          const k = t.parentId ?? null;
+          nextOrder.set(k, Math.max(nextOrder.get(k) ?? -1, t.sortOrder));
+        }
+        const created: LibraryTag[] = [];
+        for (const spec of specs) {
+          const name = spec.name.trim();
+          if (!name) continue;
+          const pid = spec.parentId ?? null;
+          const k = tagKey(pid, name);
+          if (byKey.has(k)) {
+            result[k] = byKey.get(k)!;
+            continue;
+          }
+          const id = nanoid();
+          const sortOrder = (nextOrder.get(pid) ?? -1) + 1;
+          nextOrder.set(pid, sortOrder);
+          created.push({ id, name, parentId: pid, paths: [], sortOrder });
+          byKey.set(k, id);
+          result[k] = id;
+        }
+        if (created.length) set({ tags: [...tags, ...created] });
+        return result;
+      },
+
+      applyFolderTags: (entries) => {
+        if (entries.length === 0) return;
+        set({
+          tags: get().tags.map((t) => {
+            const adds: string[] = [];
+            for (const e of entries) {
+              if (e.tagIds.includes(t.id) && !t.paths.includes(e.relPath)) {
+                adds.push(e.relPath);
+              }
+            }
+            return adds.length ? { ...t, paths: [...t.paths, ...adds] } : t;
+          }),
+        });
+      },
 
       setFolderCover: (folderName, filePath) => {
         set((state) => {

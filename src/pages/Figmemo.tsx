@@ -5,6 +5,7 @@ import {
   DownloadOutlined,
   ExportOutlined,
   LinkOutlined,
+  PlusOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
 import {
@@ -29,7 +30,7 @@ import {
   fetchPostImages,
   listSitePosts,
   saveFigmemoPost,
-  syncLocalTags,
+  setArticleTags,
 } from '../services/figmemo';
 import { useFigmemoStore } from '../stores/figmemo';
 import { useFigmemoTagsStore } from '../stores/figmemo-tags';
@@ -50,6 +51,13 @@ interface PostDetail {
   link: string;
 }
 
+/** 文章级标签分组（可后续扩充；可选值之外还能自定义） */
+const TAG_GROUPS: { key: string; options: string[] }[] = [
+  { key: '姿势', options: ['站姿', '蹲姿', '坐姿'] },
+  { key: '发型', options: ['长发', '短发', '特殊发型'] },
+  { key: '体型', options: ['幼女', '成女', '熟女'] },
+];
+
 /** fig-memo：标签树筛选 + 本地文章列表 + 网页式详情 */
 export const FigmemoPage: React.FC = () => {
   const { message } = App.useApp();
@@ -66,6 +74,10 @@ export const FigmemoPage: React.FC = () => {
   const [images, setImages] = useState<PlatformMedia[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  const [activeGroup, setActiveGroup] = useState<string | null>(null);
+  const [customInput, setCustomInput] = useState('');
+  const [tagSaving, setTagSaving] = useState(false);
 
   const relOf = (item: FigmemoListItem) => `fig-memo/${item.folderName}`;
 
@@ -112,7 +124,6 @@ export const FigmemoPage: React.FC = () => {
     try {
       const n = await saveFigmemoPost(selected);
       if (n > 0) {
-        await syncLocalTags();
         message.success(`已加入下载队列（${n} 个附件）`);
       } else {
         message.info('该文章没有可下载的图片');
@@ -123,6 +134,44 @@ export const FigmemoPage: React.FC = () => {
     } finally {
       setSaving(false);
     }
+  };
+
+  const applyArticleTags = async (next: Record<string, string[]>) => {
+    if (!selected) return;
+    const clean: Record<string, string[]> = {};
+    for (const [g, vs] of Object.entries(next)) {
+      const arr = (vs || []).filter(Boolean);
+      if (arr.length) clean[g] = arr;
+    }
+    setSelected({ ...selected, articleTags: clean });
+    setTagSaving(true);
+    try {
+      await setArticleTags(selected, clean);
+    } catch (err: any) {
+      message.error(err?.message || '标签保存失败');
+    } finally {
+      setTagSaving(false);
+    }
+  };
+
+  const toggleArticleTag = (group: string, value: string) => {
+    const cur = selected?.articleTags || {};
+    const list = cur[group] || [];
+    const next = { ...cur };
+    next[group] = list.includes(value)
+      ? list.filter((v) => v !== value)
+      : [...list, value];
+    if (next[group].length === 0) delete next[group];
+    applyArticleTags(next);
+  };
+
+  const addCustomTag = (group: string, value: string) => {
+    const v = value.trim();
+    if (!v) return;
+    const cur = selected?.articleTags || {};
+    const list = cur[group] || [];
+    if (!list.includes(v)) applyArticleTags({ ...cur, [group]: [...list, v] });
+    setCustomInput('');
   };
 
   const counts = useMemo(() => {
@@ -225,6 +274,13 @@ export const FigmemoPage: React.FC = () => {
               {selected.categories.map((c) => (
                 <Tag key={c.id}>{c.name}</Tag>
               ))}
+              {Object.entries(selected.articleTags || {}).flatMap(([g, vs]) =>
+                (vs || []).map((v) => (
+                  <Tag key={`${g}:${v}`} color="blue">
+                    {g}·{v}
+                  </Tag>
+                )),
+              )}
               <span>
                 · {selected.imageCount} 张图 ·{' '}
                 {selected.exists ? '已下载' : '未下载'}
@@ -277,6 +333,69 @@ export const FigmemoPage: React.FC = () => {
             )}
           </article>
         </div>
+
+        {/* 右下角悬浮：文章标签（姿势/发型/体型…） */}
+        <div className="fixed right-6 bottom-6 z-50 flex flex-col items-end gap-2">
+          {activeGroup && (
+            <div className="bg-white rounded-lg shadow-xl border-[1px] border-gray-200 p-3 w-64">
+              <div className="text-sm font-medium mb-2 flex items-center">
+                {activeGroup}
+                {tagSaving && <Spin size="small" className="ml-2" />}
+                <Button
+                  type="text"
+                  size="small"
+                  className="ml-auto"
+                  onClick={() => setActiveGroup(null)}
+                >
+                  收起
+                </Button>
+              </div>
+              <div className="flex flex-wrap gap-1 mb-3">
+                {Array.from(
+                  new Set([
+                    ...(TAG_GROUPS.find((g) => g.key === activeGroup)
+                      ?.options || []),
+                    ...((selected.articleTags || {})[activeGroup] || []),
+                  ]),
+                ).map((v) => (
+                  <Tag.CheckableTag
+                    key={v}
+                    checked={(
+                      (selected.articleTags || {})[activeGroup] || []
+                    ).includes(v)}
+                    onChange={() => toggleArticleTag(activeGroup, v)}
+                  >
+                    {v}
+                  </Tag.CheckableTag>
+                ))}
+              </div>
+              <Input.Search
+                size="small"
+                placeholder="自定义后回车"
+                value={customInput}
+                onChange={(e) => setCustomInput(e.target.value)}
+                onSearch={(v) => addCustomTag(activeGroup, v)}
+                enterButton={<PlusOutlined />}
+              />
+            </div>
+          )}
+          <div className="flex items-center gap-2 bg-white rounded-full shadow-xl border-[1px] border-gray-200 px-2 py-1">
+            {TAG_GROUPS.map((g) => (
+              <Button
+                key={g.key}
+                size="small"
+                shape="round"
+                type={activeGroup === g.key ? 'primary' : 'default'}
+                onClick={() => {
+                  setActiveGroup(activeGroup === g.key ? null : g.key);
+                  setCustomInput('');
+                }}
+              >
+                {g.key}
+              </Button>
+            ))}
+          </div>
+        </div>
       </div>
     );
   }
@@ -322,16 +441,23 @@ export const FigmemoPage: React.FC = () => {
                     onClick={() => openPost(item)}
                   >
                     <div className="h-[12rem] bg-gray-100">
-                      {item.coverPath ? (
+                      {item.coverUrl || item.coverPath ? (
                         <img
-                          src={toAssetUrl(item.coverPath)}
+                          src={
+                            item.coverUrl || toAssetUrl(item.coverPath || '')
+                          }
                           alt={item.title}
                           loading="lazy"
+                          referrerPolicy="no-referrer"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).style.display =
+                              'none';
+                          }}
                           className="w-full h-full object-cover transition-transform group-hover:scale-105"
                         />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center text-gray-400 text-sm">
-                          {item.exists ? '无封面' : '未下载'}
+                          无封面
                         </div>
                       )}
                     </div>

@@ -31,6 +31,8 @@ export const FIGMEMO_FEED_ID = 'figmemo-feed';
 const FIGMEMO_TAG_ROOT = 'fig-memo';
 /** 厂商标签的根标签名 */
 const MANUFACTURER_ROOT = '厂商';
+/** 年份标签的根标签名 */
+const YEAR_ROOT = '年份';
 /** 旧版分类根标签名（迁移用） */
 const LEGACY_CATEGORY_ROOT = '分类';
 
@@ -40,6 +42,8 @@ export interface FigmemoPost {
   link: string;
   title: string;
   categoryIds: number[];
+  /** 特色图媒体 id（封面用） */
+  featuredMedia?: number;
 }
 
 export interface FigmemoCategory {
@@ -56,6 +60,8 @@ export interface FigmemoMeta {
   link: string;
   categories: { id: number; name: string; slug: string }[];
   imageCount: number;
+  /** 文章级标签（姿势/发型/体型…）：组名 → 取值列表 */
+  articleTags?: Record<string, string[]>;
 }
 
 export interface FigmemoProgress {
@@ -120,7 +126,7 @@ async function fetchPostsPage(
       page: String(page),
       orderby: 'date',
       order: 'desc',
-      _fields: 'id,date,link,title,categories',
+      _fields: 'id,date,link,title,categories,featured_media',
     };
     if (categoryIds && categoryIds.length) {
       query.categories = categoryIds.join(',');
@@ -136,6 +142,7 @@ async function fetchPostsPage(
     link: p.link,
     title: p.title?.rendered || '',
     categoryIds: p.categories || [],
+    featuredMedia: p.featured_media || undefined,
   }));
 }
 
@@ -278,41 +285,46 @@ export async function appendMeta(record: FigmemoMeta): Promise<void> {
   await fs.writeTextFile(file, `${JSON.stringify(record)}\n`, { append: true });
 }
 
-/** 取/建根标签，返回其 id */
-function ensureRootTag(name: string): string {
-  const find = () =>
-    useFigmemoTagsStore
-      .getState()
-      .tags.find((t) => (t.parentId ?? null) === null && t.name === name);
-  let root = find();
-  if (!root) {
-    try {
-      useFigmemoTagsStore.getState().addTag(name, null);
-    } catch {
-      // ignore
-    }
-    root = find();
+/**
+ * 写入/更新某篇文章的文章级标签（姿势/发型/体型…）。
+ * 没有元数据记录的文章（未下载）也会补建一条记录。
+ */
+export async function setArticleTags(
+  post: {
+    postId: string;
+    title: string;
+    date: string;
+    link: string;
+    categories: { id: number; name: string; slug: string }[];
+    imageCount: number;
+  },
+  articleTags: Record<string, string[]>,
+): Promise<void> {
+  const clean: Record<string, string[]> = {};
+  for (const [group, values] of Object.entries(articleTags)) {
+    const arr = (values || []).map((v) => v.trim()).filter(Boolean);
+    if (arr.length) clean[group] = arr;
   }
-  return root?.id || '';
-}
-
-/** 取/建某根标签下的子标签，返回其 id */
-function ensureChildTag(rootId: string, name: string): string {
-  if (!rootId) return '';
-  const find = () =>
-    useFigmemoTagsStore
-      .getState()
-      .tags.find((t) => (t.parentId ?? null) === rootId && t.name === name);
-  let child = find();
-  if (!child) {
-    try {
-      useFigmemoTagsStore.getState().addTag(name, rootId);
-    } catch {
-      // ignore
-    }
-    child = find();
+  const records = await readMetaRecords();
+  const idx = records.findIndex(
+    (r) => String(r.postId) === String(post.postId),
+  );
+  if (idx >= 0) {
+    records[idx] = { ...records[idx], articleTags: clean };
+  } else {
+    records.push({
+      postId: post.postId,
+      title: post.title,
+      date: post.date,
+      link: post.link,
+      categories: post.categories,
+      imageCount: post.imageCount,
+      articleTags: clean,
+    });
   }
-  return child?.id || '';
+  const file = await metaFilePath();
+  const text = records.map((r) => JSON.stringify(r)).join('\n');
+  await fs.writeTextFile(file, text ? `${text}\n` : '');
 }
 
 /** 读取 figmemo.jsonl 全部元数据记录 */
@@ -346,9 +358,9 @@ function guessManufacturer(title: string): string {
 }
 
 /**
- * 按**本地文件夹**同步标签（分类 + 厂商）：
- * 只给「本地确实存在文件夹」的帖子打标（基于 figmemo.jsonl 元数据 + 磁盘存在性判断），
- * 未下载到的帖子不打标。建库/追新结束后或手动都可调用，返回打标的文件夹数。
+ * 同步 fig-memo 标签（分类 + 厂商 + 年份）：
+ * 覆盖**站点全部文章**（含未下载），未下载的也一并进入对应标签。
+ * 建库/追新结束后或手动都可调用，返回已打标的文章数。
  */
 export async function syncLocalTags(): Promise<number> {
   const base = useSettingsStore.getState().download.saveDirBase;
@@ -370,42 +382,107 @@ export async function syncLocalTags(): Promise<number> {
     }
   }
 
-  const records = await readMetaRecords();
-  const rootId = ensureRootTag(FIGMEMO_TAG_ROOT);
-  const mfrRootId = ensureRootTag(MANUFACTURER_ROOT);
+  const [sitePosts, metaRecords, cats] = await Promise.all([
+    fetchAllPosts().catch(() => [] as FigmemoPost[]),
+    readMetaRecords(),
+    fetchCategories().catch(() => new Map<number, FigmemoCategory>()),
+  ]);
 
-  const catTagMap = new Map<number, string>();
-  const seenCat = new Set<number>();
-  for (const r of records) {
+  const namesById = new Map<number, string>();
+  for (const c of cats.values()) namesById.set(c.id, c.name);
+  for (const r of metaRecords) {
     for (const c of r.categories || []) {
-      if (seenCat.has(c.id)) continue;
-      seenCat.add(c.id);
-      const tagId = ensureChildTag(rootId, c.name);
-      if (tagId) catTagMap.set(c.id, tagId);
+      if (!namesById.has(c.id)) namesById.set(c.id, c.name);
     }
   }
 
-  const baseDir = base.replace(/[\\/]+$/, '');
+  // 汇总条目：站点全部文章 + 仅本地存在的补漏记录
+  interface Entry {
+    title: string;
+    date: string;
+    categoryIds: number[];
+  }
+  const seen = new Set<string>();
+  const entries: Entry[] = [];
+  for (const p of sitePosts) {
+    seen.add(String(p.id));
+    entries.push({ title: p.title, date: p.date, categoryIds: p.categoryIds });
+  }
+  for (const r of metaRecords) {
+    const id = String(r.postId);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    entries.push({
+      title: r.title,
+      date: r.date,
+      categoryIds: (r.categories || []).map((c) => c.id),
+    });
+  }
+
+  const tagKey = (pid: string | null, name: string) =>
+    `${pid ?? ''}\u0000${name}`;
+
+  // 先建三个根标签
+  const rootMap = useFigmemoTagsStore.getState().addTagsBatch([
+    { name: FIGMEMO_TAG_ROOT, parentId: null },
+    { name: MANUFACTURER_ROOT, parentId: null },
+    { name: YEAR_ROOT, parentId: null },
+  ]);
+  const rootId = rootMap[tagKey(null, FIGMEMO_TAG_ROOT)] || '';
+  const mfrRootId = rootMap[tagKey(null, MANUFACTURER_ROOT)] || '';
+  const yearRootId = rootMap[tagKey(null, YEAR_ROOT)] || '';
+
+  // 收集所有需要的一级子标签
+  const catNames = new Set<string>();
+  const mfrNames = new Set<string>();
+  const yearNames = new Set<string>();
+  for (const e of entries) {
+    for (const cid of e.categoryIds) {
+      const n = namesById.get(cid);
+      if (n) catNames.add(n);
+    }
+    const mfr = guessManufacturer(e.title);
+    if (mfr) mfrNames.add(mfr);
+    const y = e.date ? dayjs(e.date).format('YYYY') : '';
+    if (y) yearNames.add(y);
+  }
+  const childSpecs = [
+    ...[...catNames].map((name) => ({ name, parentId: rootId })),
+    ...[...mfrNames].map((name) => ({ name, parentId: mfrRootId })),
+    ...[...yearNames].map((name) => ({ name, parentId: yearRootId })),
+  ].filter((s) => s.parentId);
+  const childMap = useFigmemoTagsStore.getState().addTagsBatch(childSpecs);
+
+  // 逐条算标签，一次性写入文件夹关系
+  const relEntries: { relPath: string; tagIds: string[] }[] = [];
   let tagged = 0;
-  for (const r of records) {
-    const relPath = figmemoRelDir(r.title, r.date);
-    const abs = `${baseDir}\\${relPath.replace(/\//g, '\\')}`;
-    // 本地没有该文件夹 → 不建标签
-    if (!(await fs.exists(abs))) continue;
-    const tagIds = (r.categories || [])
-      .map((c) => catTagMap.get(c.id))
-      .filter((x): x is string => !!x);
-    const mfr = guessManufacturer(r.title);
-    if (mfr) {
-      const mfrTagId = ensureChildTag(mfrRootId, mfr);
-      if (mfrTagId) tagIds.push(mfrTagId);
+  for (const e of entries) {
+    const relPath = figmemoRelDir(e.title, e.date);
+    const tagIds: string[] = [];
+    for (const cid of e.categoryIds) {
+      const n = namesById.get(cid);
+      if (n && rootId) {
+        const id = childMap[tagKey(rootId, n)];
+        if (id) tagIds.push(id);
+      }
+    }
+    const mfr = guessManufacturer(e.title);
+    if (mfr && mfrRootId) {
+      const id = childMap[tagKey(mfrRootId, mfr)];
+      if (id) tagIds.push(id);
+    }
+    const y = e.date ? dayjs(e.date).format('YYYY') : '';
+    if (y && yearRootId) {
+      const id = childMap[tagKey(yearRootId, y)];
+      if (id) tagIds.push(id);
     }
     if (tagIds.length) {
-      useFigmemoTagsStore.getState().addFolderTags([relPath], tagIds);
+      relEntries.push({ relPath, tagIds });
       tagged += 1;
     }
   }
-  log().info('syncLocalTags', { records: records.length, tagged });
+  useFigmemoTagsStore.getState().applyFolderTags(relEntries);
+  log().info('syncLocalTags', { entries: entries.length, tagged });
   return tagged;
 }
 
@@ -556,6 +633,10 @@ export interface FigmemoListItem {
   folderPath: string;
   exists: boolean;
   coverPath?: string;
+  /** 站点封面图 URL（未下载文章也能显示缩略图） */
+  coverUrl?: string;
+  /** 文章级标签（姿势/发型/体型…） */
+  articleTags?: Record<string, string[]>;
 }
 
 async function firstImageIn(dir: string): Promise<string | undefined> {
@@ -600,6 +681,7 @@ export async function listLocalPosts(
       folderPath,
       exists,
       coverPath: exists ? await firstImageIn(folderPath) : undefined,
+      articleTags: r.articleTags,
     };
     onEach?.(item);
     return item;
@@ -643,6 +725,9 @@ export async function listSitePosts(
     readMetaRecords(),
   ]);
   const metaById = new Map(metaRecords.map((r) => [r.postId, r]));
+  const featured = await resolveFeaturedUrls(
+    posts.map((p) => p.featuredMedia || 0),
+  );
   posts.sort((a, b) => (a.date < b.date ? 1 : -1));
   return await mapLimit(posts, 8, async (p) => {
     const folderName = `${p.date.slice(0, 10)} ${unicodeFilenamify(
@@ -651,6 +736,9 @@ export async function listSitePosts(
     const folderPath = `${baseDir}\\fig-memo\\${folderName}`;
     const exists = await fs.exists(folderPath);
     const meta = metaById.get(p.id);
+    const coverUrl = p.featuredMedia
+      ? featured.get(p.featuredMedia)
+      : undefined;
     return {
       postId: p.id,
       title: p.title,
@@ -665,8 +753,34 @@ export async function listSitePosts(
       folderPath,
       exists,
       coverPath: exists ? await firstImageIn(folderPath) : undefined,
+      coverUrl,
+      articleTags: meta?.articleTags,
     };
   });
+}
+
+/** 批量把特色图媒体 id 解析为原图 URL（每 100 个一批） */
+async function resolveFeaturedUrls(
+  ids: number[],
+): Promise<Map<number, string>> {
+  const map = new Map<number, string>();
+  const uniq = [...new Set(ids.filter((id) => id > 0))];
+  for (let i = 0; i < uniq.length; i += 100) {
+    const chunk = uniq.slice(i, i + 100);
+    try {
+      const body = await getJson(`${API}/media`, {
+        include: chunk.join(','),
+        per_page: '100',
+        _fields: 'id,source_url',
+      });
+      for (const m of (body || []) as any[]) {
+        if (m?.id && m.source_url) map.set(m.id, m.source_url);
+      }
+    } catch (err) {
+      log().warn('解析特色图失败', err);
+    }
+  }
+  return map;
 }
 
 /** 保存单篇文章到本地（手动保存：不计统计、不打标；调用方随后可 syncLocalTags） */
