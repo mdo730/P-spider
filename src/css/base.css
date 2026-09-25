@@ -18,3 +18,25 @@ body.library-tweet-bar-open .ant-image-preview-switch-right {
 body.library-tweet-bar-open .library-video-wrap {
   padding-right: 20rem;
 }
+
+/* fig-memo 文章正文（网页式详情） */
+.figmemo-article {
+  line-height: 1.8;
+  word-break: break-word;
+}
+.figmemo-article img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+  margin: 6px 0;
+}
+.figmemo-article figure {
+  margin: 0;
+}
+.figmemo-article p {
+  margin: 0.6em 0;
+}
+.figmemo-article a {
+  color: var(--ant-color-link);
+}
+

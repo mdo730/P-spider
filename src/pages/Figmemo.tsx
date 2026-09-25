@@ -1,258 +1,234 @@
 /* eslint-disable react/prop-types */
-import { App, Breadcrumb, Button, Empty } from 'antd';
+import { ArrowLeftOutlined, ReloadOutlined } from '@ant-design/icons';
+import { App, Button, Empty, Input, Select, Spin, Tag } from 'antd';
+import dayjs from 'dayjs';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { PageHeader } from '../components/PageHeader';
-import { CategorySidebar } from '../components/figmemo/CategorySidebar';
-import { FolderDetail } from '../components/figmemo/FolderDetail';
-import { FolderGrid } from '../components/figmemo/FolderGrid';
-import { useFigmemoTagsStore } from '../stores/figmemo-tags';
-import { useSettingsStore } from '../stores/settings';
 import {
-  DEFAULT_LIBRARY_FILTER,
-  LibraryFilter,
-  LibraryRootFolder,
-  LibrarySubFolder,
-  buildTagIndex,
-  fetchMtimes,
-  listRootFolders,
-  mapLimit,
-  matchesFilter,
-  normalizeRel,
-  summarizeFolder,
-  summarizeFolders,
-  toRelPath,
-} from '../utils/library';
+  FigmemoListItem,
+  fetchPostDetail,
+  listLocalPosts,
+} from '../services/figmemo';
+import { toAssetUrl } from '../utils/asset';
 
-/** 本地库：多级标签管理 saveDirBase 下的文件夹（含子文件夹），按标签浏览 */
+interface PostDetail {
+  title: string;
+  contentHtml: string;
+  link: string;
+}
+
+/** fig-memo：本地文章列表 + 网页式文章详情（去广告） */
 export const FigmemoPage: React.FC = () => {
   const { message } = App.useApp();
-  const saveDirBase = useSettingsStore((s) => s.download.saveDirBase);
-  const tags = useFigmemoTagsStore((s) => s.tags);
-  const index = useMemo(() => buildTagIndex(tags), [tags]);
-
-  const [filter, setFilter] = useState<LibraryFilter>(DEFAULT_LIBRARY_FILTER);
-  const [rootFolders, setRootFolders] = useState<LibraryRootFolder[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [tagMatched, setTagMatched] = useState<LibraryRootFolder[]>([]);
-  const [tagLoading, setTagLoading] = useState(false);
+  const [items, setItems] = useState<FigmemoListItem[]>([]);
+  const [loading, setLoading] = useState(true);
   const [keyword, setKeyword] = useState('');
-  const [opened, setOpened] = useState<LibraryRootFolder | null>(null);
-  const [subStack, setSubStack] = useState<LibrarySubFolder[]>([]);
+  const [categoryId, setCategoryId] = useState<number | 'all'>('all');
 
-  const loadFolders = useCallback(
-    async (refresh = false) => {
-      if (!saveDirBase) {
-        setRootFolders([]);
-        return;
-      }
-      setLoading(true);
-      try {
-        const listed = await listRootFolders(saveDirBase);
-        const summarized = await summarizeFolders(listed, refresh);
-        const mtimes = await fetchMtimes(summarized.map((f) => f.path));
-        setRootFolders(
-          summarized.map((folder, i) => ({
-            ...folder,
-            mtime: mtimes[i] ?? undefined,
-          })),
-        );
-      } catch (err: any) {
-        log.error(err);
-        message.error(
-          err?.message || '读取保存目录失败，请检查设置中的保存路径',
-        );
-        setRootFolders([]);
-      } finally {
-        setLoading(false);
-      }
-    },
-    [saveDirBase, message],
-  );
+  const [selected, setSelected] = useState<FigmemoListItem | null>(null);
+  const [detail, setDetail] = useState<PostDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const list = await listLocalPosts();
+      setItems(list);
+    } catch (err: any) {
+      log.error(err);
+      message.error(err?.message || '读取文章列表失败');
+    } finally {
+      setLoading(false);
+    }
+  }, [message]);
 
   useEffect(() => {
-    loadFolders(false);
-  }, [loadFolders]);
+    load();
+  }, [load]);
 
-  const relOf = (path: string) => toRelPath(path, saveDirBase);
-
-  const counts = useMemo(() => {
-    const byId: Record<string, number> = {};
-    for (const t of tags) {
-      const set = new Set<string>();
-      for (const tid of index.subtreeIds(t.id)) {
-        const tag = index.byId.get(tid);
-        if (tag) tag.paths.forEach((p) => set.add(normalizeRel(p)));
-      }
-      byId[t.id] = set.size;
+  const openPost = async (item: FigmemoListItem) => {
+    setSelected(item);
+    setDetail(null);
+    setDetailLoading(true);
+    try {
+      const d = await fetchPostDetail(item.postId);
+      setDetail(d);
+    } catch (err: any) {
+      log.error(err);
+      message.error(err?.message || '读取文章详情失败');
+    } finally {
+      setDetailLoading(false);
     }
-    const unclassified = rootFolders.filter(
-      (f) =>
-        useFigmemoTagsStore.getState().getFolderTagIds(relOf(f.path)).length ===
-        0,
-    ).length;
-    return { all: rootFolders.length, unclassified, byId };
-  }, [tags, index, rootFolders, saveDirBase]);
+  };
 
-  // 标签筛选：直接展示“命中的文件夹本身”（任意层级），而非包含命中的根文件夹
-  useEffect(() => {
-    if (filter.kind !== 'tags' || !saveDirBase) {
-      setTagMatched([]);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      setTagLoading(true);
-      try {
-        const candidates = new Set<string>();
-        for (const id of filter.tagIds) {
-          for (const tid of index.subtreeIds(id)) {
-            const t = index.byId.get(tid);
-            if (t) t.paths.forEach((p) => candidates.add(normalizeRel(p)));
-          }
-        }
-        const matched = [...candidates].filter((p) =>
-          matchesFilter(index, filter.tagIds, filter.rule, p),
-        );
-        const base = saveDirBase.replace(/[\\/]+$/, '');
-        const absList = matched.map((rel) => ({
-          rel,
-          path: `${base}\\${rel.replace(/\//g, '\\')}`,
-        }));
-        const summaries = await mapLimit(absList, 6, async (f) => ({
-          ...f,
-          summary: await summarizeFolder(f.path),
-        }));
-        const mtimes = await fetchMtimes(summaries.map((f) => f.path));
-        const result: LibraryRootFolder[] = [];
-        summaries.forEach((f, i) => {
-          if (!f.summary) return;
-          result.push({
-            name: f.rel.split('/').pop() || f.rel,
-            path: f.path,
-            ...f.summary,
-            mtime: mtimes[i] ?? undefined,
-          });
-        });
-        if (!cancelled) setTagMatched(result);
-      } catch (err) {
-        log.error('标签筛选失败', err);
-        if (!cancelled) setTagMatched([]);
-      } finally {
-        if (!cancelled) setTagLoading(false);
+  const categoryOptions = useMemo(() => {
+    const map = new Map<number, { id: number; name: string; count: number }>();
+    for (const it of items) {
+      for (const c of it.categories) {
+        const e = map.get(c.id) || { id: c.id, name: c.name, count: 0 };
+        e.count += 1;
+        map.set(c.id, e);
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [filter, index, saveDirBase]);
+    }
+    return [...map.values()].sort((a, b) => b.count - a.count);
+  }, [items]);
 
-  const filteredFolders = useMemo(() => {
-    let list: LibraryRootFolder[];
-    if (filter.kind === 'tags') {
-      list = tagMatched;
-    } else if (filter.kind === 'unclassified') {
-      list = rootFolders.filter(
-        (f) =>
-          useFigmemoTagsStore.getState().getFolderTagIds(relOf(f.path))
-            .length === 0,
+  const filtered = useMemo(() => {
+    let list = items;
+    if (categoryId !== 'all') {
+      list = list.filter((it) =>
+        it.categories.some((c) => c.id === categoryId),
       );
-    } else {
-      list = rootFolders;
     }
     const kw = keyword.trim().toLowerCase();
-    if (kw) list = list.filter((f) => f.name.toLowerCase().includes(kw));
+    if (kw) list = list.filter((it) => it.title.toLowerCase().includes(kw));
     return list;
-  }, [rootFolders, tagMatched, filter, keyword, saveDirBase]);
+  }, [items, categoryId, keyword]);
 
-  const currentDir = subStack.length
-    ? subStack[subStack.length - 1].path
-    : opened?.path || '';
-
-  const breadcrumbItems = [
-    {
-      title: (
-        <a
-          onClick={() => {
-            setOpened(null);
-            setSubStack([]);
-          }}
-        >
-          {opened ? opened.name : '本地库'}
-        </a>
-      ),
-    },
-    ...subStack.map((folder, i) => ({
-      title:
-        i === subStack.length - 1 ? (
-          folder.name
-        ) : (
-          <a onClick={() => setSubStack((prev) => prev.slice(0, i + 1))}>
-            {folder.name}
+  // 详情视图
+  if (selected) {
+    return (
+      <div className="flex flex-col h-screen">
+        <PageHeader />
+        <div className="flex items-center gap-2 pb-3">
+          <Button
+            icon={<ArrowLeftOutlined />}
+            onClick={() => {
+              setSelected(null);
+              setDetail(null);
+            }}
+          >
+            返回列表
+          </Button>
+          <a
+            href={selected.link}
+            target="_blank"
+            rel="noreferrer"
+            className="text-sm text-ant-color-link"
+          >
+            在原站打开
           </a>
-        ),
-    })),
-  ];
+        </div>
+        <div className="flex-1 overflow-y-auto pb-10">
+          <article className="bg-white rounded-md border-[1px] border-gray-200 max-w-4xl mx-auto p-6">
+            <h1 className="text-2xl font-bold leading-snug">
+              {selected.title}
+            </h1>
+            <div className="text-sm text-gray-400 mt-2 flex items-center flex-wrap gap-2">
+              <span>{dayjs(selected.date).format('YYYY-MM-DD HH:mm')}</span>
+              {selected.categories.map((c) => (
+                <Tag key={c.id}>{c.name}</Tag>
+              ))}
+              <span>
+                · {selected.imageCount} 张图 ·{' '}
+                {selected.exists ? '已下载' : '未下载'}
+              </span>
+            </div>
+            <hr className="my-4 border-gray-100" />
+            {detailLoading ? (
+              <div className="flex justify-center py-16">
+                <Spin size="large" />
+              </div>
+            ) : detail ? (
+              <div
+                className="figmemo-article"
+                // 正文来自 fig-memo 原站（可信）；已移除 script
+                dangerouslySetInnerHTML={{ __html: detail.contentHtml }}
+              />
+            ) : (
+              <Empty description="正文加载失败" />
+            )}
+          </article>
+        </div>
+      </div>
+    );
+  }
 
+  // 列表视图
   return (
     <div className="flex flex-col h-screen">
       <PageHeader />
-      {!saveDirBase ? (
-        <Empty
-          className="mt-24"
-          description="尚未设置保存目录，请先到「设置 → 下载」中设置保存路径"
+      <div className="flex items-center flex-wrap gap-2 pb-3">
+        <Input
+          allowClear
+          value={keyword}
+          onChange={(e) => setKeyword(e.target.value)}
+          placeholder="搜索标题"
+          className="w-56"
         />
-      ) : (
-        <div className="flex-1 min-h-0 flex gap-4 pb-4">
-          <CategorySidebar
-            filter={filter}
-            counts={counts}
-            onChange={setFilter}
-          />
-          <section
-            className="flex-1 min-w-0 flex flex-col"
-            aria-label="本地库内容"
-          >
-            {opened && (
-              <div className="flex items-center gap-3 pb-3">
-                <Breadcrumb items={breadcrumbItems} />
-                <Button
-                  size="small"
-                  className="ml-auto"
-                  onClick={() => {
-                    setOpened(null);
-                    setSubStack([]);
-                  }}
-                >
-                  返回
-                </Button>
-              </div>
-            )}
-            {opened ? (
-              <FolderDetail
-                dir={currentDir}
-                rootFolderName={opened.name}
-                saveDirBase={saveDirBase}
-                onOpenFolder={(folder) =>
-                  setSubStack((prev) => [...prev, folder])
-                }
-              />
-            ) : (
-              <FolderGrid
-                folders={filteredFolders}
-                loading={loading || tagLoading}
-                keyword={keyword}
-                onKeywordChange={setKeyword}
-                saveDirBase={saveDirBase}
-                onOpen={(folder) => {
-                  setOpened(folder);
-                  setSubStack([]);
-                }}
-                onRefresh={() => loadFolders(true)}
-              />
-            )}
-          </section>
-        </div>
-      )}
+        <Select
+          value={categoryId}
+          onChange={setCategoryId}
+          style={{ minWidth: 200 }}
+          options={[
+            { value: 'all' as const, label: `全部分类（${items.length}）` },
+            ...categoryOptions.map((c) => ({
+              value: c.id,
+              label: `${c.name}（${c.count}）`,
+            })),
+          ]}
+        />
+        <span className="text-sm text-gray-400">{filtered.length} 篇</span>
+        <Button
+          className="ml-auto"
+          icon={<ReloadOutlined />}
+          loading={loading}
+          onClick={load}
+        >
+          刷新
+        </Button>
+      </div>
+      <div className="flex-1 overflow-y-auto pb-6">
+        {loading && items.length === 0 ? (
+          <div className="flex justify-center py-20">
+            <Spin size="large" />
+          </div>
+        ) : filtered.length === 0 ? (
+          <Empty className="mt-16" description="暂无文章" />
+        ) : (
+          <ul className="grid grid-cols-[repeat(auto-fill,minmax(14rem,1fr))] gap-3">
+            {filtered.map((item) => (
+              <li
+                key={item.postId}
+                className="bg-white rounded-md border-[1px] border-gray-100 overflow-hidden group cursor-pointer"
+                onClick={() => openPost(item)}
+              >
+                <div className="h-[12rem] bg-gray-100">
+                  {item.coverPath ? (
+                    <img
+                      src={toAssetUrl(item.coverPath)}
+                      alt={item.title}
+                      loading="lazy"
+                      className="w-full h-full object-cover transition-transform group-hover:scale-105"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-gray-400 text-sm">
+                      {item.exists ? '无封面' : '未下载'}
+                    </div>
+                  )}
+                </div>
+                <div className="px-2 py-2">
+                  <p
+                    className="text-sm leading-snug line-clamp-2"
+                    title={item.title}
+                  >
+                    {item.title}
+                  </p>
+                  <div className="text-xs text-gray-400 mt-1 flex items-center gap-1 flex-wrap">
+                    <span>{dayjs(item.date).format('YYYY-MM-DD')}</span>
+                    {item.categories[0] && (
+                      <Tag className="!m-0 !text-xs">
+                        {item.categories[0].name}
+                      </Tag>
+                    )}
+                    <span>· {item.imageCount} 图</span>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   );
 };

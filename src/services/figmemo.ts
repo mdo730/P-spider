@@ -6,6 +6,7 @@ import { PlatformMedia, PlatformPost } from '../platforms';
 import { useDownloadStore } from '../stores/download';
 import { useFigmemoTagsStore } from '../stores/figmemo-tags';
 import { useSettingsStore } from '../stores/settings';
+import { getMediaKind, isMediaFile, mapLimit } from '../utils/library';
 import { unicodeFilenamify } from '../utils/unicode';
 
 let _log: ICategoriedLogger;
@@ -467,8 +468,6 @@ export interface FigmemoYearRange {
   fromYear?: number;
   toYear?: number;
 }
-
-/** 建库：下载现存文章（categoryIds 非空时只下这些分类；yearRange 限定年份） */
 export async function runFigmemoBuild(
   categoryIds: number[],
   yearRange: FigmemoYearRange,
@@ -544,4 +543,81 @@ export async function runFigmemoCheck(
     }
   }
   return { newestDate: posts[0]?.date, posts: posts.length, images };
+}
+
+export interface FigmemoListItem {
+  postId: string;
+  title: string;
+  date: string;
+  link: string;
+  categories: { id: number; name: string; slug: string }[];
+  imageCount: number;
+  folderName: string;
+  folderPath: string;
+  exists: boolean;
+  coverPath?: string;
+}
+
+async function firstImageIn(dir: string): Promise<string | undefined> {
+  try {
+    const entries = await fs.readDir(dir, { recursive: false });
+    for (const entry of entries) {
+      const name = entry.name || entry.path.split(/[\\/]/).pop() || '';
+      if (isMediaFile(name) && getMediaKind(name) === 'image') {
+        return entry.path;
+      }
+    }
+  } catch {
+    // 文件夹不存在
+  }
+  return undefined;
+}
+
+/**
+ * 本地文章列表：读 figmemo.jsonl 元数据（不扫整盘），按需取本地文件夹封面；按发布时间倒序。
+ */
+export async function listLocalPosts(
+  onEach?: (item: FigmemoListItem) => void,
+): Promise<FigmemoListItem[]> {
+  const base = useSettingsStore.getState().download.saveDirBase || '';
+  const baseDir = base.replace(/[\\/]+$/, '');
+  const records = await readMetaRecords();
+  records.sort((a, b) => (a.date < b.date ? 1 : -1));
+  return await mapLimit(records, 8, async (r) => {
+    const folderName = `${r.date.slice(0, 10)} ${unicodeFilenamify(
+      truncateTitle(r.title),
+    )}`;
+    const folderPath = `${baseDir}\\fig-memo\\${folderName}`;
+    const exists = await fs.exists(folderPath);
+    const item: FigmemoListItem = {
+      postId: r.postId,
+      title: r.title,
+      date: r.date,
+      link: r.link,
+      categories: r.categories || [],
+      imageCount: r.imageCount || 0,
+      folderName,
+      folderPath,
+      exists,
+      coverPath: exists ? await firstImageIn(folderPath) : undefined,
+    };
+    onEach?.(item);
+    return item;
+  });
+}
+
+/** 拉取文章正文（网页式详情用；去掉脚本避免注入） */
+export async function fetchPostDetail(
+  postId: string,
+): Promise<{ title: string; contentHtml: string; link: string }> {
+  const body = await getJson(`${API}/posts/${postId}`, {
+    _fields: 'title,content,link',
+  });
+  const raw: string = body?.content?.rendered || '';
+  const contentHtml = raw.replace(/<script[\s\S]*?<\/script>/gi, '');
+  return {
+    title: body?.title?.rendered || '',
+    contentHtml,
+    link: body?.link || '',
+  };
 }
