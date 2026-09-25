@@ -41,6 +41,8 @@ export interface LibraryStore {
   ) => Record<string, string>;
   /** 批量设置文件夹→标签关系（一次写入，取并集） */
   applyFolderTags: (entries: { relPath: string; tagIds: string[] }[]) => void;
+  /** 批量移除文件夹与标签的关联 */
+  removeFolderTags: (relPaths: string[], tagIds: string[]) => void;
 
   /** 设置一级文件夹的自定义缩略图（传 null 恢复默认） */
   setFolderCover: (folderName: string, filePath: string | null) => void;
@@ -223,6 +225,17 @@ export const useFigmemoTagsStore = create(
               }
             }
             return adds.length ? { ...t, paths: [...t.paths, ...adds] } : t;
+          }),
+        });
+      },
+
+      removeFolderTags: (relPaths, tagIds) => {
+        if (relPaths.length === 0 || tagIds.length === 0) return;
+        set({
+          tags: get().tags.map((t) => {
+            if (!tagIds.includes(t.id)) return t;
+            const next = t.paths.filter((p) => !relPaths.includes(p));
+            return next.length === t.paths.length ? t : { ...t, paths: next };
           }),
         });
       },

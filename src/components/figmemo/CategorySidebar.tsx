@@ -64,17 +64,16 @@ export const CategorySidebar: React.FC<Props> = ({
   const setFilter = (patch: Partial<LibraryFilter>) =>
     onChange({ ...filter, ...patch });
 
-  const selectedKeys =
-    filter.kind === 'tags' ? filter.tagIds.map((id) => `t_${id}`) : [];
+  const selectedKeys = filter.tagIds.map((id) => `t_${id}`);
 
   const onSelect: TreeProps['onSelect'] = (keys) => {
     const ids = (keys as string[]).map((k) => String(k).slice(2));
     if (filter.multi) {
       const deduped = dedupeTagSelection(index, ids);
-      setFilter({ kind: deduped.length ? 'tags' : 'all', tagIds: deduped });
+      setFilter({ tagIds: deduped });
     } else {
       const one = ids.length ? [ids[ids.length - 1]] : [];
-      setFilter({ kind: one.length ? 'tags' : 'all', tagIds: one });
+      setFilter({ tagIds: one });
     }
   };
 
@@ -118,7 +117,7 @@ export const CategorySidebar: React.FC<Props> = ({
         const removed = index.subtreeIds(id);
         removeTag(id);
         if (filter.tagIds.some((tid) => removed.has(tid))) {
-          setFilter({ kind: 'all', tagIds: [] });
+          setFilter({ tagIds: [] });
         }
       },
     });
@@ -210,15 +209,21 @@ export const CategorySidebar: React.FC<Props> = ({
       <div className="p-2 flex items-center gap-1 flex-wrap border-b-[1px] border-gray-100">
         <Button
           size="small"
-          type={filter.kind === 'all' ? 'primary' : 'default'}
-          onClick={() => setFilter({ kind: 'all', tagIds: [] })}
+          type={
+            !filter.unclassifiedOnly && filter.tagIds.length === 0
+              ? 'primary'
+              : 'default'
+          }
+          onClick={() => setFilter({ tagIds: [], unclassifiedOnly: false })}
         >
           全部 <span className="opacity-60 ml-1">{counts.all}</span>
         </Button>
         <Button
           size="small"
-          type={filter.kind === 'unclassified' ? 'primary' : 'default'}
-          onClick={() => setFilter({ kind: 'unclassified' })}
+          type={filter.unclassifiedOnly ? 'primary' : 'default'}
+          onClick={() =>
+            setFilter({ unclassifiedOnly: !filter.unclassifiedOnly })
+          }
         >
           未打标签{' '}
           <span className="opacity-60 ml-1">{counts.unclassified}</span>
@@ -281,7 +286,7 @@ export const CategorySidebar: React.FC<Props> = ({
               onClose={(e) => {
                 e.preventDefault();
                 const next = filter.tagIds.filter((x) => x !== id);
-                setFilter({ kind: next.length ? 'tags' : 'all', tagIds: next });
+                setFilter({ tagIds: next });
               }}
             >
               {index.byId.get(id)?.name}

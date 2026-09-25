@@ -393,18 +393,6 @@ export const Settings: React.FC = () => {
           >
             刷新
           </Button>
-          <Button
-            onClick={async () => {
-              try {
-                const n = await figmemo.syncTags();
-                message.success(`已按本地文件夹补标签（${n} 个）`);
-              } catch (err: any) {
-                message.error(`补标签失败：${err?.message || '未知原因'}`);
-              }
-            }}
-          >
-            补标签
-          </Button>
           <span className="text-sm text-gray-500">{figmemoStatusText}</span>
         </div>
         <div className="mt-3">
@@ -436,7 +424,8 @@ export const Settings: React.FC = () => {
         <p className="text-sm text-gray-400 mt-2">
           个人自用：订阅 fig-memo（fig-memo-r18.site）。开启分类后每 24
           小时自动检查新文章；「刷新」立即检查；「建库」按已开启分类+年份范围下载现存文章（⚠️
-          量大）。标签**只对本地确实存在的文件夹**生成：建库/追新结束后会自动同步，「补标签」可随时手动重扫。
+          量大）。标签（分类/厂商/年份/姿势·发型·体型）由站点数据**自动生成**，覆盖全部文章（含未下载），打开
+          fig-memo 选项卡时即会刷新。
         </p>
       </Section>
     </>

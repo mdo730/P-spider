@@ -6,6 +6,7 @@ import {
   FIGMEMO_SOURCE,
   FigmemoProgress,
   fetchNewestPostDate,
+  refreshSitePosts,
   runFigmemoBuild,
   runFigmemoCheck,
   syncLocalTags,
@@ -74,6 +75,12 @@ export const useFigmemoStore = create(
 
       setFeatureEnabled: (enabled) => {
         set({ featureEnabled: enabled });
+        // 首次启用即后台做一次站点快照，之后打开选项卡只拉新增
+        if (enabled) {
+          refreshSitePosts().catch(() => {
+            // ignore
+          });
+        }
       },
 
       setCategoryEnabled: async (categoryId, enabled) => {

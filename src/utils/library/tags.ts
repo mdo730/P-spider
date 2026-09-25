@@ -109,20 +109,41 @@ export function tagCoveredSet(index: TagIndex, tagId: string): Set<string> {
 
 export type FilterRule = 'intersect' | 'union';
 
+/**
+ * 「不算已打标签」的根标签名：分类（fig-memo）、厂商、年份都是自动生成的，
+ * 统计/筛选「未打标签」时忽略它们，方便手动标注 姿势/发型/体型 等。
+ */
+export const NON_COUNTING_TAG_ROOTS = ['fig-memo', '厂商', '年份'];
+
 /** 本地库当前筛选状态 */
 export interface LibraryFilter {
-  kind: 'all' | 'unclassified' | 'tags';
   tagIds: string[];
   rule: FilterRule;
   multi: boolean;
+  /** 只看「未打（手动）标签」的文章；与 tagIds 叠加生效 */
+  unclassifiedOnly: boolean;
 }
 
 export const DEFAULT_LIBRARY_FILTER: LibraryFilter = {
-  kind: 'all',
   tagIds: [],
   rule: 'intersect',
   multi: false,
+  unclassifiedOnly: false,
 };
+
+/** 某文件夹命中的「手动标签」id 列表（排除 分类/厂商/年份 等自动根） */
+export function folderManualTagIds(index: TagIndex, relPath: string): string[] {
+  const np = normalizeRel(relPath);
+  const nonCount = new Set(NON_COUNTING_TAG_ROOTS);
+  const out: string[] = [];
+  for (const t of index.byId.values()) {
+    if (!t.paths.some((p) => normalizeRel(p) === np)) continue;
+    const rootName = index.chainNames(t.id)[0];
+    if (rootName && nonCount.has(rootName)) continue;
+    out.push(t.id);
+  }
+  return out;
+}
 
 /** 单文件夹是否命中标签筛选（union=任一命中，intersect=全部命中，默认 intersect） */
 export function matchesFilter(

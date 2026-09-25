@@ -28,7 +28,8 @@ import {
   FigmemoListItem,
   fetchPostDetail,
   fetchPostImages,
-  listSitePosts,
+  loadCachedSitePosts,
+  refreshSitePosts,
   saveFigmemoPost,
   setArticleTags,
 } from '../services/figmemo';
@@ -38,6 +39,7 @@ import {
   DEFAULT_LIBRARY_FILTER,
   LibraryFilter,
   buildTagIndex,
+  folderManualTagIds,
   matchesFilter,
   tagCoveredSet,
 } from '../utils/library';
@@ -83,12 +85,25 @@ export const FigmemoPage: React.FC = () => {
 
   const load = useCallback(async () => {
     setLoading(true);
+    const enabledCategories = useFigmemoStore.getState().enabledCategories;
+    let shown = false;
+    // 1) 本地缓存秒开
     try {
-      const enabledCategories = useFigmemoStore.getState().enabledCategories;
-      setItems(await listSitePosts(enabledCategories));
+      const cached = await loadCachedSitePosts(enabledCategories);
+      if (cached) {
+        setItems(cached);
+        setLoading(false);
+        shown = true;
+      }
+    } catch (err) {
+      log.error(err);
+    }
+    // 2) 后台联网刷新
+    try {
+      setItems(await refreshSitePosts(enabledCategories));
     } catch (err: any) {
       log.error(err);
-      message.error(err?.message || '读取文章列表失败');
+      if (!shown) message.error(err?.message || '读取文章列表失败');
     } finally {
       setLoading(false);
     }
@@ -144,6 +159,11 @@ export const FigmemoPage: React.FC = () => {
       if (arr.length) clean[g] = arr;
     }
     setSelected({ ...selected, articleTags: clean });
+    setItems((prev) =>
+      prev.map((it) =>
+        it.postId === selected.postId ? { ...it, articleTags: clean } : it,
+      ),
+    );
     setTagSaving(true);
     try {
       await setArticleTags(selected, clean);
@@ -181,23 +201,21 @@ export const FigmemoPage: React.FC = () => {
       byId[t.id] = items.filter((it) => covered.has(relOf(it))).length;
     }
     const unclassified = items.filter(
-      (it) =>
-        useFigmemoTagsStore.getState().getFolderTagIds(relOf(it)).length === 0,
+      (it) => folderManualTagIds(index, relOf(it)).length === 0,
     ).length;
     return { all: items.length, unclassified, byId };
   }, [tags, index, items]);
 
   const filtered = useMemo(() => {
     let list = items;
-    if (filter.kind === 'tags') {
+    if (filter.tagIds.length) {
       list = list.filter((it) =>
         matchesFilter(index, filter.tagIds, filter.rule, relOf(it)),
       );
-    } else if (filter.kind === 'unclassified') {
+    }
+    if (filter.unclassifiedOnly) {
       list = list.filter(
-        (it) =>
-          useFigmemoTagsStore.getState().getFolderTagIds(relOf(it)).length ===
-          0,
+        (it) => folderManualTagIds(index, relOf(it)).length === 0,
       );
     }
     const kw = keyword.trim().toLowerCase();
