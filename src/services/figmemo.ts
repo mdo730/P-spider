@@ -811,6 +811,8 @@ interface FigmemoSiteCache {
   categories: FigmemoCategory[];
   /** 特色图媒体 id → 原图 URL */
   featured: Record<string, string>;
+  /** 文章 id → 封面 URL（缺特色图时取正文首图；空串表示已查过但无图） */
+  postCovers: Record<string, string>;
 }
 
 async function siteCachePath(): Promise<string> {
@@ -862,6 +864,7 @@ async function buildItems(
   metaById: Map<string, FigmemoMeta>,
   dirSet: Set<string>,
   featured: Map<number, string>,
+  postCovers: Map<string, string>,
   baseDir: string,
 ): Promise<FigmemoListItem[]> {
   const sorted = [...posts].sort((a, b) => (a.date < b.date ? 1 : -1));
@@ -872,10 +875,11 @@ async function buildItems(
     const folderPath = `${baseDir}\\fig-memo\\${folderName}`;
     const exists = dirSet.has(folderName);
     const meta = metaById.get(p.id);
-    const coverUrl = p.featuredMedia
-      ? featured.get(p.featuredMedia)
-      : undefined;
-    // 有站点封面就不必扫本地；仅缺封面且已下载时才回退本地首图
+    const coverUrl =
+      (p.featuredMedia && featured.get(p.featuredMedia)) ||
+      postCovers.get(p.id) ||
+      undefined;
+    // 有封面就不必扫本地；仅缺封面且已下载时才回退本地首图
     const coverPath =
       !coverUrl && exists ? await firstImageIn(folderPath) : undefined;
     return {
@@ -925,6 +929,7 @@ export async function loadCachedSitePosts(
   const featured = new Map(
     Object.entries(cache.featured || {}).map(([k, v]) => [Number(k), v]),
   );
+  const postCovers = new Map(Object.entries(cache.postCovers || {}));
   await syncSiteTags(cache.posts, cats, metaRecords);
   const dirSet = await listDownloadedFolderNames(baseDir);
   return await buildItems(
@@ -933,6 +938,7 @@ export async function loadCachedSitePosts(
     metaById,
     dirSet,
     featured,
+    postCovers,
     baseDir,
   );
 }
@@ -973,6 +979,9 @@ export async function refreshSitePosts(
 
   let allPosts: FigmemoPost[];
   const featured = new Map<number, string>();
+  const postCovers = new Map<string, string>(
+    Object.entries(cache?.postCovers || {}),
+  );
   if (cache && cache.posts.length) {
     for (const [k, v] of Object.entries(cache.featured || {})) {
       featured.set(Number(k), v);
@@ -991,14 +1000,30 @@ export async function refreshSitePosts(
     for (const [k, v] of await resolveFeaturedUrls(needIds)) featured.set(k, v);
   }
 
+  // 仍无封面的文章：用正文首图兜底（含老文章；查过无图记空串，避免重复查）
+  const missingCoverIds = allPosts
+    .filter((p) => {
+      const fm = p.featuredMedia || 0;
+      if (fm && featured.has(fm)) return false;
+      return postCovers.get(String(p.id)) === undefined;
+    })
+    .map((p) => String(p.id));
+  if (missingCoverIds.length) {
+    const resolved = await resolveContentCovers(missingCoverIds);
+    for (const [k, v] of resolved) postCovers.set(k, v);
+  }
+
   const featuredObj: Record<string, string> = {};
   for (const [k, v] of featured) featuredObj[String(k)] = v;
+  const postCoversObj: Record<string, string> = {};
+  for (const [k, v] of postCovers) postCoversObj[k] = v;
   await writeSiteCache({
     version: 1,
     fetchedAt: Date.now(),
     posts: allPosts,
     categories: [...cats.values()],
     featured: featuredObj,
+    postCovers: postCoversObj,
   });
 
   await syncSiteTags(allPosts, cats, metaRecords);
@@ -1010,8 +1035,43 @@ export async function refreshSitePosts(
     metaById,
     dirSet,
     featured,
+    postCovers,
     baseDir,
   );
+}
+
+/** 从正文 HTML 取第一张图 URL */
+function firstImageUrlFromHtml(html: string): string {
+  const m = /<img\b[^>]*?(?:data-src|src)=["']([^"']+)["']/i.exec(html);
+  let url = m?.[1] || '';
+  if (url.startsWith('//')) url = `https:${url}`;
+  if (!/^https?:/i.test(url)) return '';
+  return url;
+}
+
+/** 批量用正文首图补文章封面（每 100 篇一批）；无图记空串 */
+async function resolveContentCovers(
+  postIds: string[],
+): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  const uniq = [...new Set(postIds)];
+  for (let i = 0; i < uniq.length; i += 100) {
+    const chunk = uniq.slice(i, i + 100);
+    try {
+      const body = await getJson(`${API}/posts`, {
+        include: chunk.join(','),
+        per_page: '100',
+        _fields: 'id,content',
+      });
+      for (const p of (body || []) as any[]) {
+        const html = p?.content?.rendered || '';
+        map.set(String(p.id), firstImageUrlFromHtml(html));
+      }
+    } catch (err) {
+      log().warn('正文封面解析失败', err);
+    }
+  }
+  return map;
 }
 
 /** 批量把特色图媒体 id 解析为原图 URL（每 100 个一批） */
@@ -1021,21 +1081,35 @@ async function resolveFeaturedUrls(
   const map = new Map<number, string>();
   const uniq = [...new Set(ids.filter((id) => id > 0))];
   for (let i = 0; i < uniq.length; i += 100) {
-    const chunk = uniq.slice(i, i + 100);
-    try {
-      const body = await getJson(`${API}/media`, {
-        include: chunk.join(','),
-        per_page: '100',
-        _fields: 'id,source_url',
-      });
-      for (const m of (body || []) as any[]) {
-        if (m?.id && m.source_url) map.set(m.id, m.source_url);
-      }
-    } catch (err) {
-      log().warn('解析特色图失败', err);
-    }
+    await resolveFeaturedChunk(uniq.slice(i, i + 100), map);
   }
   return map;
+}
+
+/** 解析一批特色图；失败则二分重试（个别无效 id 不会拖垮整批） */
+async function resolveFeaturedChunk(
+  ids: number[],
+  map: Map<number, string>,
+): Promise<void> {
+  if (ids.length === 0) return;
+  try {
+    const body = await getJson(`${API}/media`, {
+      include: ids.join(','),
+      per_page: '100',
+      _fields: 'id,source_url',
+    });
+    for (const m of (body || []) as any[]) {
+      if (m?.id && m.source_url) map.set(m.id, m.source_url);
+    }
+  } catch (err) {
+    if (ids.length === 1) {
+      log().warn('解析特色图失败', ids[0], err);
+      return;
+    }
+    const mid = Math.floor(ids.length / 2);
+    await resolveFeaturedChunk(ids.slice(0, mid), map);
+    await resolveFeaturedChunk(ids.slice(mid), map);
+  }
 }
 
 /** 保存单篇文章到本地（手动保存：不计统计、不打标；调用方随后可 syncLocalTags） */
