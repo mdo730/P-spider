@@ -606,7 +606,7 @@ export async function listLocalPosts(
   });
 }
 
-/** 拉取文章正文（网页式详情用；去掉脚本避免注入） */
+/** 拉取文章正文（网页式详情用；清洗掉外链/小图/脚本等噪音） */
 export async function fetchPostDetail(
   postId: string,
 ): Promise<{ title: string; contentHtml: string; link: string }> {
@@ -614,7 +614,14 @@ export async function fetchPostDetail(
     _fields: 'title,content,link',
   });
   const raw: string = body?.content?.rendered || '';
-  const contentHtml = raw.replace(/<script[\s\S]*?<\/script>/gi, '');
+  const contentHtml = raw
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    // 图片块（含带货小图）整块移除，图片改由下方缩略图网格呈现
+    .replace(/<figure[\s\S]*?<\/figure>/gi, '')
+    // 外部链接（多为带货/购物链接）整段移除
+    .replace(/<a\b[^>]*>[\s\S]*?<\/a>/gi, '')
+    .replace(/<img\b[^>]*>/gi, '');
   return {
     title: body?.title?.rendered || '',
     contentHtml,
