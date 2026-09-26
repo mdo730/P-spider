@@ -1,16 +1,16 @@
 # P-Spider 会话交接（HANDOFF）
 
-> 用途：开新会话时把本项目状态快速交接给 AI。最后更新：2026-09-25
+> 用途：开新会话时把本项目状态快速交接给 AI。最后更新：2026-09-26
 
 ## 一句话现状
 
-P-Spider（fork 自 x-spider）**v1.3.1 已发布（2026-09-25，GitHub Release `v1.3.1`）；当前开发版 `1.3.2` 未发布**（用户计划自用几天、再修一轮后才决定是否发）。fig-memo 自用订阅 + 本地库标签改造。本轮（1.3.1）已完成：列表与订阅解耦（文章全显示、订阅只管追新）、本地库文件夹导航竞态修复、fig-memo 本地优先（封面/详情图）、标签浮窗现代化 + 收藏、图片数/保存修正、放大图右键、点标签卡顿修复、自研图片查看器、统一图片右键菜单 + 图片切割、切换秒开。**1.3.2（未发布）新增：** fig-memo 详情「上一篇/下一篇」按筛选列表跳转、快捷标签墙（点一下即打/取消）+ 空格下一篇、修复退出「多标签」后筛选未清空。
+P-Spider（fork 自 x-spider）**v1.3.2 已发布（2026-09-26，GitHub Release `v1.3.2`）**。fig-memo 自用订阅 + 本地库标签改造。1.3.1：列表与订阅解耦、本地库竞态修复、fig-memo 本地优先、标签浮窗+收藏、自研图片查看器、统一图片右键菜单+图片切割、切换秒开。**1.3.2 新增：** fig-memo 详情「上一篇/下一篇」按筛选列表跳转、快捷标签墙 + 空格下一篇、**接入 Hpoi 手办数据（候选匹配/默认自动关联第一条/手动校正/评分排序/卡片角标）**、匹配分类白名单、图片数修正（本地实际数/离线补全/未知不显示）、**数据种子内置（站点/图片数/Hpoi，不含手标标签）**、修复 XSERVER WAF（rest_route）等。
 
 ## 项目关键信息
 
 - 路径：本仓库（git 仓库，分支 `master`）
 - 技术栈：Tauri v1 + React18 + TS + Vite + Tailwind + antd5 + Zustand
-- 版本：`1.3.2`（开发中，未发布；`package.json` 与 `src-tauri/Cargo.toml` 同步）；已发布最新为 `1.3.1`
+- 版本：`1.3.2`（**已发布**，2026-09-26；`package.json` 与 `src-tauri/Cargo.toml` 同步）
 - 文档：`DEVELOPMENT.md`（架构地图 + 功能 + 待办 + 发布流程），**改动后同步更新**
 - 回滚点：分支 `backup-1.2.2`（commit `c3fd23c`）、zip `x-spider-backup-1.2.2.zip`
 
@@ -32,7 +32,7 @@ P-Spider（fork 自 x-spider）**v1.3.1 已发布（2026-09-25，GitHub Release 
 - `figmemo-site.json`（站点缓存：posts/categories/featured/postCovers）
 - `figmemo-state.json`（订阅基线/统计）、`figmemo-favorites.json`（收藏 postId）、`downloads.jsonl`、`subscriptions.json`、`library-trace.json`
 
-## 已完成（1.3.0 / 1.3.1，v1.3.1 已发布 2026-09-25）
+## 已完成（1.3.0 ~ 1.3.2，v1.3.2 已发布 2026-09-26）
 
 1. **fig-memo 独立选项卡**：路由 `figmemo`；设置里「启用 fig-memo 功能」开关（`featureEnabled`）控制显隐，与分类订阅解耦。标签树数据分家（`figmemo-tags.json`）。
 2. **列表含未下载文章**：拉站点全站文章 + 本地状态合并；**列表始终显示全站文章**（1.3.1 起与订阅分类解耦）；未下载也有封面缩略图、可看详情、「保存该文章」。
@@ -107,12 +107,12 @@ P-Spider（fork 自 x-spider）**v1.3.1 已发布（2026-09-25，GitHub Release 
 
 ```
 我在开发 P-Spider（fork 自 x-spider 的桌面下载器），仓库在 <项目路径>，
-Tauri v1 + React18 + TS + Vite + Tailwind + antd5 + Zustand，当前版本 1.3.1（已发布）。
+Tauri v1 + React18 + TS + Vite + Tailwind + antd5 + Zustand，当前版本 1.3.2（已发布）。
 请先读 项目根目录的 DEVELOPMENT.md 和 HANDOFF.md 了解现状，再开始。
 
 约定：
 - 改完跑 pnpm typeCheck + npx eslint ./src（必要时 pnpm build）；除非我说“打包”，否则别 pnpm tauri build。
-- 打包后把 P-Spider.exe / aria2c.exe / test-P-Spider_1.3.1_x64-setup.exe 拷到 <测试目录>（app 开着会被占用，需先退出）。
+- 打包后把 P-Spider.exe / aria2c.exe / P-Spider_1.3.2_x64-setup.exe 拷到 <测试目录>（app 开着会被占用，需先退出）。
 - git push 要走代理：git -c http.proxy=http://127.0.0.1:7897 -c https.proxy=http://127.0.0.1:7897 push origin master；发 Release 前设 $env:HTTPS_PROXY='http://127.0.0.1:7897' 再用 gh。
 - 别用 PowerShell 直接读写源码（破坏 UTF-8中文）；用 .NET [IO.File] + UTF8Encoding($false)。
 - 用户数据（标签/收藏/订阅/历史/设置）都在 %APPDATA%\p-spider\，仓库里不放任何数据文件。
