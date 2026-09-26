@@ -270,11 +270,11 @@ export const CategorySidebar: React.FC<Props> = ({
           type={filter.multi ? 'primary' : 'default'}
           onClick={() => {
             const nextMulti = !filter.multi;
-            const tagIds =
-              !nextMulti && filter.tagIds.length > 1
-                ? [filter.tagIds[filter.tagIds.length - 1]]
-                : filter.tagIds;
-            setFilter({ multi: nextMulti, tagIds });
+            // 退出多标签时清空标签筛选（回到全部）；进入多标签时保留当前已选标签
+            setFilter({
+              multi: nextMulti,
+              tagIds: nextMulti ? filter.tagIds : [],
+            });
           }}
         >
           多标签

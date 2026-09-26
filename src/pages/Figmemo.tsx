@@ -1,13 +1,16 @@
 /* eslint-disable react/prop-types */
 import {
   ArrowLeftOutlined,
+  CheckOutlined,
   DownloadOutlined,
   ExportOutlined,
   HeartFilled,
   HeartOutlined,
+  LeftOutlined,
   LinkOutlined,
   PlusOutlined,
   ReloadOutlined,
+  RightOutlined,
   TagOutlined,
 } from '@ant-design/icons';
 import {
@@ -23,7 +26,13 @@ import {
   Tag,
 } from 'antd';
 import dayjs from 'dayjs';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { CategorySidebar } from '../components/figmemo/CategorySidebar';
 import { PageHeader } from '../components/PageHeader';
 import { PlatformMedia } from '../platforms';
@@ -35,6 +44,7 @@ import {
   refreshSitePosts,
   saveFigmemoPost,
   setArticleTags,
+  setHpoiMatch,
   upsertMetaImageCount,
 } from '../services/figmemo';
 import { useFigmemoFavoritesStore } from '../stores/figmemo-favorites';
@@ -53,6 +63,9 @@ import {
 import { openUrl } from '../utils/shell';
 import { handleImageMenuKey, imageMenuItems } from '../utils/image-menu';
 import { LocalThumb } from '../components/library/LocalThumb';
+import hpoiIcon from '../assets/platform-icons/hpoi.png';
+import { HpoiMatchPanel } from '../components/figmemo/HpoiMatchPanel';
+import { HpoiMatch, HPOI_MATCH_CATEGORY_IDS } from '../services/hpoi';
 
 interface PostDetail {
   title: string;
@@ -68,6 +81,32 @@ const TAG_GROUPS: { key: string; options: string[] }[] = [
 ];
 
 const EMPTY_COUNTS: TagCounts = { all: 0, unclassified: 0, byId: {} };
+
+/**
+ * 用 fig-memo 文章标题/正文拼出 Hpoi 搜索关键词。
+ * 标题形如 `メーカー「商品名」...`；正文兜底解析 `メーカー：` / `商品名：`。
+ */
+function buildHpoiKeyword(title: string, html?: string): string {
+  let maker = '';
+  let name = '';
+  const t = title.match(/^([^「]+?)「(.+?)」/);
+  if (t) {
+    maker = t[1].trim();
+    name = t[2].trim();
+  }
+  if (html && (!maker || !name)) {
+    const text = html.replace(/<[^>]*>/g, '\n');
+    if (!maker) {
+      const m = text.match(/メーカー\s*[:：]\s*([^\n]+)/);
+      if (m) maker = m[1].trim();
+    }
+    if (!name) {
+      const m = text.match(/商品名\s*[:：]\s*([^\n]+)/);
+      if (m) name = m[1].trim();
+    }
+  }
+  return [name || title.trim(), maker].filter(Boolean).join(' ');
+}
 
 // 会话级内存缓存：切走再切回 fig-memo 时直接用内存列表，避免重复「读缓存→构建→同步标签→渲染」
 const ITEMS_TTL = 3 * 60 * 1000;
@@ -125,6 +164,9 @@ export const FigmemoPage: React.FC = () => {
   const [items, setItems] = useState<FigmemoListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [keyword, setKeyword] = useState('');
+  const [sort, setSort] = useState<
+    'date-desc' | 'date-asc' | 'rating-desc' | 'rating-asc'
+  >('date-desc');
 
   // 列表变化时同步到会话缓存，供切回时秒开（仅在有内容时记录，避免把初始空列表当成缓存）
   useEffect(() => {
@@ -135,6 +177,9 @@ export const FigmemoPage: React.FC = () => {
   }, [items]);
 
   const [selected, setSelected] = useState<FigmemoListItem | null>(null);
+  // 进入详情时快照当时的筛选列表顺序，供「上一篇/下一篇」按用户筛选结果跳转
+  const [navList, setNavList] = useState<FigmemoListItem[]>([]);
+  const detailScrollRef = useRef<HTMLDivElement>(null);
   const [detail, setDetail] = useState<PostDetail | null>(null);
   const [images, setImages] = useState<PlatformMedia[]>([]);
   const [localImages, setLocalImages] = useState<
@@ -199,7 +244,8 @@ export const FigmemoPage: React.FC = () => {
     load();
   }, [load]);
 
-  const openPost = async (item: FigmemoListItem) => {
+  const openPost = async (item: FigmemoListItem, list?: FigmemoListItem[]) => {
+    if (list) setNavList(list);
     setSelected(item);
     setDetail(null);
     setImages([]);
@@ -247,6 +293,25 @@ export const FigmemoPage: React.FC = () => {
         ]);
         setDetail(d);
         setImages(imgs);
+        // 未下载文章：顺手把站点图片数落库，列表卡片就能显示真实数量
+        if (item.imageCount !== imgs.length) {
+          const count = imgs.length;
+          setItems((prev) =>
+            prev.map((it) =>
+              it.postId === item.postId ? { ...it, imageCount: count } : it,
+            ),
+          );
+          upsertMetaImageCount(
+            {
+              postId: item.postId,
+              title: item.title,
+              date: item.date,
+              link: item.link,
+              categories: item.categories,
+            },
+            count,
+          ).catch(() => undefined);
+        }
       }
     } catch (err: any) {
       log.error(err);
@@ -290,6 +355,11 @@ export const FigmemoPage: React.FC = () => {
         it.postId === selected.postId ? { ...it, articleTags: clean } : it,
       ),
     );
+    setNavList((prev) =>
+      prev.map((it) =>
+        it.postId === selected.postId ? { ...it, articleTags: clean } : it,
+      ),
+    );
     setTagSaving(true);
     try {
       await setArticleTags(selected, clean);
@@ -312,6 +382,23 @@ export const FigmemoPage: React.FC = () => {
     applyArticleTags(next);
   };
 
+  // 点一下即打/取消某分类下的一个标签值（快捷标签墙）
+  const toggleGroupTag = (group: string, value: string) => {
+    if (!selected) return;
+    const cur = selected.articleTags?.[group] || [];
+    setGroupTags(
+      group,
+      cur.includes(value) ? cur.filter((v) => v !== value) : [...cur, value],
+    );
+  };
+
+  const addGroupTag = (group: string, value: string) => {
+    if (!selected) return;
+    const cur = selected.articleTags?.[group] || [];
+    if (cur.includes(value)) return;
+    setGroupTags(group, [...cur, value]);
+  };
+
   const addGroup = () => {
     const name = newGroup.trim();
     if (!name) return;
@@ -327,6 +414,28 @@ export const FigmemoPage: React.FC = () => {
     useFigmemoTagsStore.getState().addTagsBatch([{ name, parentId: null }]);
     setNewGroup('');
     setPanelOpen(true);
+  };
+
+  // 关联/解除 hpoi 词条（同步详情、列表与导航快照，并落盘）
+  const applyHpoiMatch = async (hpoi: HpoiMatch | null) => {
+    if (!selected) return;
+    const next = hpoi || undefined;
+    setSelected({ ...selected, hpoi: next });
+    setItems((prev) =>
+      prev.map((it) =>
+        it.postId === selected.postId ? { ...it, hpoi: next } : it,
+      ),
+    );
+    setNavList((prev) =>
+      prev.map((it) =>
+        it.postId === selected.postId ? { ...it, hpoi: next } : it,
+      ),
+    );
+    try {
+      await setHpoiMatch(selected, hpoi);
+    } catch (err: any) {
+      message.error(err?.message || 'hpoi 关联保存失败');
+    }
   };
 
   const hasSelected = selected != null;
@@ -364,8 +473,25 @@ export const FigmemoPage: React.FC = () => {
     }
     const kw = keyword.trim().toLowerCase();
     if (kw) list = list.filter((it) => it.title.toLowerCase().includes(kw));
-    return list;
-  }, [hasSelected, items, filter, index, keyword, favSet]);
+
+    const cmpDate = (x: FigmemoListItem, y: FigmemoListItem) =>
+      x.date < y.date ? -1 : x.date > y.date ? 1 : 0;
+    const arr = [...list];
+    arr.sort((a, b) => {
+      if (sort === 'rating-desc' || sort === 'rating-asc') {
+        const ra = a.hpoi?.rating;
+        const rb = b.hpoi?.rating;
+        if (ra == null && rb == null) return cmpDate(b, a);
+        if (ra == null) return 1;
+        if (rb == null) return -1;
+        if (ra !== rb) return sort === 'rating-desc' ? rb - ra : ra - rb;
+      } else if (sort === 'date-asc') {
+        return cmpDate(a, b);
+      }
+      return cmpDate(b, a);
+    });
+    return arr;
+  }, [hasSelected, items, filter, index, keyword, favSet, sort]);
 
   // 侧栏「收藏」计数：当前列表范围内已收藏的文章数
   const favoriteCount = useMemo(
@@ -377,6 +503,55 @@ export const FigmemoPage: React.FC = () => {
   );
 
   const postUrl = selected?.link;
+
+  // Hpoi 手办维基：用「商品名 + 厂商」预填搜索（手动挑对应词条，不做脆弱的自动匹配）
+  const hpoiKeyword = selected
+    ? buildHpoiKeyword(selected.title, detail?.contentHtml)
+    : '';
+  const hpoiUrl = `https://www.hpoi.net/search?keyword=${encodeURIComponent(
+    hpoiKeyword,
+  )}&category=100`;
+
+  // 当前文章在快照列表中的位置（用于「上一篇/下一篇」与进度显示）
+  const navIndex = useMemo(
+    () =>
+      selected ? navList.findIndex((it) => it.postId === selected.postId) : -1,
+    [selected, navList],
+  );
+  const navPrev = navIndex > 0 ? navList[navIndex - 1] : null;
+  const navNext =
+    navIndex >= 0 && navIndex < navList.length - 1
+      ? navList[navIndex + 1]
+      : null;
+
+  // 切换文章时回到详情顶部
+  useEffect(() => {
+    detailScrollRef.current?.scrollTo({ top: 0 });
+  }, [selected?.postId]);
+
+  // 空格键 = 下一篇（在输入框/可编辑元素内不触发，避免打字或误触按钮）
+  useEffect(() => {
+    if (!selected) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.code !== 'Space') return;
+      const el = document.activeElement as HTMLElement | null;
+      const tagName = el?.tagName;
+      if (
+        tagName === 'INPUT' ||
+        tagName === 'TEXTAREA' ||
+        tagName === 'SELECT' ||
+        tagName === 'BUTTON' ||
+        el?.isContentEditable
+      ) {
+        return;
+      }
+      if (!navNext) return;
+      e.preventDefault();
+      openPost(navNext);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [selected, navNext, openPost]);
 
   const imageMenu = (media: PlatformMedia): MenuProps => ({
     items: [
@@ -433,6 +608,30 @@ export const FigmemoPage: React.FC = () => {
           >
             返回列表
           </Button>
+          <Button
+            icon={<LeftOutlined />}
+            disabled={!navPrev}
+            onClick={() => {
+              if (navPrev) openPost(navPrev);
+            }}
+          >
+            上一篇
+          </Button>
+          <Button
+            icon={<RightOutlined />}
+            disabled={!navNext}
+            title="下一篇（空格键）"
+            onClick={() => {
+              if (navNext) openPost(navNext);
+            }}
+          >
+            下一篇
+          </Button>
+          {navIndex >= 0 && (
+            <span className="text-sm text-gray-400">
+              {navIndex + 1} / {navList.length}
+            </span>
+          )}
           <a
             href={selected.link}
             target="_blank"
@@ -441,6 +640,19 @@ export const FigmemoPage: React.FC = () => {
           >
             在原站打开
           </a>
+          <Button
+            icon={
+              <img
+                src={hpoiIcon}
+                alt="Hpoi"
+                className="w-4 h-4 object-contain"
+              />
+            }
+            title={`在 Hpoi 手办维基搜索：${hpoiKeyword}`}
+            onClick={() => openUrl(hpoiUrl)}
+          >
+            Hpoi
+          </Button>
           <Button
             className="ml-auto"
             type="primary"
@@ -451,7 +663,7 @@ export const FigmemoPage: React.FC = () => {
             保存该文章
           </Button>
         </div>
-        <div className="flex-1 overflow-y-auto pb-10">
+        <div className="flex-1 overflow-y-auto pb-10" ref={detailScrollRef}>
           <article className="bg-white rounded-md border-[1px] border-gray-200 max-w-4xl mx-auto p-6">
             <h1 className="text-2xl font-bold leading-snug">
               {selected.title}
@@ -543,6 +755,18 @@ export const FigmemoPage: React.FC = () => {
           </article>
         </div>
 
+        {/* 右上角：Hpoi 候选关联（仅白名单分类） */}
+        {selected.categories?.some((c) =>
+          HPOI_MATCH_CATEGORY_IDS.includes(c.id),
+        ) && (
+          <HpoiMatchPanel
+            item={selected}
+            contentHtml={detail?.contentHtml}
+            onConfirm={applyHpoiMatch}
+            onClear={() => applyHpoiMatch(null)}
+          />
+        )}
+
         {/* 右下角：现代化浮动操作（标签浮窗 + 标签/收藏按钮） */}
         <div className="fixed right-6 bottom-6 z-50">
           <div className="relative flex flex-col items-end gap-3">
@@ -564,22 +788,64 @@ export const FigmemoPage: React.FC = () => {
                   收起
                 </button>
               </div>
-              {annotatableGroups.map((g) => (
-                <div key={g.name} className="mb-3">
-                  <div className="text-xs text-gray-500 mb-1">{g.name}</div>
-                  <Select
-                    mode="tags"
-                    size="small"
-                    className="w-full"
-                    placeholder="选择或输入后回车"
-                    value={(selected.articleTags || {})[g.name] || []}
-                    options={g.options.map((v) => ({ label: v, value: v }))}
-                    onChange={(vals) => setGroupTags(g.name, vals as string[])}
-                    tokenSeparators={[',', '，']}
-                    maxTagCount="responsive"
-                  />
-                </div>
-              ))}
+              {annotatableGroups.map((g) => {
+                const sel = (selected.articleTags || {})[g.name] || [];
+                const selSet = new Set(sel);
+                // 已选但还不在候选项里的值（如刚自定义输入、标签树尚未刷新）也一并展示
+                const options = [
+                  ...g.options,
+                  ...sel.filter((v) => !g.options.includes(v)),
+                ];
+                return (
+                  <div key={g.name} className="mb-3">
+                    <div className="text-xs text-gray-500 mb-1">
+                      {g.name}
+                      {sel.length > 0 && (
+                        <span className="ml-1 text-sky-500">{sel.length}</span>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1">
+                      {options.map((v) => {
+                        const on = selSet.has(v);
+                        return (
+                          <button
+                            key={v}
+                            type="button"
+                            onClick={(e) => {
+                              e.currentTarget.blur();
+                              toggleGroupTag(g.name, v);
+                            }}
+                            className={`rounded-full border px-2 py-0.5 text-xs leading-5 transition-colors ${
+                              on
+                                ? 'border-sky-500 bg-sky-500 text-white'
+                                : 'border-gray-200 bg-white text-gray-600 hover:border-sky-400 hover:text-sky-600'
+                            }`}
+                          >
+                            {v}
+                          </button>
+                        );
+                      })}
+                      <input
+                        type="text"
+                        placeholder="＋自定义"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            const v = e.currentTarget.value.trim();
+                            if (v) {
+                              addGroupTag(g.name, v);
+                              e.currentTarget.value = '';
+                            }
+                          }
+                        }}
+                        onBlur={(e) => {
+                          e.currentTarget.value = '';
+                        }}
+                        className="w-20 rounded-full border border-dashed border-gray-300 bg-transparent px-2 py-0.5 text-xs leading-5 outline-none transition-all focus:w-28 focus:border-sky-400"
+                      />
+                    </div>
+                  </div>
+                );
+              })}
               <div className="flex items-center gap-1 border-t-[1px] border-gray-100 pt-2">
                 <Input
                   size="small"
@@ -665,6 +931,18 @@ export const FigmemoPage: React.FC = () => {
               className="w-52"
             />
             <span className="text-sm text-gray-400">{filtered.length} 篇</span>
+            <Select
+              size="small"
+              value={sort}
+              onChange={(v) => setSort(v)}
+              className="w-36"
+              options={[
+                { label: '日期 新→旧', value: 'date-desc' },
+                { label: '日期 旧→新', value: 'date-asc' },
+                { label: 'Hpoi 评分 高→低', value: 'rating-desc' },
+                { label: 'Hpoi 评分 低→高', value: 'rating-asc' },
+              ]}
+            />
             <Button
               className="ml-auto"
               icon={<ReloadOutlined />}
@@ -698,7 +976,7 @@ export const FigmemoPage: React.FC = () => {
                     onClick: async ({ key, domEvent }) => {
                       domEvent.stopPropagation();
                       if (await handleImageMenuKey(key, ctx, message)) return;
-                      if (key === 'openArticle') openPost(item);
+                      if (key === 'openArticle') openPost(item, filtered);
                     },
                   };
                   return (
@@ -709,9 +987,9 @@ export const FigmemoPage: React.FC = () => {
                     >
                       <li
                         className="lib-card-cv bg-white rounded-md border-[1px] border-gray-100 overflow-hidden group cursor-pointer"
-                        onClick={() => openPost(item)}
+                        onClick={() => openPost(item, filtered)}
                       >
-                        <div className="h-[9rem] bg-gray-100">
+                        <div className="relative h-[9rem] bg-gray-100">
                           {item.coverPath ? (
                             <LocalThumb
                               filePath={item.coverPath}
@@ -736,6 +1014,32 @@ export const FigmemoPage: React.FC = () => {
                               无封面
                             </div>
                           )}
+                          <div className="absolute right-1 bottom-1 z-10 flex items-center gap-0.5">
+                            {item.exists && (
+                              <span
+                                title="已下载"
+                                className="flex items-center justify-center w-4 h-4 rounded-full bg-sky-500 text-white shadow"
+                              >
+                                <CheckOutlined className="text-[10px] leading-none" />
+                              </span>
+                            )}
+                            {favSet.has(String(item.postId)) && (
+                              <span
+                                title="已收藏"
+                                className="flex items-center justify-center w-4 h-4 rounded-full bg-rose-500 text-white shadow"
+                              >
+                                <HeartFilled className="text-[10px] leading-none" />
+                              </span>
+                            )}
+                            {Object.keys(item.articleTags || {}).length > 0 && (
+                              <span
+                                title="已打标签"
+                                className="flex items-center justify-center w-4 h-4 rounded-full bg-slate-400 text-white shadow"
+                              >
+                                <TagOutlined className="text-[10px] leading-none" />
+                              </span>
+                            )}
+                          </div>
                         </div>
                         <div className="px-2 py-2">
                           <p
@@ -751,7 +1055,14 @@ export const FigmemoPage: React.FC = () => {
                                 {item.categories[0].name}
                               </Tag>
                             )}
-                            <span>· {item.imageCount} 图</span>
+                            {item.hpoi?.rating != null && (
+                              <span className="text-amber-500">
+                                ★{item.hpoi.rating}
+                              </span>
+                            )}
+                            {item.imageCount > 0 && (
+                              <span>· {item.imageCount} 图</span>
+                            )}
                           </div>
                         </div>
                       </li>

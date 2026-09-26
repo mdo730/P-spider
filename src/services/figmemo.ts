@@ -8,6 +8,63 @@ import { useFigmemoTagsStore } from '../stores/figmemo-tags';
 import { useSettingsStore } from '../stores/settings';
 import { getMediaKind, isMediaFile, mapLimit } from '../utils/library';
 import { unicodeFilenamify } from '../utils/unicode';
+import { HpoiMatch } from './hpoi';
+import hpoiSeedData from '../data/hpoi-matches.json';
+import figmemoMetaSeedData from '../data/figmemo-meta-seed.json';
+import figmemoSiteSeedData from '../data/figmemo-site-seed.json';
+
+/** 内置文章元数据种子：postId → { imageCount }（离线补的图片数；不含用户手标标签） */
+const FIGMEMO_META_SEED = figmemoMetaSeedData as Record<
+  string,
+  { imageCount?: number }
+>;
+
+/** 内置站点缓存种子（文章清单/分类/封面），首启本地无缓存时用它初始化 */
+const FIGMEMO_SITE_SEED = figmemoSiteSeedData;
+
+/** 内置 hpoi 绑定种子（离线批量匹配结果），postId → 紧凑快照 */
+const HPOI_SEED = hpoiSeedData as Record<
+  string,
+  {
+    itemId: number;
+    nameCN?: string;
+    name?: string;
+    companyName?: string;
+    scale?: number;
+    rating?: number;
+    commentCount?: number;
+    cover?: string;
+  }
+>;
+
+/** 从内置种子取某篇的 hpoi 快照（无则为 undefined） */
+function seedHpoi(postId: string): HpoiMatch | undefined {
+  const s = HPOI_SEED[String(postId)];
+  if (!s || !s.itemId) return undefined;
+  return {
+    itemId: s.itemId,
+    nameCN: s.nameCN || '',
+    name: s.name || '',
+    companyName: s.companyName || '',
+    scale: s.scale,
+    rating: s.rating,
+    commentCount: s.commentCount,
+    cover: s.cover,
+    releaseDate: undefined,
+    tags: [],
+    matchedAt: '',
+  };
+}
+
+/** 记录是否被用户显式解除过 hpoi（解除后不再回落到内置种子） */
+function resolveHpoi(
+  meta: { hpoi?: HpoiMatch; hpoiRemoved?: boolean } | undefined,
+  postId: string,
+): HpoiMatch | undefined {
+  if (meta?.hpoi) return meta.hpoi;
+  if (meta?.hpoiRemoved) return undefined;
+  return seedHpoi(postId);
+}
 
 let _log: ICategoriedLogger;
 
@@ -18,8 +75,10 @@ function log() {
 }
 
 const SITE = 'https://fig-memo-r18.site';
-const API = `${SITE}/wp-json/wp/v2`;
-const UA = 'Mozilla/5.0';
+// XSERVER WAF 会 403 掉 /wp-json/ 路径；用 WordPress 的 ?rest_route= 查询形式可绕过
+const API = `${SITE}/?rest_route=/wp/v2`;
+const UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36';
 const PER_PAGE = 100;
 const MAX_TITLE = 60;
 
@@ -62,6 +121,10 @@ export interface FigmemoMeta {
   imageCount: number;
   /** 文章级标签（姿势/发型/体型…）：组名 → 取值列表 */
   articleTags?: Record<string, string[]>;
+  /** 已确认的 hpoi 词条关联快照 */
+  hpoi?: HpoiMatch;
+  /** 用户显式解除过 hpoi（解除后不再回落内置种子） */
+  hpoiRemoved?: boolean;
 }
 
 export interface FigmemoProgress {
@@ -409,24 +472,80 @@ export async function setArticleTags(
     useFigmemoTagsStore.getState().removeFolderTags([relPath], removed);
 }
 
+/** 写入/清除某篇文章的 hpoi 关联快照（没有元数据记录的文章也会补建一条） */
+export async function setHpoiMatch(
+  post: {
+    postId: string;
+    title: string;
+    date: string;
+    link: string;
+    categories: { id: number; name: string; slug: string }[];
+    imageCount: number;
+  },
+  hpoi: HpoiMatch | null,
+): Promise<void> {
+  const records = await readMetaRecords();
+  const idx = records.findIndex(
+    (r) => String(r.postId) === String(post.postId),
+  );
+  if (idx >= 0) {
+    if (hpoi) {
+      records[idx] = { ...records[idx], hpoi };
+      delete records[idx].hpoiRemoved;
+    } else {
+      const next = { ...records[idx] };
+      delete next.hpoi;
+      next.hpoiRemoved = true;
+      records[idx] = next;
+    }
+  } else if (hpoi) {
+    records.push({ ...post, hpoi });
+  } else {
+    return;
+  }
+  const file = await metaFilePath();
+  const text = records.map((r) => JSON.stringify(r)).join('\n');
+  await fs.writeTextFile(file, text ? `${text}\n` : '');
+}
+
 /** 读取 figmemo.jsonl 全部元数据记录 */
 export async function readMetaRecords(): Promise<FigmemoMeta[]> {
   const out: FigmemoMeta[] = [];
   try {
     const file = await metaFilePath();
-    if (!(await fs.exists(file))) return out;
-    const text = await fs.readTextFile(file);
-    for (const line of text.split('\n')) {
-      if (!line.trim()) continue;
-      try {
-        const r = JSON.parse(line) as FigmemoMeta;
-        if (r?.postId) out.push(r);
-      } catch {
-        // ignore bad line
+    if (await fs.exists(file)) {
+      const text = await fs.readTextFile(file);
+      for (const line of text.split('\n')) {
+        if (!line.trim()) continue;
+        try {
+          const r = JSON.parse(line) as FigmemoMeta;
+          if (r?.postId) out.push(r);
+        } catch {
+          // ignore bad line
+        }
       }
     }
   } catch (err) {
     log().warn('读取 figmemo.jsonl 失败', err);
+  }
+  // 合并内置文章种子：补 imageCount；本地缺失的记录补建（新装/清数据后也有图片数）
+  const byId = new Map(out.map((r) => [String(r.postId), r]));
+  for (const [pid, s] of Object.entries(FIGMEMO_META_SEED)) {
+    const r = byId.get(pid);
+    if (r) {
+      if (!r.imageCount && s.imageCount) r.imageCount = s.imageCount;
+    } else if (s.imageCount) {
+      const rec: FigmemoMeta = {
+        postId: pid,
+        title: '',
+        date: '',
+        link: '',
+        categories: [],
+        imageCount: s.imageCount,
+      };
+      out.push(rec);
+      byId.set(pid, rec);
+    }
   }
   return out;
 }
@@ -773,30 +892,37 @@ export interface FigmemoListItem {
   coverUrl?: string;
   /** 文章级标签（姿势/发型/体型…） */
   articleTags?: Record<string, string[]>;
+  /** 已确认的 hpoi 词条关联快照 */
+  hpoi?: HpoiMatch;
 }
 
-async function firstImageIn(dir: string): Promise<string | undefined> {
+/** 本地文件夹的图片数 + 首图（会话缓存，避免重复 readDir） */
+interface FolderImageInfo {
+  first?: string;
+  count: number;
+}
+const folderImageCache = new Map<string, FolderImageInfo>();
+async function folderImageInfoCached(dir: string): Promise<FolderImageInfo> {
+  const cached = folderImageCache.get(dir);
+  if (cached) return cached;
+  let info: FolderImageInfo = { first: undefined, count: 0 };
   try {
     const entries = await fs.readDir(dir, { recursive: false });
+    let first: string | undefined;
+    let count = 0;
     for (const entry of entries) {
       const name = entry.name || entry.path.split(/[\\/]/).pop() || '';
       if (isMediaFile(name) && getMediaKind(name) === 'image') {
-        return entry.path;
+        count += 1;
+        if (!first) first = entry.path;
       }
     }
+    info = { first, count };
   } catch {
     // 文件夹不存在
   }
-  return undefined;
-}
-
-/** 本地封面路径的会话缓存（首次加载会构建两次列表，避免重复 readDir） */
-const localCoverCache = new Map<string, string | undefined>();
-async function firstImageInCached(dir: string): Promise<string | undefined> {
-  if (localCoverCache.has(dir)) return localCoverCache.get(dir);
-  const value = await firstImageIn(dir);
-  localCoverCache.set(dir, value);
-  return value;
+  folderImageCache.set(dir, info);
+  return info;
 }
 
 /**
@@ -815,18 +941,22 @@ export async function listLocalPosts(
     )}`;
     const folderPath = `${baseDir}\\fig-memo\\${folderName}`;
     const exists = await fs.exists(folderPath);
+    const localInfo = exists
+      ? await folderImageInfoCached(folderPath)
+      : undefined;
     const item: FigmemoListItem = {
       postId: r.postId,
       title: r.title,
       date: r.date,
       link: r.link,
       categories: r.categories || [],
-      imageCount: r.imageCount || 0,
+      imageCount: exists ? localInfo?.count || 0 : r.imageCount || 0,
       folderName,
       folderPath,
       exists,
-      coverPath: exists ? await firstImageIn(folderPath) : undefined,
+      coverPath: localInfo?.first,
       articleTags: r.articleTags,
+      hpoi: resolveHpoi(r, r.postId),
     };
     onEach?.(item);
     return item;
@@ -874,10 +1004,17 @@ async function siteCachePath(): Promise<string> {
 async function readSiteCache(): Promise<FigmemoSiteCache | null> {
   try {
     const file = await siteCachePath();
-    if (!(await fs.exists(file))) return null;
-    const obj = JSON.parse(await fs.readTextFile(file));
-    if (!obj?.posts) return null;
-    return obj as FigmemoSiteCache;
+    if (await fs.exists(file)) {
+      const obj = JSON.parse(await fs.readTextFile(file));
+      if (obj?.posts) return obj as FigmemoSiteCache;
+    }
+    // 本地无缓存 → 用内置站点种子初始化（新用户首启秒开、离线可用；随后照常增量刷新）
+    if (FIGMEMO_SITE_SEED?.posts?.length) {
+      const seed = FIGMEMO_SITE_SEED as unknown as FigmemoSiteCache;
+      await writeSiteCache(seed);
+      return seed;
+    }
+    return null;
   } catch (err) {
     log().warn('读取站点缓存失败', err);
     return null;
@@ -932,11 +1069,11 @@ async function buildItems(
       postCovers.get(p.id) ||
       undefined;
     // 本地优先：已下载就用本地首图（走缩略图缓存，秒开），没有才回退站点封面 URL
-    const localCover = exists
-      ? await firstImageInCached(folderPath)
+    const localInfo = exists
+      ? await folderImageInfoCached(folderPath)
       : undefined;
-    const coverPath = localCover;
-    const coverUrl = localCover ? undefined : networkCover;
+    const coverPath = localInfo?.first;
+    const coverUrl = coverPath ? undefined : networkCover;
     return {
       postId: p.id,
       title: p.title,
@@ -946,13 +1083,14 @@ async function buildItems(
         .map((id) => cats.get(id))
         .filter((c): c is FigmemoCategory => !!c)
         .map((c) => ({ id: c.id, name: c.name, slug: c.slug })),
-      imageCount: meta?.imageCount || 0,
+      imageCount: exists ? localInfo?.count || 0 : meta?.imageCount || 0,
       folderName,
       folderPath,
       exists,
       coverPath,
       coverUrl,
       articleTags: meta?.articleTags,
+      hpoi: resolveHpoi(meta, p.id),
     };
   });
 }
