@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod fsutil;
+mod media_proxy;
 mod network;
 
 use tauri::{CustomMenuItem, Manager, SystemTray, SystemTrayEvent, SystemTrayMenu, WindowEvent};
@@ -48,10 +49,12 @@ fn main() {
           network::set_auto_start,
           network::get_auto_start,
           network::quit_app,
+          media_proxy::media_proxy_port,
           fsutil::get_path_mtimes,
           fsutil::get_folder_stats,
           fsutil::generate_thumbnail,
           fsutil::copy_files_to_clipboard,
+          fsutil::convert_video_to_gif,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

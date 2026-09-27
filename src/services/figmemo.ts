@@ -1393,6 +1393,32 @@ async function resolveFeaturedChunk(
   }
 }
 
+/** 保存单张远程媒体到本地（按图文目录规则，与整篇保存一致） */
+export async function saveFigmemoMedia(
+  item: FigmemoListItem,
+  media: PlatformMedia,
+): Promise<void> {
+  const platformPost: PlatformPost = {
+    id: item.postId,
+    creator: {
+      id: FIGMEMO_SOURCE,
+      name: FIGMEMO_AUTHOR,
+      username: FIGMEMO_AUTHOR,
+    },
+    publishedAt: dayjs(item.date),
+    text: truncateTitle(item.title),
+    medias: [media],
+    links: [],
+    postUrl: item.link,
+    source: FIGMEMO_SOURCE,
+  };
+  await useDownloadStore
+    .getState()
+    .batchCreateDownloadTask([
+      { source: FIGMEMO_SOURCE, post: platformPost, media },
+    ]);
+}
+
 /** 保存单篇文章到本地（手动保存：不计统计、不打标；调用方随后可 syncLocalTags） */
 export async function saveFigmemoPost(item: FigmemoListItem): Promise<number> {
   const images = await fetchPostImages(item.postId);

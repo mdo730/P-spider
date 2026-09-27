@@ -24,6 +24,9 @@ import dayjs from 'dayjs';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { PageHeader } from '../components/PageHeader';
 import { LocalThumb } from '../components/library/LocalThumb';
+import { useRemoteVideo } from '../hooks/useRemoteVideo';
+import { ensureMediaProxy, mediaProxyUrl } from '../utils/media-proxy';
+import { resolveTweetMediaUrl } from '../services/tweet-media';
 import {
   DownloadHistoryRecord,
   getMediaOriginalUrl,
@@ -61,6 +64,9 @@ import { useHomepageStore } from '../stores/homepage';
 import { useSubscriptionStore } from '../stores/subscription';
 import { ROUTES } from '../constants/routes';
 import MediaType from '../enums/MediaType';
+
+// 提前启动本地流式代理（GIF/视频远程播放用）
+ensureMediaProxy();
 
 const PAGE_SIZE = 25;
 const LOAD_MORE_STEP = 5;
@@ -229,6 +235,34 @@ export const TimelinePage: React.FC = () => {
     );
   }, []);
 
+  // 后台为「本地已删且历史无直链」的视频/GIF 自动反查直链（网格里也能动）
+  const resolveMissingMedia = useCallback(async (gs: TimelineGroup[]) => {
+    const targets: DownloadHistoryRecord[] = [];
+    for (const g of gs) {
+      for (const r of g.records) {
+        if (
+          (r.mediaType === MediaType.Video || r.mediaType === MediaType.Gif) &&
+          r.existsLocal === false &&
+          !r.videoUrl &&
+          r.username &&
+          r.postId
+        ) {
+          targets.push(r);
+        }
+      }
+    }
+    let changed = false;
+    for (const r of targets.slice(0, 6)) {
+      const url = await resolveTweetMediaUrl(r.username!, r.postId);
+      if (url) {
+        r.videoUrl = url;
+        changed = true;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    if (changed) setGroups((prev) => [...prev]);
+  }, []);
+
   // 挂载：有会话缓存先秒显（切回原样），**同时后台重新聚合**以反映新下载/新内容
   useEffect(() => {
     let alive = true;
@@ -244,11 +278,12 @@ export const TimelinePage: React.FC = () => {
       setGroups(merged);
       setVisibleCount(visibleCountCache);
       setLoading(false);
+      void resolveMissingMedia(merged);
     })();
     return () => {
       alive = false;
     };
-  }, [build]);
+  }, [build, resolveMissingMedia]);
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
@@ -268,11 +303,12 @@ export const TimelinePage: React.FC = () => {
       );
       setGroups(merged);
       setVisibleCount(visibleCountCache);
+      void resolveMissingMedia(merged);
       message.success('已更新');
     } finally {
       setRefreshing(false);
     }
-  }, [build, visibleCount, message]);
+  }, [build, visibleCount, message, resolveMissingMedia]);
 
   const loadMore = useCallback(() => {
     setLoadingMore(true);
@@ -398,6 +434,30 @@ export const TimelinePage: React.FC = () => {
   );
 };
 
+/**
+ * 同一条媒体可能被重复记录（如 GIF 同时存了 .mp4 与封面 .jpg）——按 mediaUrl 去重，
+ * 优先保留非封面(jpg)的那条，避免时间流一张图显示两次。
+ */
+function dedupeMediaRecords(
+  list: DownloadHistoryRecord[],
+): DownloadHistoryRecord[] {
+  const isPosterJpg = (r: DownloadHistoryRecord) =>
+    /\.jpe?g$/i.test(r.fileName || '');
+  const index = new Map<string, number>();
+  const out: DownloadHistoryRecord[] = [];
+  for (const r of list) {
+    const key = r.mediaUrl || r.filePath || `${r.postId}-${r.fileName}`;
+    const i = index.get(key);
+    if (i === undefined) {
+      index.set(key, out.length);
+      out.push(r);
+    } else if (isPosterJpg(out[i]) && !isPosterJpg(r)) {
+      out[i] = r; // 用非封面替换封面
+    }
+  }
+  return out;
+}
+
 const TimelineItem: React.FC<{
   group: TimelineGroup;
   maxTextLen: number;
@@ -405,7 +465,8 @@ const TimelineItem: React.FC<{
 }> = ({ group, maxTextLen, maxImages }) => {
   const { message } = App.useApp();
   const openArticle = useRouteStore((s) => s.openArticle);
-  const first = group.records[0];
+  const records = dedupeMediaRecords(group.records);
+  const first = records[0];
   const url = first?.username
     ? buildUserUrl(first.username)
     : 'javascript:void(0);';
@@ -433,7 +494,14 @@ const TimelineItem: React.FC<{
   const shownText = textClipped ? `${text.slice(0, maxTextLen)}…` : text;
   const subscriptions = useSubscriptionStore((s) => s.subscriptions);
   const [subscribing, setSubscribing] = useState(false);
-  const [videoSrc, setVideoSrc] = useState<string | null>(null);
+  // 当前播放的视频：本地用 asset 直链；远程（未下载转贴）经后端代理拉取后播放
+  const [video, setVideo] = useState<{
+    local?: string;
+    remote?: string;
+    postUrl?: string;
+  } | null>(null);
+  const remoteVideo = useRemoteVideo(video?.remote);
+  const [videoError, setVideoError] = useState(false);
   const isRetweet = group.kind === 'retweet';
   const subscribed = group.username
     ? subscriptions.some(
@@ -617,16 +685,154 @@ const TimelineItem: React.FC<{
       )}
 
       <div className="flex flex-wrap gap-2">
-        {group.records.slice(0, maxImages).map((record, idx) => {
+        {records.slice(0, maxImages).map((record, idx) => {
           const key = `${record.postId}-${idx}`;
-          const localPath = record.filePath || undefined;
-          const thumbUrl = getMediaThumbUrl(record);
-          const originalUrl = getMediaOriginalUrl(record);
-          const isVideo =
-            record.mediaType === MediaType.Video ||
-            record.mediaType === MediaType.Gif;
+          // 本地文件被删（existsLocal=false）时按“未下载”处理，走远程兜底
+          const localPath =
+            record.existsLocal === false
+              ? undefined
+              : record.filePath || undefined;
+          const rawThumb = getMediaThumbUrl(record);
+          const rawOriginal = getMediaOriginalUrl(record);
+          // 远程图（pbs 等被墙）也经本地代理取，本地文件删了仍能显示
+          const toRemote = (u?: string) =>
+            u && /^https?:/i.test(u) ? mediaProxyUrl(u) : u;
+          const thumbUrl = toRemote(rawThumb);
+          const originalUrl = toRemote(rawOriginal);
+          // 只有视频走视频播放器；GIF 单独处理（要动、但不要播放器 UI）
+          const isVideo = record.mediaType === MediaType.Video;
+          const isGif = record.mediaType === MediaType.Gif;
 
-          // 视频/GIF：封面走 CDN 预览图；本地有文件则点击弹窗播放，否则打开原推
+          const gifCtx: ImageMenuCtx = {
+            localPath,
+            remoteUrl: originalUrl,
+            postUrl: record.postUrl,
+            author: record.username ? `@${record.username}` : undefined,
+          };
+
+          // GIF：本地 .gif 直接 <img>（会动）；本地 mp4 / 远程用无控件的自动循环视频（像 gif）
+          if (isGif) {
+            const localIsGif = !!localPath && /\.gif$/i.test(localPath);
+            const remoteAnimSrc = record.videoUrl
+              ? mediaProxyUrl(record.videoUrl)
+              : undefined;
+            const animSrc = localIsGif
+              ? toAssetUrl(localPath!)
+              : localPath
+                ? toAssetUrl(localPath)
+                : remoteAnimSrc;
+            return (
+              <Dropdown
+                key={key}
+                trigger={['contextMenu']}
+                menu={{
+                  items: [
+                    ...imageMenuItems(gifCtx),
+                    ...(!localPath && record.mediaUrl
+                      ? [
+                          {
+                            key: 'saveLocal',
+                            label: '保存到本地',
+                            icon: <DownloadOutlined />,
+                          },
+                        ]
+                      : []),
+                  ],
+                  onClick: async ({ key: k, domEvent }) => {
+                    domEvent.stopPropagation();
+                    if (await handleImageMenuKey(k, gifCtx, message)) return;
+                    if (k === 'saveLocal') await saveMedia(record);
+                  },
+                }}
+              >
+                <div
+                  className="relative w-40 h-40 rounded-md overflow-hidden border-[1px] border-gray-100 bg-black group cursor-pointer"
+                  title={localIsGif ? '查看 GIF' : '播放 GIF'}
+                  onClick={async () => {
+                    if (localIsGif) return; // 本地 .gif 交给 antd 图片预览
+                    setVideoError(false);
+                    if (localPath) {
+                      setVideo({ local: toAssetUrl(localPath) });
+                      return;
+                    }
+                    if (record.videoUrl) {
+                      setVideo({
+                        remote: record.videoUrl,
+                        postUrl: record.postUrl,
+                      });
+                      return;
+                    }
+                    // 本地已删且历史无直链：按推文 ID 反查媒体直链
+                    if (record.username && record.postId) {
+                      message.loading({
+                        content: '查找视频直链…',
+                        key: 'resolve-media',
+                        duration: 0,
+                      });
+                      const url = await resolveTweetMediaUrl(
+                        record.username,
+                        record.postId,
+                      );
+                      message.destroy('resolve-media');
+                      if (url) {
+                        setVideo({ remote: url, postUrl: record.postUrl });
+                        return;
+                      }
+                    }
+                    if (record.postUrl) openUrl(record.postUrl);
+                  }}
+                >
+                  {thumbUrl && (
+                    <img
+                      src={thumbUrl}
+                      alt={record.fileName}
+                      loading="lazy"
+                      className="absolute inset-0 w-full h-full object-cover"
+                    />
+                  )}
+                  {animSrc &&
+                    (localIsGif ? (
+                      <Image
+                        src={animSrc}
+                        alt={record.fileName}
+                        width={160}
+                        height={160}
+                        className="relative w-full h-full object-cover"
+                        preview={{ src: animSrc }}
+                      />
+                    ) : (
+                      <video
+                        src={animSrc}
+                        autoPlay
+                        loop
+                        muted
+                        playsInline
+                        className="relative w-full h-full object-cover"
+                        onError={(e) => {
+                          const v = e.currentTarget as HTMLVideoElement;
+                          // 本地文件缺失/直连失败 → 回退到经代理的远程直链，再不行就藏起来露封面
+                          if (
+                            remoteAnimSrc &&
+                            !v.dataset.fellBack &&
+                            v.src !== remoteAnimSrc
+                          ) {
+                            v.dataset.fellBack = '1';
+                            v.src = remoteAnimSrc;
+                          } else {
+                            v.style.display = 'none';
+                          }
+                        }}
+                      />
+                    ))}
+                  <span className="absolute right-1 bottom-1 text-xs text-white bg-black/60 rounded px-1">
+                    GIF
+                  </span>
+                </div>
+              </Dropdown>
+            );
+          }
+
+          // 视频：封面走 CDN 预览图；本地有文件则点击弹窗播放，否则打开原推
           if (isVideo) {
             const videoMenu: MenuProps = {
               items: [
@@ -685,10 +891,36 @@ const TimelineItem: React.FC<{
                 <div
                   className="relative w-40 h-40 rounded-md overflow-hidden border-[1px] border-gray-100 bg-black group cursor-pointer"
                   title={localPath || record.videoUrl ? '播放视频' : '打开原推'}
-                  onClick={() => {
-                    if (localPath) setVideoSrc(toAssetUrl(localPath));
-                    else if (record.videoUrl) setVideoSrc(record.videoUrl);
-                    else if (record.postUrl) openUrl(record.postUrl);
+                  onClick={async () => {
+                    setVideoError(false);
+                    if (localPath) {
+                      setVideo({ local: toAssetUrl(localPath) });
+                      return;
+                    }
+                    if (record.videoUrl) {
+                      setVideo({
+                        remote: record.videoUrl,
+                        postUrl: record.postUrl,
+                      });
+                      return;
+                    }
+                    if (record.username && record.postId) {
+                      message.loading({
+                        content: '查找视频直链…',
+                        key: 'resolve-media',
+                        duration: 0,
+                      });
+                      const url = await resolveTweetMediaUrl(
+                        record.username,
+                        record.postId,
+                      );
+                      message.destroy('resolve-media');
+                      if (url) {
+                        setVideo({ remote: url, postUrl: record.postUrl });
+                        return;
+                      }
+                    }
+                    if (record.postUrl) openUrl(record.postUrl);
                   }}
                 >
                   {localPath ? (
@@ -722,7 +954,11 @@ const TimelineItem: React.FC<{
               <Dropdown
                 key={key}
                 trigger={['contextMenu']}
-                menu={menuFor({ localPath, postUrl: record.postUrl })}
+                menu={menuFor({
+                  localPath,
+                  postUrl: record.postUrl,
+                  author: record.username ? `@${record.username}` : undefined,
+                })}
               >
                 <div className="inline-block">
                   <LocalThumb
@@ -740,6 +976,7 @@ const TimelineItem: React.FC<{
           const remoteCtx: ImageMenuCtx = {
             remoteUrl: originalUrl,
             postUrl: record.postUrl,
+            author: record.username ? `@${record.username}` : undefined,
           };
           return (
             <Dropdown
@@ -784,13 +1021,13 @@ const TimelineItem: React.FC<{
       </div>
 
       {(textClipped ||
-        group.records.length > maxImages ||
+        records.length > maxImages ||
         articlePage ||
         isRetweet) && (
         <div className="mt-2 flex items-center gap-3 text-xs text-gray-400">
           {textClipped && <span>正文已折叠</span>}
-          {group.records.length > maxImages && (
-            <span>还有 {group.records.length - maxImages} 张图</span>
+          {records.length > maxImages && (
+            <span>还有 {records.length - maxImages} 张图</span>
           )}
           {articlePage && (
             <Button
@@ -816,18 +1053,35 @@ const TimelineItem: React.FC<{
       )}
 
       <Modal
-        open={!!videoSrc}
+        open={!!video}
         footer={null}
         width="92%"
         centered
         destroyOnClose
         wrapClassName="library-video-wrap"
         styles={{ body: { padding: 0, background: '#0f1114' } }}
-        onCancel={() => setVideoSrc(null)}
+        onCancel={() => setVideo(null)}
       >
-        {videoSrc && (
+        {video && !video.local && remoteVideo.loading && (
+          <div className="flex flex-col items-center justify-center gap-3 py-24 text-gray-300">
+            <Spin size="large" />
+            <span className="text-sm">正在经代理加载视频…</span>
+          </div>
+        )}
+        {video && (remoteVideo.failed || videoError) && !video.local && (
+          <div className="flex flex-col items-center justify-center gap-3 py-24 text-gray-300">
+            <span className="text-sm">视频加载失败（代理或网络问题）</span>
+            {video.postUrl && (
+              <Button size="small" onClick={() => openUrl(video.postUrl!)}>
+                在原推打开
+              </Button>
+            )}
+          </div>
+        )}
+        {(video?.local || remoteVideo.src) && !videoError && (
           <video
-            src={videoSrc}
+            src={video?.local || remoteVideo.src}
+            onError={() => setVideoError(true)}
             controls
             autoPlay
             className="w-full max-h-[80vh] bg-black"

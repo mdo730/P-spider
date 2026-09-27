@@ -137,11 +137,16 @@ export const FileGrid: React.FC<Props> = ({
   // 统一右键菜单（网格卡片与查看器共用）
   const menuFor = (file: FileRef): MenuProps => {
     const postUrl = getPostUrl(file);
+    const fileInfo = getInfo(file);
+    // 作者：优先推文信息里的用户名，否则用一级文件夹名（本地库通常以作者命名）
+    const author = fileInfo?.username
+      ? `@${fileInfo.username}`
+      : coverFolderName || undefined;
     const isVideo = file.kind === 'video';
     return {
       items: [
         ...(!isVideo
-          ? imageMenuItems({ localPath: file.path, postUrl })
+          ? imageMenuItems({ localPath: file.path, postUrl, author })
           : [
               {
                 key: 'reveal',
@@ -183,7 +188,7 @@ export const FileGrid: React.FC<Props> = ({
           !isVideo &&
           (await handleImageMenuKey(
             key,
-            { localPath: file.path, postUrl },
+            { localPath: file.path, postUrl, author },
             message,
           ))
         ) {

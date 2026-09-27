@@ -97,18 +97,76 @@ pub fn generate_thumbnail(src: String, dst: String, size: u32) -> Result<(), Str
 
 /// 把一批本地文件（切割图）以「文件列表」写入系统剪贴板。
 /// 粘贴到聊天软件/资源管理器即得到 N 个图片附件（Windows CF_HDROP）。
+/// text 非空时同一会话再追加文本格式（CF_UNICODETEXT）；
+/// html 非空时再追加 HTML 格式（CF_HTML，含内联图片+文本），富文本框可一次贴出「图片 + 文本」。
 #[tauri::command]
-pub fn copy_files_to_clipboard(paths: Vec<String>) -> Result<(), String> {
+pub fn copy_files_to_clipboard(
+    paths: Vec<String>,
+    text: Option<String>,
+    html: Option<String>,
+) -> Result<(), String> {
     #[cfg(windows)]
     {
-        use clipboard_win::{raw, Clipboard};
+        use clipboard_win::{formats, raw, Clipboard};
         let _clip = Clipboard::new_attempts(10).map_err(|e| e.to_string())?;
         raw::set_file_list(&paths).map_err(|e| e.to_string())?;
+        if let Some(t) = text {
+            if !t.is_empty() {
+                // CF_UNICODETEXT：UTF-16LE，末尾 NUL；set_without_clear 以免清掉刚写入的文件列表
+                let mut utf16: Vec<u16> = t.encode_utf16().collect();
+                utf16.push(0);
+                let bytes: Vec<u8> = utf16.iter().flat_map(|u| u.to_le_bytes()).collect();
+                raw::set_without_clear(formats::CF_UNICODETEXT, &bytes)
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+        if let Some(h) = html {
+            if !h.is_empty() {
+                if let Some(fmt) = raw::register_format("HTML Format") {
+                    raw::set_without_clear(fmt.get(), h.as_bytes())
+                        .map_err(|e| e.to_string())?;
+                }
+            }
+        }
         return Ok(());
     }
     #[cfg(not(windows))]
     {
-        let _ = paths;
+        let _ = (paths, text, html);
+        Err("仅支持 Windows".into())
+    }
+}
+
+/// 用系统 ffmpeg 把视频（GIF 的 mp4）转成真实 .gif（“下载即转”用）。
+/// 需要系统 PATH 中有 ffmpeg；没有则返回错误，调用方保留 mp4。
+#[tauri::command]
+pub fn convert_video_to_gif(src: String, dst: String) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let status = std::process::Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-i",
+                &src,
+                "-vf",
+                "fps=12,scale=640:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse",
+                "-loop",
+                "0",
+                &dst,
+            ])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status()
+            .map_err(|e| format!("未能运行 ffmpeg（请确认已安装并在 PATH 中）：{e}"))?;
+        if !status.success() {
+            return Err(format!("ffmpeg 退出码 {:?}", status.code()));
+        }
+        return Ok(());
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (src, dst);
         Err("仅支持 Windows".into())
     }
 }

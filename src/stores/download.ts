@@ -1,4 +1,5 @@
-import { fs, notification, path } from '@tauri-apps/api';
+import { fs, invoke, notification, path } from '@tauri-apps/api';
+import MediaType from '../enums/MediaType';
 import { nanoid } from 'nanoid';
 import * as R from 'ramda';
 import { create } from 'zustand';
@@ -506,6 +507,25 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
 
       // 任务首次完成时触发，供订阅统计与下载历史记录使用
       if (status.status === 'complete' && task.status !== 'complete') {
+        // GIF：下载即转成真实 .gif（需系统 ffmpeg + 设置开启），并替换 mp4
+        if (
+          useSettingsStore.getState().download.gifToRealGif &&
+          newTask.media.type === MediaType.Gif &&
+          /\.mp4$/i.test(newTask.fileName)
+        ) {
+          try {
+            const src = await path.join(newTask.dir, newTask.fileName);
+            const gifName = newTask.fileName.replace(/\.mp4$/i, '.gif');
+            const dst = await path.join(newTask.dir, gifName);
+            await invoke('convert_video_to_gif', { src, dst });
+            await fs.removeFile(src);
+            newTask.fileName = gifName;
+            updateDownloadTask(newTask, Date.now());
+            log().info('GIF 已转真 gif', dst);
+          } catch (err) {
+            log().warn('GIF 转换失败，保留 mp4', err);
+          }
+        }
         onTaskCompleted.emit(newTask);
       }
     }

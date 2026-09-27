@@ -1,6 +1,6 @@
 [package]
 name = "p-spider"
-version = "1.4.0"
+version = "1.4.1"
 description = "A spider for P"
 authors = ["you"]
 license = ""
@@ -16,8 +16,11 @@ tauri-build = { version = "1.5", features = [] }
 tauri = { version = "1.5", features = [ "protocol-asset", "shell-all", "fs-all", "path-all", "os-all", "clipboard-all", "app-all", "dialog-all", "window-all", "notification-all", "system-tray"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-reqwest = { version = "0.11", features = ["json", "gzip"] }
+reqwest = { version = "0.11", features = ["json", "gzip", "blocking"] }
 winreg = "0.52"
+# 本地流式媒体代理（把远程视频/音频经代理转发给 WebView，支持 Range 边下边播）
+tiny_http = "0.12"
+percent-encoding = "2"
 # 缩略图在 Rust 端生成（解码/缩放/编码），避免占用 WebView 主线程导致白屏/OOM
 image = { version = "0.24", default-features = false, features = ["jpeg", "png", "webp", "gif", "bmp"] }
 

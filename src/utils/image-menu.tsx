@@ -20,6 +20,8 @@ export interface ImageMenuCtx {
   remoteUrl?: string;
   /** 原网页 URL */
   postUrl?: string;
+  /** 作者 ID（如 `@username`）；开启「附带作者/原帖信息」时与原文链接一起写剪贴板 */
+  author?: string;
 }
 
 interface Msg {
@@ -97,16 +99,26 @@ export async function handleImageMenuKey(
       const src = ctx.localPath || ctx.remoteUrl;
       if (!src) return true;
       const split = useSettingsStore.getState().split;
+      const infoParts = [ctx.author, ctx.postUrl].filter(Boolean) as string[];
+      const info = split.appendSourceInfo ? infoParts.join('  ') : '';
       const n = await copySplitImageToClipboard(
         src,
         split.direction,
         split.parts,
+        info || undefined,
       );
-      message.success(`已复制 ${n} 条切割图像到剪贴板`);
+      message.success(
+        split.appendSourceInfo
+          ? info
+            ? `已复制 ${n} 条切割图像（含作者/原帖，文本也在剪贴板）`
+            : `已复制 ${n} 条切割图像（未匹配到作者/原帖信息）`
+          : `已复制 ${n} 条切割图像到剪贴板`,
+      );
       return true;
     }
     if (key === IMAGE_MENU.reveal) {
-      if (ctx.localPath) await showInFolder(ctx.localPath);
+      // 打开「所在目录」并选中该文件（否则 explorer <文件> 会用默认程序打开文件）
+      if (ctx.localPath) await showInFolder(ctx.localPath, true);
       return true;
     }
     if (key === IMAGE_MENU.post) {

@@ -8,6 +8,7 @@ import {
   HeartOutlined,
   LeftOutlined,
   LinkOutlined,
+  LoadingOutlined,
   ReloadOutlined,
   RightOutlined,
 } from '@ant-design/icons';
@@ -18,6 +19,7 @@ import {
   Empty,
   Image,
   Input,
+  Menu,
   MenuProps,
   Pagination,
   Select,
@@ -35,6 +37,7 @@ import React, {
 import { CategorySidebar } from '../components/moeyo/CategorySidebar';
 import { PageHeader } from '../components/PageHeader';
 import { PlatformMedia } from '../platforms';
+import MediaType from '../enums/MediaType';
 import {
   MOEYO_HPOI_CATEGORY_IDS,
   MoeyoListItem,
@@ -43,6 +46,7 @@ import {
   loadCachedSitePosts,
   parseMoeyoProduct,
   refreshSitePosts,
+  saveMoeyoMedia,
   saveMoeyoPost,
   setHpoiMatch,
   upsertMetaImageCount,
@@ -50,6 +54,7 @@ import {
 import { HpoiMatchPanel } from '../components/figmemo/HpoiMatchPanel';
 import { getHpoiPostIndex } from '../services/figmemo';
 import { HpoiMatch } from '../services/hpoi';
+import hpoiIcon from '../assets/platform-icons/hpoi.png';
 import { useMoeyoFavoritesStore } from '../stores/moeyo-favorites';
 import { useMoeyoTagsStore } from '../stores/moeyo-tags';
 import { useRouteStore } from '../stores/route';
@@ -66,6 +71,7 @@ import {
 import { openUrl } from '../utils/shell';
 import { handleImageMenuKey, imageMenuItems } from '../utils/image-menu';
 import { LocalThumb } from '../components/library/LocalThumb';
+import { useTextSelectionMenu } from '../hooks/useTextSelectionMenu';
 
 interface PostDetail {
   title: string;
@@ -84,6 +90,12 @@ let lastRefreshAt = 0;
 
 /** 列表分页每页条数 */
 const PAGE_SIZE = 60;
+
+/** 图片名归一：取 basename、去掉小图 `s` 后缀、小写（用于把本地文件匹配到远程图） */
+function normImgBase(name: string): string {
+  const b = (name || '').split('/').pop() || '';
+  return b.replace(/s(\.\w+)$/i, '$1').toLowerCase();
+}
 
 type MoeyoSort = 'date-desc' | 'date-asc';
 
@@ -172,6 +184,12 @@ export const MoeyoPage: React.FC = () => {
   >([]);
   const [detailLoading, setDetailLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  // 正文图片右键菜单（自定义定位）
+  const [bodyImgMenu, setBodyImgMenu] = useState<{
+    x: number;
+    y: number;
+    url: string;
+  } | null>(null);
 
   const relOf = (item: MoeyoListItem) => `moeyo/${item.folderName}`;
 
@@ -240,75 +258,49 @@ export const MoeyoPage: React.FC = () => {
     setLocalImages([]);
     setDetailLoading(true);
     try {
-      // 本地优先：已下载且目录里有图片时，直接读本地（走缩略图缓存），不再拉站点媒体
-      let local: { path: string; name: string }[] = [];
-      if (item.exists) {
-        try {
-          const content = await scanDirectory(item.folderPath);
-          local = content.files
-            .filter((f) => f.kind === 'image')
-            .map((f) => ({ path: f.path, name: f.name }));
-        } catch {
-          local = [];
-        }
+      // 同时拉「远程全量图片列表」+「本地已存图片」+「正文」：
+      // 以远程列表为准，本地有的用本地（本地可能只存了部分，不能只显示本地）
+      const [d, imgs, local] = await Promise.all([
+        fetchPostDetail(item.postId),
+        fetchPostImages(item.postId).catch(() => [] as PlatformMedia[]),
+        (async () => {
+          if (!item.exists) return [] as { path: string; name: string }[];
+          try {
+            const content = await scanDirectory(item.folderPath);
+            return content.files
+              .filter((f) => f.kind === 'image')
+              .map((f) => ({ path: f.path, name: f.name }));
+          } catch {
+            return [];
+          }
+        })(),
+      ]);
+      setDetail(d);
+      setImages(imgs);
+      setLocalImages(local);
+      if (openArticleCache?.item.postId === item.postId) {
+        openArticleCache.detail = d;
+        openArticleCache.images = imgs;
+        openArticleCache.localImages = local;
       }
-      if (local.length > 0) {
-        setLocalImages(local);
-        const d = await fetchPostDetail(item.postId);
-        setDetail(d);
-        if (openArticleCache?.item.postId === item.postId) {
-          openArticleCache.localImages = local;
-          openArticleCache.detail = d;
-        }
-        // 已下载文章的图片数若与记录不符，顺手修正（自愈旧的 imageCount=0 记录）
-        if (item.imageCount !== local.length) {
-          const count = local.length;
-          setItems((prev) =>
-            prev.map((it) =>
-              it.postId === item.postId ? { ...it, imageCount: count } : it,
-            ),
-          );
-          upsertMetaImageCount(
-            {
-              postId: item.postId,
-              title: item.title,
-              date: item.date,
-              link: item.link,
-              categories: item.categories,
-            },
-            count,
-          ).catch(() => undefined);
-        }
-      } else {
-        const [d, imgs] = await Promise.all([
-          fetchPostDetail(item.postId),
-          fetchPostImages(item.postId).catch(() => [] as PlatformMedia[]),
-        ]);
-        setDetail(d);
-        setImages(imgs);
-        if (openArticleCache?.item.postId === item.postId) {
-          openArticleCache.detail = d;
-          openArticleCache.images = imgs;
-        }
-        // 未下载文章：顺手把站点图片数落库，列表卡片就能显示真实数量
-        if (item.imageCount !== imgs.length) {
-          const count = imgs.length;
-          setItems((prev) =>
-            prev.map((it) =>
-              it.postId === item.postId ? { ...it, imageCount: count } : it,
-            ),
-          );
-          upsertMetaImageCount(
-            {
-              postId: item.postId,
-              title: item.title,
-              date: item.date,
-              link: item.link,
-              categories: item.categories,
-            },
-            count,
-          ).catch(() => undefined);
-        }
+      // 图片数以远程为准（无远程时用本地），顺手修正旧记录
+      const count = imgs.length || local.length;
+      if (count > 0 && item.imageCount !== count) {
+        setItems((prev) =>
+          prev.map((it) =>
+            it.postId === item.postId ? { ...it, imageCount: count } : it,
+          ),
+        );
+        upsertMetaImageCount(
+          {
+            postId: item.postId,
+            title: item.title,
+            date: item.date,
+            link: item.link,
+            categories: item.categories,
+          },
+          count,
+        ).catch(() => undefined);
       }
     } catch (err: any) {
       log.error(err);
@@ -484,6 +476,24 @@ export const MoeyoPage: React.FC = () => {
 
   const postUrl = selected?.link;
 
+  // Hpoi 手办维基搜索：商品名 + 厂商（来自正文结构化字段）
+  const hpoiKeyword = selected
+    ? (() => {
+        const p = parseMoeyoProduct(selected.title, detail?.contentHtml);
+        return [p.product, p.maker].filter(Boolean).join(' ');
+      })()
+    : '';
+  const hpoiUrl = `https://www.hpoi.net/search?keyword=${encodeURIComponent(
+    hpoiKeyword,
+  )}&category=100`;
+
+  // 本地已存图片：按归一化文件名建索引，供「远程列表 + 本地覆盖」用
+  const localByBase = useMemo(() => {
+    const map = new Map<string, { path: string; name: string }>();
+    for (const f of localImages) map.set(normImgBase(f.name), f);
+    return map;
+  }, [localImages]);
+
   // 当前文章在快照列表中的位置（用于「上一篇/下一篇」与进度显示）
   const navIndex = useMemo(
     () =>
@@ -525,9 +535,46 @@ export const MoeyoPage: React.FC = () => {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [selected, navNext, openPost]);
 
+  const { openTextMenu, textMenu } = useTextSelectionMenu();
+
+  // 正文图片右键菜单：点击别处 / Esc / 滚动即关闭
+  useEffect(() => {
+    if (!bodyImgMenu) return;
+    const close = () => setBodyImgMenu(null);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close();
+    };
+    window.addEventListener('mousedown', close);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', close);
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [bodyImgMenu]);
+
+  const mediaFromUrl = (url: string): PlatformMedia => ({
+    id: url,
+    type: MediaType.Photo,
+    url,
+    thumbUrl: url,
+    downloadUrl: url,
+    fileName: decodeURIComponent(url.split('/').pop() || '') || 'moeyo',
+  });
+
   const imageMenu = (media: PlatformMedia): MenuProps => ({
     items: [
       ...imageMenuItems({ remoteUrl: media.url, postUrl }),
+      ...(media.url
+        ? [
+            {
+              key: 'saveLocal',
+              label: '保存到本地',
+              icon: <DownloadOutlined />,
+            },
+          ]
+        : []),
       { type: 'divider' },
       { key: 'copyLink', label: '复制图片链接', icon: <LinkOutlined /> },
       { key: 'openImg', label: '在浏览器打开原图', icon: <ExportOutlined /> },
@@ -544,7 +591,10 @@ export const MoeyoPage: React.FC = () => {
         return;
       }
       try {
-        if (key === 'copyLink' && media.url) {
+        if (key === 'saveLocal' && media.url && selected) {
+          await saveMoeyoMedia(selected, media);
+          message.success('已添加到下载队列');
+        } else if (key === 'copyLink' && media.url) {
           await navigator.clipboard.writeText(media.url);
           message.success('图片链接已复制');
         } else if (key === 'openImg' && media.url) {
@@ -631,17 +681,21 @@ export const MoeyoPage: React.FC = () => {
             </Button>
           )}
           <Button
-            className="ml-auto"
-            type="primary"
-            icon={<DownloadOutlined />}
-            loading={saving}
-            onClick={savePost}
+            icon={
+              <img
+                src={hpoiIcon}
+                alt="Hpoi"
+                className="w-4 h-4 object-contain"
+              />
+            }
+            title={`在 Hpoi 手办维基搜索：${hpoiKeyword}`}
+            onClick={() => openUrl(hpoiUrl)}
           >
-            保存该文章
+            Hpoi
           </Button>
         </div>
         <div className="flex-1 overflow-y-auto pb-10" ref={detailScrollRef}>
-          <article className="bg-white rounded-md border-[1px] border-gray-200 max-w-4xl mx-auto p-6">
+          <article className="select-text bg-white rounded-md border-[1px] border-gray-200 max-w-4xl mx-auto p-6">
             <h1 className="text-2xl font-bold leading-snug">
               {selected.title}
             </h1>
@@ -663,50 +717,50 @@ export const MoeyoPage: React.FC = () => {
               </div>
             ) : (
               <>
-                {/* 图片在上，正文在下；有本地文件优先用本地（缩略图缓存，秒开） */}
-                {localImages.length > 0 ? (
+                {/* 以远程全量列表为准，本地已存的用本地（本地可能只存了部分） */}
+                {images.length > 0 || localImages.length > 0 ? (
                   <Image.PreviewGroup>
                     <ul className="mb-5 grid grid-cols-[repeat(auto-fill,minmax(8rem,9rem))] gap-2">
-                      {localImages.map((f) => (
-                        <Dropdown
-                          key={f.path}
-                          trigger={['contextMenu']}
-                          menu={localImageMenu(f)}
-                        >
-                          <li className="lib-card-cv relative aspect-square bg-white rounded-md overflow-hidden border-[1px] border-gray-100 group">
-                            <LocalThumb
-                              filePath={f.path}
-                              alt={f.name}
-                              className="object-cover w-full h-full"
-                              wrapperClassName="w-full h-full"
-                              preview
-                            />
-                          </li>
-                        </Dropdown>
-                      ))}
-                    </ul>
-                  </Image.PreviewGroup>
-                ) : images.length > 0 ? (
-                  <Image.PreviewGroup>
-                    <ul className="mb-5 grid grid-cols-[repeat(auto-fill,minmax(8rem,9rem))] gap-2">
-                      {images.map((m, i) => (
-                        <Dropdown
-                          key={`${m.id || m.url}-${i}`}
-                          trigger={['contextMenu']}
-                          menu={imageMenu(m)}
-                        >
-                          <li className="lib-card-cv relative aspect-square bg-white rounded-md overflow-hidden border-[1px] border-gray-100 group">
-                            <Image
-                              src={m.thumbUrl || m.url}
-                              alt={m.fileName || ''}
-                              loading="lazy"
-                              className="object-cover w-full h-full"
-                              wrapperClassName="w-full h-full"
-                              preview={{ src: m.url }}
-                            />
-                          </li>
-                        </Dropdown>
-                      ))}
+                      {(images.length > 0
+                        ? images
+                        : localImages.map((f) => ({
+                            url: f.path,
+                            fileName: f.name,
+                          }))
+                      ).map((m: any, i: number) => {
+                        const local =
+                          images.length > 0
+                            ? localByBase.get(normImgBase(m.url || ''))
+                            : localImages[i];
+                        return (
+                          <Dropdown
+                            key={`${m.id || m.url}-${i}`}
+                            trigger={['contextMenu']}
+                            menu={local ? localImageMenu(local) : imageMenu(m)}
+                          >
+                            <li className="lib-card-cv relative aspect-square bg-white rounded-md overflow-hidden border-[1px] border-gray-100 group">
+                              {local ? (
+                                <LocalThumb
+                                  filePath={local.path}
+                                  alt={local.name}
+                                  className="object-cover w-full h-full"
+                                  wrapperClassName="w-full h-full"
+                                  preview
+                                />
+                              ) : (
+                                <Image
+                                  src={m.thumbUrl || m.url}
+                                  alt={m.fileName || ''}
+                                  loading="lazy"
+                                  className="object-cover w-full h-full"
+                                  wrapperClassName="w-full h-full"
+                                  preview={{ src: m.url }}
+                                />
+                              )}
+                            </li>
+                          </Dropdown>
+                        );
+                      })}
                     </ul>
                   </Image.PreviewGroup>
                 ) : null}
@@ -721,6 +775,20 @@ export const MoeyoPage: React.FC = () => {
                         e.preventDefault();
                         openUrl(href);
                       }
+                    }}
+                    onContextMenu={(e) => {
+                      const img = (e.target as HTMLElement).closest('img');
+                      const src = img?.getAttribute('src');
+                      if (src) {
+                        e.preventDefault();
+                        setBodyImgMenu({
+                          x: e.clientX,
+                          y: e.clientY,
+                          url: src,
+                        });
+                        return;
+                      }
+                      openTextMenu(e);
                     }}
                     dangerouslySetInnerHTML={{ __html: detail.contentHtml }}
                   />
@@ -746,6 +814,47 @@ export const MoeyoPage: React.FC = () => {
           />
         )}
 
+        {/* 选中文字的右键菜单 */}
+        {textMenu}
+
+        {/* 正文图片右键菜单 */}
+        {bodyImgMenu && (
+          <div
+            className="fixed z-[1000]"
+            style={{ left: bodyImgMenu.x, top: bodyImgMenu.y }}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <Menu
+              className="min-w-[10rem] rounded-md border-[1px] border-gray-200 shadow-lg"
+              items={[
+                ...imageMenuItems({ remoteUrl: bodyImgMenu.url, postUrl }),
+                {
+                  key: 'saveLocal',
+                  label: '保存到本地',
+                  icon: <DownloadOutlined />,
+                },
+              ]}
+              onClick={async ({ key }) => {
+                const url = bodyImgMenu.url;
+                setBodyImgMenu(null);
+                if (
+                  await handleImageMenuKey(
+                    key,
+                    { remoteUrl: url, postUrl },
+                    message,
+                  )
+                ) {
+                  return;
+                }
+                if (key === 'saveLocal' && url && selected) {
+                  await saveMoeyoMedia(selected, mediaFromUrl(url));
+                  message.success('已添加到下载队列');
+                }
+              }}
+            />
+          </div>
+        )}
+
         {/* 右下角：收藏按钮 */}
         <div className="fixed right-6 bottom-6 z-50">
           <div className="relative flex flex-col items-end gap-3">
@@ -769,6 +878,20 @@ export const MoeyoPage: React.FC = () => {
                   key="off"
                   className="text-lg transition-transform duration-300 group-hover:scale-110"
                 />
+              )}
+            </button>
+            {/* 保存按钮（圆形，缩小） */}
+            <button
+              type="button"
+              title="保存该文章"
+              disabled={saving}
+              onClick={savePost}
+              className="group flex h-11 w-11 items-center justify-center rounded-full bg-white text-gray-500 shadow-lg ring-1 ring-black/5 transition-all duration-200 ease-out hover:scale-110 hover:text-ant-color-primary hover:shadow-xl active:scale-95 disabled:opacity-60"
+            >
+              {saving ? (
+                <LoadingOutlined className="text-lg" />
+              ) : (
+                <DownloadOutlined className="text-lg transition-transform duration-300 group-hover:scale-110" />
               )}
             </button>
           </div>

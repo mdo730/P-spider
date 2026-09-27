@@ -8,6 +8,7 @@ import {
   HeartOutlined,
   LeftOutlined,
   LinkOutlined,
+  LoadingOutlined,
   PlusOutlined,
   ReloadOutlined,
   RightOutlined,
@@ -43,6 +44,7 @@ import {
   fetchPostImages,
   loadCachedSitePosts,
   refreshSitePosts,
+  saveFigmemoMedia,
   saveFigmemoPost,
   setArticleTags,
   setHpoiMatch,
@@ -64,6 +66,7 @@ import {
 } from '../utils/library';
 import { openUrl } from '../utils/shell';
 import { handleImageMenuKey, imageMenuItems } from '../utils/image-menu';
+import { useTextSelectionMenu } from '../hooks/useTextSelectionMenu';
 import { LocalThumb } from '../components/library/LocalThumb';
 import hpoiIcon from '../assets/platform-icons/hpoi.png';
 import { HpoiMatchPanel } from '../components/figmemo/HpoiMatchPanel';
@@ -239,6 +242,7 @@ export const FigmemoPage: React.FC = () => {
   >([]);
   const [detailLoading, setDetailLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const { openTextMenu, textMenu } = useTextSelectionMenu();
 
   const [panelOpen, setPanelOpen] = useState(false);
   const [newGroup, setNewGroup] = useState('');
@@ -676,6 +680,15 @@ export const FigmemoPage: React.FC = () => {
   const imageMenu = (media: PlatformMedia): MenuProps => ({
     items: [
       ...imageMenuItems({ remoteUrl: media.url, postUrl }),
+      ...(media.url
+        ? [
+            {
+              key: 'saveLocal',
+              label: '保存到本地',
+              icon: <DownloadOutlined />,
+            },
+          ]
+        : []),
       { type: 'divider' },
       { key: 'copyLink', label: '复制图片链接', icon: <LinkOutlined /> },
       { key: 'openImg', label: '在浏览器打开原图', icon: <ExportOutlined /> },
@@ -692,7 +705,10 @@ export const FigmemoPage: React.FC = () => {
         return;
       }
       try {
-        if (key === 'copyLink' && media.url) {
+        if (key === 'saveLocal' && media.url && selected) {
+          await saveFigmemoMedia(selected, media);
+          message.success('已添加到下载队列');
+        } else if (key === 'copyLink' && media.url) {
           await navigator.clipboard.writeText(media.url);
           message.success('图片链接已复制');
         } else if (key === 'openImg' && media.url) {
@@ -774,18 +790,12 @@ export const FigmemoPage: React.FC = () => {
           >
             Hpoi
           </Button>
-          <Button
-            className="ml-auto"
-            type="primary"
-            icon={<DownloadOutlined />}
-            loading={saving}
-            onClick={savePost}
-          >
-            保存该文章
-          </Button>
         </div>
         <div className="flex-1 overflow-y-auto pb-10" ref={detailScrollRef}>
-          <article className="bg-white rounded-md border-[1px] border-gray-200 max-w-4xl mx-auto p-6">
+          <article
+            className="select-text bg-white rounded-md border-[1px] border-gray-200 max-w-4xl mx-auto p-6"
+            onContextMenu={(e) => openTextMenu(e)}
+          >
             <h1 className="text-2xl font-bold leading-snug">
               {selected.title}
             </h1>
@@ -889,6 +899,9 @@ export const FigmemoPage: React.FC = () => {
         )}
 
         {/* 右下角：现代化浮动操作（标签浮窗 + 标签/收藏按钮） */}
+        {/* 选中文字的右键菜单 */}
+        {textMenu}
+
         <div className="fixed right-6 bottom-6 z-50">
           <div className="relative flex flex-col items-end gap-3">
             {/* 标签浮窗：绝对定位于按钮上方，不占位；带进/出场动画 */}
@@ -1023,6 +1036,20 @@ export const FigmemoPage: React.FC = () => {
                   key="off"
                   className="text-lg transition-transform duration-300 group-hover:scale-110"
                 />
+              )}
+            </button>
+            {/* 保存按钮（圆形，缩小） */}
+            <button
+              type="button"
+              title="保存该文章"
+              disabled={saving}
+              onClick={savePost}
+              className="group flex h-11 w-11 items-center justify-center rounded-full bg-white text-gray-500 shadow-lg ring-1 ring-black/5 transition-all duration-200 ease-out hover:scale-110 hover:text-ant-color-primary hover:shadow-xl active:scale-95 disabled:opacity-60"
+            >
+              {saving ? (
+                <LoadingOutlined className="text-lg" />
+              ) : (
+                <DownloadOutlined className="text-lg transition-transform duration-300 group-hover:scale-110" />
               )}
             </button>
           </div>

@@ -34,6 +34,8 @@ export interface DownloadHistoryRecord {
   videoUrl?: string;
   /** 本地保存完整路径 */
   filePath: string;
+  /** 本地文件是否仍存在（分组时探测；用于本地文件被删后的兜底） */
+  existsLocal?: boolean;
   /** 本地文件名 */
   fileName: string;
   /** 下载完成时间戳 */
@@ -130,10 +132,20 @@ export async function getTimelineGroups(
   const all = await readDownloadHistory();
   const startTime = Date.now() - rangeDays * 24 * 60 * 60 * 1000;
 
-  const recent = all.filter((r) => {
+  const recentAll = all.filter((r) => {
     const t = new Date(r.tweetTime).getTime();
     return !Number.isNaN(t) && t >= startTime;
   });
+  // 探测本地文件是否仍存在（被删除后用于兜底：走远程/原推，而不是本地路径）
+  const recent = await Promise.all(
+    recentAll.map(async (r) => {
+      let existsLocal: boolean | undefined;
+      if (r.filePath) {
+        existsLocal = await fs.exists(r.filePath).catch(() => false);
+      }
+      return { ...r, existsLocal };
+    }),
+  );
 
   const map = new Map<string, TimelineGroup>();
   for (const r of recent) {
@@ -259,6 +271,12 @@ onTaskCompleted.listen((task) => {
         avatar: task.post?.creator?.avatar,
         mediaType: task.media?.type || MediaType.Photo,
         mediaUrl: task.media?.url,
+        // 视频/GIF 记录下载直链，便于本地文件删除后仍能经代理流式播放
+        videoUrl:
+          task.media?.type === MediaType.Video ||
+          task.media?.type === MediaType.Gif
+            ? task.media?.downloadUrl
+            : undefined,
         filePath,
         fileName: task.fileName,
         downloadedAt: task.updatedAt,

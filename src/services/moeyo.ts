@@ -336,24 +336,41 @@ async function fetchContentImages(postId: string): Promise<PlatformMedia[]> {
   const html: string = body?.content?.rendered || '';
   const re =
     /https?:\/\/(?:www\.)?moeyo\.com\/(?:image|wp-content\/uploads)\/[^"'\s)>]+?\.(?:jpg|jpeg|png|webp|gif)/gi;
-  const seen = new Set<string>();
-  const out: PlatformMedia[] = [];
-  for (const m of html.matchAll(re)) {
-    const url = m[0].replace(/&amp;/g, '&');
+  // moeyo 每张图在正文里同时有 `001.jpg` 与 `001s.jpg`（s=小图）两个 URL，
+  // 按「去掉小图 s 后缀」归一化去重，避免同一张图出现两次（含下载重复）；优先保留不带 s 的原图。
+  const toMedia = (url: string): PlatformMedia => {
     const base = url.split('/').pop() || '';
-    if (/^thumbnail\./i.test(base)) continue; // 列表缩略图跳过
-    if (seen.has(url)) continue;
-    seen.add(url);
-    out.push({
+    return {
       id: url,
       type: MediaType.Photo,
       url,
       thumbUrl: url,
       downloadUrl: url,
       fileName: decodeURIComponent(base) || 'moeyo',
-    });
+    };
+  };
+  const isSmall = (url: string) => /s\.\w+$/i.test(url.split('/').pop() || '');
+  const normKey = (url: string) => {
+    const parent = url.slice(0, url.lastIndexOf('/'));
+    const base = (url.split('/').pop() || '').replace(/s(\.\w+)$/i, '$1');
+    return `${parent}/${base.toLowerCase()}`;
+  };
+  const byKey = new Map<string, PlatformMedia>();
+  const order: string[] = [];
+  for (const m of html.matchAll(re)) {
+    const url = m[0].replace(/&amp;/g, '&');
+    const base = url.split('/').pop() || '';
+    if (/^thumbnail\./i.test(base)) continue; // 列表缩略图跳过
+    const key = normKey(url);
+    const prev = byKey.get(key);
+    if (!prev) {
+      byKey.set(key, toMedia(url));
+      order.push(key);
+    } else if (isSmall(prev.url || '') && !isSmall(url)) {
+      byKey.set(key, toMedia(url)); // 优先保留原图
+    }
   }
-  return out;
+  return order.map((k) => byKey.get(k)!).filter(Boolean);
 }
 
 /** 某帖的图片：moeyo 图片都在正文内联，直接解析正文 */
@@ -1422,6 +1439,32 @@ async function resolveFeaturedChunk(
     await resolveFeaturedChunk(ids.slice(0, mid), map);
     await resolveFeaturedChunk(ids.slice(mid), map);
   }
+}
+
+/** 保存单张远程媒体到本地（按图文目录规则，与整篇保存一致） */
+export async function saveMoeyoMedia(
+  item: MoeyoListItem,
+  media: PlatformMedia,
+): Promise<void> {
+  const platformPost: PlatformPost = {
+    id: item.postId,
+    creator: {
+      id: MOEYO_SOURCE,
+      name: MOEYO_AUTHOR,
+      username: MOEYO_AUTHOR,
+    },
+    publishedAt: dayjs(item.date),
+    text: truncateTitle(item.title),
+    medias: [media],
+    links: [],
+    postUrl: item.link,
+    source: MOEYO_SOURCE,
+  };
+  await useDownloadStore
+    .getState()
+    .batchCreateDownloadTask([
+      { source: MOEYO_SOURCE, post: platformPost, media },
+    ]);
 }
 
 /** 保存单篇文章到本地（手动保存：不计统计、不打标；调用方随后可 syncLocalTags） */

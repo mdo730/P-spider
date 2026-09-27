@@ -25,6 +25,8 @@ export interface Settings_V2 {
     dirTemplate: string;
     fileNameTemplate: string;
     sameFileSkip: boolean;
+    /** GIF(animated_gif) 下载后自动用 ffmpeg 转成真实 .gif（需系统装有 ffmpeg；默认关闭） */
+    gifToRealGif?: boolean;
   };
   app: {
     writeLogs: boolean;
@@ -37,6 +39,8 @@ export interface Settings_V2 {
     /** horizontal=左右切（竖条）；vertical=上下切（横条） */
     direction: 'horizontal' | 'vertical';
     parts: number;
+    /** 复制切割图像时，附带「作者ID / 原文链接」文本一起进剪贴板（默认关闭） */
+    appendSourceInfo?: boolean;
   };
 }
 

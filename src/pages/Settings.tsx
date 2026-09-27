@@ -286,6 +286,14 @@ export const Settings: React.FC = () => {
         >
           <Switch />
         </Item>
+        <Item
+          settingKey="gifToRealGif"
+          label="GIF 转真实 gif"
+          valuePropName="checked"
+          description="开启后，下载的动图(GIF)会用系统 ffmpeg 自动转成真实 .gif 并替换原 mp4（需系统已安装 ffmpeg 且在 PATH 中；未安装则保留 mp4）"
+        >
+          <Switch />
+        </Item>
       </Section>
       <Section title="本地库" name="library" titleIcon={<FolderOutlined />}>
         <div className="flex items-center flex-wrap gap-3">
@@ -355,6 +363,14 @@ export const Settings: React.FC = () => {
           description="本地库 / fig-memo / 时间流 右键图片「复制切割图像」时按此预设切割；结果以文件形式进剪贴板（临时文件，粘贴即 N 张图）"
         >
           <InputNumber min={2} max={20} />
+        </Item>
+        <Item
+          settingKey="appendSourceInfo"
+          label="附带作者 / 原帖信息"
+          valuePropName="checked"
+          description="开启后，「复制切割图像」除图片外，还会把「作者ID / 原文链接」以文本形式一并写入剪贴板（可粘贴到文本框）"
+        >
+          <Switch />
         </Item>
       </Section>
       <Section

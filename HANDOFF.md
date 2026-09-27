@@ -4,13 +4,13 @@
 
 ## 一句话现状
 
-P-Spider（fork 自 x-spider）**v1.4.0 已发布（2026-09-27，GitHub Release `v1.4.0`）**。**1.4.0 新增：** ① **moeyo 来源**（moeyo.com，克隆 fig-memo：订阅追新/建库/列表分页详情保存/自动标签树/收藏/时间流记事；分类整备为 8 项 + 别名归并 + 事件独占；**去掉厂商标签**）；② **时间流大改**——接入 moeyo 记事、**未下载转贴进时间流**（默认关闭的订阅开关、按原创/hpoi 去重、可跳 app 内 fig-memo 正文）、视频应用内播放 + 右键「保存到本地」、本地视频缓存缩略图、**置顶为默认页**（原主页改名「X主页」）、滚动位置会话保持 + 右下角刷新/回顶、分类标注 + 头像；③ **订阅修复**：失败不再每秒无限重试（此前整晚锤爆 X → 403 空体/非 JSON）、检查限流（并发 4/200ms）、转贴更新接入、「文件夹」按钮修复；④ **内置 moeyo 站点(31k)+hpoi(21.5k) 种子**（首启秒开）；⑤ 性能修复（moeyo 点年份标签卡死：标签覆盖集改为只预计算一次）。更早：1.3.2 hpoi 候选匹配 + 数据种子；1.3.1 自研查看器/统一切割菜单/缩略图 Rust 化。
+P-Spider（fork 自 x-spider）**v1.4.1 已发布（2026-09-27，GitHub Release `v1.4.1`）**。**1.4.1 修复/新增：** 未下载转贴视频**边下边播**（Rust 本地流式代理 media_proxy，仅 127.0.0.1、透传 Range、走应用代理）、本地库「打开本地储存位置」改为**选中文件**、图片切割可**附带作者/原帖**（文本+HTML 多格式）、文章详情保存按钮移到底部圆形、正文/标题**可选中** + 选中文字右键菜单、moeyo 补「Hpoi」搜索按钮、图片单独「保存到本地」（含 moeyo 正文内嵌图）、moeyo 图片 `001.jpg`/`001s.jpg` 重复修复、**GIF「下载即转真 gif」**（系统 ffmpeg）+ 时间流 GIF 会动、**本地文件删除后兜底**（按推文 ID 反查直链 + 远程经代理）。**1.4.0 新增：** ① **moeyo 来源**（moeyo.com，克隆 fig-memo：订阅追新/建库/列表分页详情保存/自动标签树/收藏/时间流记事；分类整备为 8 项 + 别名归并 + 事件独占；**去掉厂商标签**）；② **时间流大改**——接入 moeyo 记事、**未下载转贴进时间流**（默认关闭的订阅开关、按原创/hpoi 去重、可跳 app 内 fig-memo 正文）、视频应用内播放 + 右键「保存到本地」、本地视频缓存缩略图、**置顶为默认页**（原主页改名「X主页」）、滚动位置会话保持 + 右下角刷新/回顶、分类标注 + 头像；③ **订阅修复**：失败不再每秒无限重试（此前整晚锤爆 X → 403 空体/非 JSON）、检查限流（并发 4/200ms）、转贴更新接入、「文件夹」按钮修复；④ **内置 moeyo 站点(31k)+hpoi(21.5k) 种子**（首启秒开）；⑤ 性能修复（moeyo 点年份标签卡死：标签覆盖集改为只预计算一次）。更早：1.3.2 hpoi 候选匹配 + 数据种子；1.3.1 自研查看器/统一切割菜单/缩略图 Rust 化。
 
 ## 项目关键信息
 
 - 路径：本仓库（git 仓库，分支 `master`）
 - 技术栈：Tauri v1 + React18 + TS + Vite + Tailwind + antd5 + Zustand
-- 版本：`1.4.0`（**已发布 2026-09-27**；`package.json` 与 `src-tauri/Cargo.toml` 同步）
+- 版本：`1.4.1`（**已发布 2026-09-27**；`package.json` 与 `src-tauri/Cargo.toml` 同步）
 - 文档：`DEVELOPMENT.md`（架构地图 + 功能 + 待办 + 发布流程），**改动后同步更新**
 - 回滚点：分支 `backup-1.2.2`（commit `c3fd23c`）、zip `x-spider-backup-1.2.2.zip`
 
@@ -110,6 +110,15 @@ P-Spider（fork 自 x-spider）**v1.4.0 已发布（2026-09-27，GitHub Release 
 67. **性能修复：moeyo 点年份标签卡死（1.4.0）**：`Moeyo.tsx` 的 `filtered` 原对**每条**文章调 `matchesFilter`（内部每条都重算 `tagCoveredSet`，年份 2014 有 1430 条 → 3 万 × 1430 ≈ 千万级）→ 卡死。改为**每个选中标签的覆盖集只预计算一次**，逐条仅做 Set 查询。
 68. **moeyo hpoi 离线全量匹配（1.4.0）**：三分类（サンプル/製品版/プレスリリース）**29083 篇全量**跑 hpoi（命中 **21581**，对应 **11528** 个词条；事件类 7065 篇无单一商品跳过）。脚本与数据在仓库外 `E:\OPENCODE\moeyo-batch\`（`run-match.cmd` 带实时进度条、断点续跑）。
 
+69. **Rust 本地流式媒体代理（1.4.1）**：`src-tauri/src/media_proxy.rs`（`tiny_http`，仅 `127.0.0.1:随机端口`，`/media?u=<url>&p=<proxy>` 转发、**透传 Range**、走应用代理）；命令 `media_proxy_port`；前端 `utils/media-proxy.ts`（`ensureMediaProxy`/`mediaProxyUrl`）、`hooks/useRemoteVideo.ts`。解决未下载转贴视频 `<video>` 走不到代理的黑屏 → **边下边播/可拖动**。
+70. **时间流本地文件删除兜底（1.4.1）**：`getTimelineGroups` 探测 `existsLocal`；记录新增 `videoUrl`（下载直链）；本地删了 → 按「未下载」处理（右键转远程、图片经代理显示）；视频/GIF 无直链时 **`services/tweet-media.ts` 按「用户名+推文ID」反查媒体流取 mp4**（自动 + 点击）。
+71. **GIF（1.4.1）**：设置「下载 → GIF 转真实 gif」（默认关，系统 ffmpeg）→ 下载完转 `.gif` 替换 mp4；时间流 GIF 本地 `.gif` 用 `<img>`（会动）、本地 mp4/远程用无控件自动循环 `<video>`；同图 `001.jpg`/`001s.jpg` 去重；`dedupeMediaRecords` 折叠重复记录。
+72. **图片切割附带来源（1.4.1）**：`settings.split.appendSourceInfo`（默认关）；开启后剪贴板含 文件列表 + 文本 + **CF_HTML**（内联图片+文本）；`copy_files_to_clipboard(paths,text,html)` 用 `set_without_clear` 多格式；切片编码改 JPEG（更快）。
+73. **正文/标题可选中 + 选中文字菜单（1.4.1）**：`<article>` 加 `select-text`；`hooks/useTextSelectionMenu.tsx`（复制/全选/用选中文字搜索 Hpoi/打开链接）。
+74. **moeyo 详情图片集合（1.4.1）**：原来「本地有图就只显示本地」→ 改为**以远程全量列表为准、本地命中用本地**（按归一化文件名匹配）；正文内嵌图右键菜单；`Hpoi` 搜索按钮补上。
+75. **本地库「打开本地储存位置」（1.4.1）**：`image-menu` 的 reveal 改 `showInFolder(path, true)`（选中文件，原会用默认程序打开文件）。
+76. **文章详情保存按钮（1.4.1）**：从顶栏移到右下角圆形按钮（收藏下方），不再被 Hpoi 面板遮挡。
+
 ## 待办（下一步候选，按优先级）
 
 1. `download.ts` 的 `if (source === 'figmemo')` 命名分支 → 抽「按源命名钩子」去泄漏
@@ -133,12 +142,12 @@ P-Spider（fork 自 x-spider）**v1.4.0 已发布（2026-09-27，GitHub Release 
 
 ```
 我在开发 P-Spider（fork 自 x-spider 的桌面下载器），仓库在 <项目路径>，
-Tauri v1 + React18 + TS + Vite + Tailwind + antd5 + Zustand，当前版本 1.4.0（已发布）。
+Tauri v1 + React18 + TS + Vite + Tailwind + antd5 + Zustand，当前版本 1.4.1（已发布）。
 请先读 项目根目录的 DEVELOPMENT.md 和 HANDOFF.md 了解现状，再开始。
 
 约定：
 - 改完跑 pnpm typeCheck + npx eslint ./src（必要时 pnpm build）；除非我说“打包”，否则别 pnpm tauri build。
-- 打包后把 P-Spider.exe / aria2c.exe / P-Spider_1.4.0_x64-setup.exe 拷到 <测试目录>（app 开着会被占用，需先退出）。
+- 打包后把 P-Spider.exe / aria2c.exe / P-Spider_1.4.1_x64-setup.exe 拷到 <测试目录>（app 开着会被占用，需先退出）。
 - git push 要走代理：git -c http.proxy=http://127.0.0.1:7897 -c https.proxy=http://127.0.0.1:7897 push origin master；发 Release 前设 $env:HTTPS_PROXY='http://127.0.0.1:7897' 再用 gh。
 - 别用 PowerShell 直接读写源码（破坏 UTF-8中文）；用 .NET [IO.File] + UTF8Encoding($false)。
 - 用户数据（标签/收藏/订阅/历史/设置）都在 %APPDATA%\p-spider\，仓库里不放任何数据文件。
