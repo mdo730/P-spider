@@ -15,6 +15,7 @@ import { Homepage } from '../pages/Homepage';
 import { Archiver } from '../pages/Archiver';
 import { LibraryPage } from '../pages/Library';
 import { FigmemoPage } from '../pages/Figmemo';
+import { MoeyoPage } from '../pages/Moeyo';
 import { DownloadManagement } from '../pages/DownloadManagement';
 import { SubscriptionPage } from '../pages/Subscription';
 import { StatisticsPage } from '../pages/Statistics';
@@ -24,8 +25,14 @@ import { About } from '../pages/About';
 
 export const ROUTES: Route[] = [
   {
+    id: 'timeline',
+    name: '时间流',
+    icon: <ClockCircleOutlined />,
+    element: <TimelinePage />,
+  },
+  {
     id: 'home',
-    name: '主页',
+    name: 'X主页',
     icon: <HomeFilled />,
     element: <Homepage />,
   },
@@ -48,6 +55,12 @@ export const ROUTES: Route[] = [
     element: <FigmemoPage />,
   },
   {
+    id: 'moeyo',
+    name: 'moeyo',
+    icon: <PictureOutlined />,
+    element: <MoeyoPage />,
+  },
+  {
     id: 'subscription',
     name: '订阅',
     icon: <BellOutlined />,
@@ -58,12 +71,6 @@ export const ROUTES: Route[] = [
     name: '统计',
     icon: <BarChartOutlined />,
     element: <StatisticsPage />,
-  },
-  {
-    id: 'timeline',
-    name: '时间流',
-    icon: <ClockCircleOutlined />,
-    element: <TimelinePage />,
   },
   {
     id: 'download-management',

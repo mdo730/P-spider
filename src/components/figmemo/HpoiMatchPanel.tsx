@@ -1,8 +1,8 @@
 /* eslint-disable react/prop-types */
 import { Button, Input, Spin, Tag, App } from 'antd';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { FigmemoListItem } from '../../services/figmemo';
 import {
+  FigmemoProductInfo,
   HpoiCandidate,
   HpoiMatch,
   candidateToMatch,
@@ -37,13 +37,15 @@ const HpoiThumb: React.FC<{ cover?: string; className?: string }> = ({
   );
 };
 
-/** 详情页右上角悬浮：hpoi 候选 top-3，点一下关联；已关联则显示快照 */
+/** 详情页右上角悬浮：hpoi 候选，点一下关联；已关联则显示快照 */
 export const HpoiMatchPanel: React.FC<{
-  item: FigmemoListItem;
+  item: { postId: string; title: string; hpoi?: HpoiMatch };
   contentHtml?: string;
+  /** 自定义「商品名/厂商」解析（默认 fig-memo 标题+正文；moeyo 传自己的） */
+  parse?: (title: string, html?: string) => FigmemoProductInfo;
   onConfirm: (match: HpoiMatch) => void;
   onClear: () => void;
-}> = ({ item, contentHtml, onConfirm, onClear }) => {
+}> = ({ item, contentHtml, parse, onConfirm, onClear }) => {
   const { message } = App.useApp();
   const [loading, setLoading] = useState(false);
   const [cands, setCands] = useState<HpoiCandidate[]>([]);
@@ -86,13 +88,13 @@ export const HpoiMatchPanel: React.FC<{
       setErr(undefined);
       setCands([]);
       setLoading(true);
-      const info = parseFigmemoFields(item.title, htmlRef.current);
+      const info = (parse || parseFigmemoFields)(item.title, htmlRef.current);
       findHpoiCandidates(info, 2, 1, exclude)
         .then(setCands)
         .catch((e: any) => setErr(e?.message || '查询失败'))
         .finally(() => setLoading(false));
     },
-    [item.title],
+    [item.title, parse],
   );
 
   useEffect(() => {

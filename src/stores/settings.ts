@@ -54,6 +54,9 @@ export const useSettingsStore = create(
         if (version < 3) {
           state.split = { direction: 'horizontal', parts: 4 };
         }
+        if (version < 4) {
+          state.timeline = { maxTextLen: 200, maxImages: 6 };
+        }
 
         return state;
       },

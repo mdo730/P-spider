@@ -5,6 +5,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { toAssetUrl } from '../../utils/asset';
 import {
   generateImageThumbUrl,
+  generateVideoThumbUrl,
   getCachedThumbUrl,
 } from '../../utils/thumbnail';
 
@@ -17,6 +18,8 @@ interface Props {
   wrapperClassName?: string;
   /** 是否接入 antd Image 全屏预览（PreviewGroup） */
   preview?: boolean;
+  /** 媒体种类：video 时生成并缓存视频首帧缩略图（勿与 preview 同用） */
+  kind?: 'image' | 'video';
 }
 
 /**
@@ -68,6 +71,7 @@ export const LocalThumb: React.FC<Props> = ({
   className,
   wrapperClassName,
   preview,
+  kind = 'image',
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
@@ -92,14 +96,20 @@ export const LocalThumb: React.FC<Props> = ({
         setSrc(cached);
         return;
       }
-      const generated = await generateImageThumbUrl(filePath);
+      const generated =
+        kind === 'video'
+          ? await generateVideoThumbUrl(filePath)
+          : await generateImageThumbUrl(filePath);
       if (cancelled) return;
-      setSrc(generated || toAssetUrl(filePath));
+      // 视频无缩略图时不回退原文件（<img> 放不了视频），交给外层占位/播放按钮
+      setSrc(
+        generated || (kind === 'video' ? undefined : toAssetUrl(filePath)),
+      );
     })();
     return () => {
       cancelled = true;
     };
-  }, [filePath, visible]);
+  }, [filePath, visible, kind]);
 
   const placeholder = (
     <div

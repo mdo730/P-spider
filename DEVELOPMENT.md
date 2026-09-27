@@ -212,6 +212,10 @@ src-tauri/
 - **离线补图片数 + 文章数据内置（本轮）**：`imgcount.py` 逐篇 `?rest_route=/wp/v2/media&parent=<id>&per_page=1` 读 `X-WP-Total`（媒体接口不返回 parent），补全 806 篇（`.bak-imgcount`）。生成 `src/data/figmemo-meta-seed.json`（2252 条/555KB），`readMetaRecords` 合并种子（补 imageCount/articleTags、缺失补建），新装/清数据也保留文章数据。前端包约 2.7MB。
 - **卡片缩略图右下角三小角标（本轮）**：同一行 `w-4 h-4` 圆点——已下载（蓝+白勾）、已收藏（红+白心）、已打标签（灰+白 TagOutlined）。
 - **站点数据内置、手标标签不内置（本轮）**：`src/data/figmemo-site-seed.json`（整份站点缓存 854KB）；`readSiteCache` 本地无缓存时写入并返回 → 新用户首启秒开/离线可用，三类标签由 `syncSiteTags` 立即生成。`figmemo-meta-seed.json` 改为只含 imageCount（60KB），不注入手标 articleTags（仅存本地）。
+- **时间流纳入未下载新记事（本轮）**：`getRecentSiteNotes(days)`（figmemo，后续 moeyo）；Timeline 合并记事（受功能开关门控），`kind:'note'` + 「查看正文」跳 app 内（`route` store `pendingArticle/openArticle` + Figmemo 消费）；设置加「时间流」区（version→4）：正文最大字数(200)/单条最大图数(6)。
+- **fig-memo 列表分页 + 状态保持（本轮）**：每页 60 + `Pagination`(可跳页)，检索结果同样分页；返回/切标签保持页码与滚动（`listUiCache` 会话缓存，不保留组件挂载，开销可忽略）。
+- **moeyo 来源（1.4.0，本轮）**：克隆 fig-memo → `services/moeyo.ts`/`stores/moeyo*.ts`/`pages/Moeyo.tsx`/`components/moeyo/`。保留订阅追新/建库/列表分页详情保存/自动标签树(分类·厂商·年份)/收藏/时间流记事；去掉手动打标与 Hpoi。API 用 `?rest_route=/wp/v2`；数据文件 `moeyo*`；`PlatformSource` 加 `moeyo`；设置/路由/侧栏/`main.tsx` 接入。⚠️ 全站 5w+，首次快照/建库限最近 60 页(~6000 篇)。统计页 moeyo 独立项待办。
+- **修复「非 JSON 响应」长退避（本轮）**：`ipc/network.ts` 的 `request()` 对「响应体非 JSON」（X 接口返回 HTML/空体等）原会退避重试 16 次（~2.5 分钟）；现解码失败即抛出不重试（网络错误仍重试）。
 - **性能（2026-09-25 修复点便签卡顿）**：`pages/Figmemo.tsx` 的 `counts`/`filtered` 原来写在详情页 `if (selected) return` 之前，**每次点便签都全量重算**（1688 篇 × 326 标签，其中「未打标签」还要对每篇扫全部标签的 paths，≈千万次 `normalizeRel`），主线程阻塞 → 卡顿。现：① 详情页用 `hasSelected` 早退，跳过列表统计/筛选；② 新增 `computeTagCounts(index, relPaths)`（`utils/library/tags.ts`），一次遍历算出「含子孙覆盖数 + 未打手动标签数」，复杂度从 O(标签×路径) 降到近似线性（已随机对拍 2 万例与旧算法一致）。
 - **计入统计**：`Statistics` 页把 figmemo 作为**独立项**；**只计「追新」下载**（任务带 `subscriptionId=figmemo-feed`），建库/手动保存不计入
 - **进时间流**：复用下载历史（`downloads.jsonl`，platform=figmemo、postUrl=帖子链接）
@@ -308,6 +312,7 @@ src-tauri/
 > **原生右键菜单屏蔽（1.2.1）**：`main.tsx` 启动时全局拦截 `contextmenu` 并 `preventDefault`（输入框/`contenteditable` 除外，保留右键粘贴），去掉 WebView 自带的「后退/刷新/另存图片」菜单；自定义菜单用 antd Dropdown 的 `contextMenu` 触发，不受影响。**例外**：antd 放大预览图 `.ant-image-preview-img` 放行原生菜单，便于「复制图片 / 图片另存为」（2026-09-25）。
 > **已发布：v1.3.1（2026-09-25）**：本地库自研图片查看器（无底栏/自由拖动/空白退出/按侧栏让位）；统一图片右键菜单（复制图像/复制切割图像/打开本地储存位置/打开原网页，本地库 + fig-memo + 时间流）；图片切割（设置预设 + Rust 文件列表写剪贴板）；缩略图改 Rust 端生成 200×200（修白屏）；fig-memo 本地优先封面/详情图 + 切换秒开 + 列表与订阅解耦 + 移出本地库；时间流图片本地优先；本地库文件夹导航竞态修复。Release：`v1.3.1`
 > **已发布：v1.3.2（2026-09-26）**：fig-memo 详情 hpoi 候选匹配（网页搜索 2 + 自研 1、默认自动关联第一条、手动校正、重新查询排除已显示）+ 列表评分排序 + 卡片「已下载/收藏/标签」角标；hpoi 匹配分类白名单；图片数修正（已下载本地实际数、离线补全、未知不显示）；数据种子内置（站点清单/图片数/hpoi，不含手标标签）；修复 XSERVER WAF（rest_route）、比例解析、评分语义、多标签退出未清。Release：`v1.3.2`
+> **已发布：v1.4.0（2026-09-27）**：① **moeyo 来源**（moeyo.com，克隆 fig-memo：订阅追新/建库/列表分页详情保存/自动标签树/收藏/时间流记事；分类整备 8 项 + 别名归并 + 事件独占 + 正文提字段；**去掉厂商标签**并停掉为提厂商的正文批量抓取）。② **时间流大改**：接入 moeyo 记事、**未下载转贴进时间流**（订阅开关默认关、按原创/hpoi 去重、可跳 app 内 fig-memo 正文）、视频应用内播放 + 右键「保存到本地」、本地视频缓存缩略图、**置顶为默认页**（原主页改名「X主页」）、滚动位置会话保持 + 右下角刷新/回顶、分类标注 + 头像。③ **订阅修复**：失败不再每秒无限重试（此前整晚锤爆 X → 403 空体/非 JSON）、出错重试 5 分钟、检查限流（并发 4/200ms + 全局闸门）、时间流刷新接入 `checkAll`、「文件夹」按钮修复。④ **内置 moeyo 站点(31083)+hpoi(21581) 种子**（首启秒开）。⑤ 性能修复（moeyo 点年份标签卡死：`tagCoveredSet` 改为只预计算一次）；标签树同步加「缓存未变则跳过」。⑥ moeyo 三分类 hpoi **离线全量匹配**（29083 篇，命中 21581）。Release：`v1.4.0`
 
 ## 如何发布新版
 

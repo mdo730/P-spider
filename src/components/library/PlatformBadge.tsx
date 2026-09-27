@@ -4,17 +4,20 @@ import { PlatformSource } from '../../platforms';
 import pawchiveIcon from '../../assets/platform-icons/pawchive.png';
 import xIcon from '../../assets/platform-icons/x.png';
 import figmemoIcon from '../../assets/platform-icons/figmemo.png';
+import moeyoIcon from '../../assets/platform-icons/moeyo.png';
 
 const ICONS: Record<PlatformSource, string> = {
   twitter: xIcon,
   pawchive: pawchiveIcon,
   figmemo: figmemoIcon,
+  moeyo: moeyoIcon,
 };
 
 const LABELS: Record<PlatformSource, string> = {
   twitter: 'X（推特）',
   pawchive: 'Pawchive',
   figmemo: 'fig-memo',
+  moeyo: 'moeyo',
 };
 
 interface Props {

@@ -12,6 +12,8 @@ import { Logger } from './utils/log';
 import './stores/download-history';
 // 副作用 import：fig-memo 自用订阅的后台调度（24h 追新）+ 统计监听
 import './stores/figmemo';
+// 副作用 import：moeyo 的后台调度（24h 追新）+ 统计监听
+import './stores/moeyo';
 
 dayjs.extend(duration);
 dayjs.locale('zh-cn');

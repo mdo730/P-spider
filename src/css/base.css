@@ -40,6 +40,34 @@ body.library-tweet-bar-open .library-video-wrap {
   color: var(--ant-color-link);
 }
 
+/* moeyo 文章正文（网页式详情；保留原格式） */
+.moeyo-article {
+  line-height: 1.8;
+  word-break: break-word;
+}
+.moeyo-article img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+  margin: 6px 0;
+}
+.moeyo-article figure {
+  margin: 0;
+}
+.moeyo-article p {
+  margin: 0.6em 0;
+}
+.moeyo-article h3 {
+  font-weight: 600;
+  margin: 0.8em 0 0.4em;
+}
+.moeyo-article a {
+  color: var(--ant-color-link);
+}
+.moeyo-article a:hover {
+  text-decoration: underline;
+}
+
 /* fig-memo 浮动按钮：角标 / 收藏图标的弹入动画 */
 @keyframes figmemo-pop {
   0% {
@@ -55,6 +83,9 @@ body.library-tweet-bar-open .library-video-wrap {
   }
 }
 .figmemo-pop {
+  animation: figmemo-pop 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.moeyo-pop {
   animation: figmemo-pop 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 

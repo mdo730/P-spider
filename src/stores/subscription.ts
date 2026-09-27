@@ -6,7 +6,19 @@ import { persist } from 'zustand/middleware';
 import MediaType from '../enums/MediaType';
 import { Subscription } from '../interfaces/Subscription';
 import { TwitterPost } from '../interfaces/TwitterPost';
-import { getUser, getUserMedias } from '../twitter/api';
+import { TwitterUser } from '../interfaces/TwitterUser';
+import {
+  TwitterRetweet,
+  getUser,
+  getUserMedias,
+  getUserRetweets,
+} from '../twitter/api';
+import { buildPostUrl } from '../twitter/url';
+import {
+  RetweetNote,
+  bestVideoUrl,
+  upsertRetweetNotes,
+} from '../services/retweets';
 import { aria2 } from '../utils/aria2';
 import {
   getAdapter,
@@ -23,6 +35,36 @@ import {
   useDownloadStore,
 } from './download';
 import { createTauriFileStorage } from './persist/tauri-file-storage';
+import { mapLimit } from '../utils/library';
+import { delay } from '../utils';
+
+/** 订阅检查并发上限：兼顾速度与风控（过高会被 X 403；过低太慢） */
+const CHECK_CONCURRENCY = 4;
+/** 每次订阅检查之间的间隔（ms），降低瞬时压力 */
+const CHECK_GAP_MS = 200;
+/** 订阅出错后的重试间隔（ms）：比正常间隔短，但远大于调度 tick，避免每秒死循环 */
+const ERROR_RETRY_MS = 5 * 60 * 1000;
+/** 全局闸门：避免定时调度与手动「一键刷新」叠加成双倍并发 */
+let checking = false;
+
+async function checkSubscriptionsThrottled(
+  subs: Subscription[],
+): Promise<void> {
+  if (checking) return;
+  checking = true;
+  try {
+    await mapLimit(subs, CHECK_CONCURRENCY, async (sub) => {
+      try {
+        await checkSubscription(sub);
+      } catch (err) {
+        log().error('Subscription check failed', { id: sub.id, err });
+      }
+      await delay(CHECK_GAP_MS);
+    });
+  } finally {
+    checking = false;
+  }
+}
 
 let _log: ICategoriedLogger;
 
@@ -36,6 +78,8 @@ export interface CreateSubscriptionParams {
   username: string;
   intervalMin: number;
   mediaTypes: MediaType[];
+  /** 是否额外抓取转贴媒体（仅进时间流，不下载；默认 false） */
+  includeRetweets?: boolean;
   /** 平台源，默认 twitter（阶段3 UI 支持多平台后由表单选择） */
   source?: PlatformSource;
 }
@@ -60,6 +104,7 @@ export const useSubscriptionStore = create(
         username,
         intervalMin,
         mediaTypes,
+        includeRetweets,
         source,
       }) => {
         const id = nanoid();
@@ -69,6 +114,7 @@ export const useSubscriptionStore = create(
           username,
           intervalMin,
           mediaTypes,
+          includeRetweets: includeRetweets === true,
           enabled: true,
           downloadedCount: 0,
           dailyStats: {},
@@ -111,15 +157,9 @@ export const useSubscriptionStore = create(
       },
       checkAll: async () => {
         const subs = get().subscriptions;
-        // 一键刷新：强制检查所有订阅（含卡在 running 的），
+        // 一键刷新：限流检查所有订阅（含卡在 running 的），
         // 避免因请求挂起卡住的订阅被永久跳过而无法恢复
-        await Promise.all(
-          subs.map((sub) =>
-            checkSubscription(sub).catch((err) => {
-              log().error('Check all failed', { id: sub.id, err });
-            }),
-          ),
-        );
+        await checkSubscriptionsThrottled(subs);
       },
       exportSubscriptions: () => {
         const subs = get().subscriptions;
@@ -130,6 +170,7 @@ export const useSubscriptionStore = create(
             username: s.username,
             intervalMin: s.intervalMin,
             mediaTypes: s.mediaTypes,
+            includeRetweets: s.includeRetweets === true,
             enabled: s.enabled,
           })),
         };
@@ -144,6 +185,7 @@ export const useSubscriptionStore = create(
             username: string;
             intervalMin?: number;
             mediaTypes?: MediaType[];
+            includeRetweets?: boolean;
             enabled?: boolean;
           }[];
         };
@@ -193,6 +235,7 @@ export const useSubscriptionStore = create(
               Array.isArray(item.mediaTypes) && item.mediaTypes.length > 0
                 ? item.mediaTypes
                 : [MediaType.Photo, MediaType.Video, MediaType.Gif],
+            includeRetweets: item.includeRetweets === true,
             enabled: item.enabled !== false,
             downloadedCount: 0,
             dailyStats: {},
@@ -225,7 +268,7 @@ export const useSubscriptionStore = create(
     }),
     {
       name: 'subscriptions',
-      version: 5,
+      version: 6,
       storage: createTauriFileStorage(),
       migrate(state: any) {
         state.subscriptions = (state.subscriptions || []).map((s: any) => {
@@ -245,7 +288,9 @@ export const useSubscriptionStore = create(
           return {
             ...s,
             // v4：旧订阅平台源统一补为 twitter；v5：kemono 订阅迁移为 pawchive（同 service/id 通用）
+            // v6：includeRetweets 默认 false（转贴仅进时间流，不下载）
             source: s.source === 'kemono' ? 'pawchive' : s.source || 'twitter',
+            includeRetweets: s.includeRetweets === true,
             dailyStats,
             downloadedCount: s.downloadedCount || 0,
           };
@@ -354,6 +399,15 @@ async function checkTwitterSubscription(
       }
     }
 
+    // 转贴：勾选了 includeRetweets 时，额外抓该用户的转贴媒体（仅进时间流，不下载）
+    if (sub.includeRetweets) {
+      try {
+        await syncSubscriptionRetweets(sub, user);
+      } catch (err) {
+        log().warn('同步转贴失败', { id: sub.id, err });
+      }
+    }
+
     update({
       status: 'idle',
       lastTweetId: newestId,
@@ -369,10 +423,70 @@ async function checkTwitterSubscription(
     log().error('Subscription check failed', { id: sub.id, err });
     update({
       status: 'error',
+      // 关键：失败也要记时间，否则调度器每秒都判定「从未检查过」而无限重试
+      lastCheckedAt: Date.now(),
       errorMessage: err?.message || '未知原因',
     });
     return { downloaded: 0 };
   }
+}
+
+/** 把一条转贴（原创推文 + 转贴时间）转成时间流缓存条目 */
+function toRetweetNote(
+  rt: TwitterRetweet,
+  retweeter: Subscription,
+): RetweetNote | null {
+  const o = rt.original;
+  const sn = o.user?.screenName;
+  if (!o.id || !sn) return null;
+  const medias = (o.medias || [])
+    .map((m) => ({
+      url: m.url || '',
+      type: m.type,
+      videoUrl: bestVideoUrl(m),
+    }))
+    .filter((m) => !!m.url);
+  if (medias.length === 0) return null;
+  return {
+    id: o.id,
+    screenName: sn,
+    authorName: o.user?.name,
+    authorAvatar: o.user?.avatar,
+    text: o.fullText,
+    link: buildPostUrl(sn, o.id),
+    retweetedAt: (rt.retweetedAt || dayjs()).toISOString(),
+    retweetedBy: [
+      { screenName: retweeter.username, name: retweeter.displayName },
+    ],
+    medias,
+  };
+}
+
+/**
+ * 抓取该用户转贴里的媒体并写入时间流缓存（不下载）。
+ * 去重：① 存储层按原创推文 id 合并（同一条多人转只留一条）；
+ * ② 原作者**已经是订阅用户**的转贴跳过（其原创内容本就会被订阅抓取）。
+ */
+async function syncSubscriptionRetweets(
+  sub: Subscription,
+  user: TwitterUser,
+): Promise<void> {
+  const { retweets } = await getUserRetweets(user.id, undefined, 40);
+  if (retweets.length === 0) return;
+  const subscribedNames = new Set(
+    useSubscriptionStore
+      .getState()
+      .subscriptions.filter((s) => s.source === 'twitter')
+      .map((s) => s.username.toLowerCase()),
+  );
+  const notes: RetweetNote[] = [];
+  for (const rt of retweets) {
+    const note = toRetweetNote(rt, sub);
+    if (!note) continue;
+    if (subscribedNames.has(note.screenName.toLowerCase())) continue;
+    notes.push(note);
+  }
+  if (notes.length > 0) await upsertRetweetNotes(notes);
 }
 
 /**
@@ -485,6 +599,7 @@ async function checkArchiverSubscription(
     log().error('Pawchive subscription check failed', { id: sub.id, err });
     update({
       status: 'error',
+      lastCheckedAt: Date.now(),
       errorMessage: err?.message || '未知原因',
     });
     return { downloaded: 0 };
@@ -538,19 +653,16 @@ async function scheduleSubscriptions() {
   const due = subscriptions.filter((sub) => {
     if (!sub.enabled) return false;
     if (sub.status === 'running') return false;
-    const intervalMs = (sub.intervalMin || DEFAULT_INTERVAL_MIN) * 60 * 1000;
     if (!sub.lastCheckedAt) return true; // 从未检查过
+    const base = (sub.intervalMin || DEFAULT_INTERVAL_MIN) * 60 * 1000;
+    // 出错的重试间隔更短（5 分钟），但绝不是每秒死循环
+    const intervalMs =
+      sub.status === 'error' ? Math.min(base, ERROR_RETRY_MS) : base;
     return now - sub.lastCheckedAt >= intervalMs;
   });
 
-  // 并发检查所有到点订阅
-  await Promise.all(
-    due.map((sub) =>
-      checkSubscription(sub).catch((err) => {
-        log().error('Scheduled subscription check failed', { sub, err });
-      }),
-    ),
-  );
+  // 限流检查所有到点订阅（避免瞬时高并发被 X 风控）
+  await checkSubscriptionsThrottled(due);
 
   setTimeout(scheduleSubscriptions, 1000);
 }

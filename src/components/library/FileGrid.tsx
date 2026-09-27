@@ -250,15 +250,16 @@ export const FileGrid: React.FC<Props> = ({
                     className="object-cover w-full h-full"
                   />
                 ) : (
-                  <>
-                    <video
-                      src={toAssetUrl(file.path)}
-                      preload="metadata"
-                      muted
-                      className="w-full h-full object-cover bg-gray-900"
+                  <div className="relative w-full h-full bg-gray-900">
+                    <LocalThumb
+                      kind="video"
+                      filePath={file.path}
+                      alt={file.name}
+                      wrapperClassName="w-full h-full"
+                      className="object-cover w-full h-full"
                     />
                     <PlayCircleFilled className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-4xl text-white/90" />
-                  </>
+                  </div>
                 )}
                 {selectMode && (
                   <span className="absolute left-1 top-1">

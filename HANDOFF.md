@@ -1,16 +1,16 @@
 # P-Spider 会话交接（HANDOFF）
 
-> 用途：开新会话时把本项目状态快速交接给 AI。最后更新：2026-09-26
+> 用途：开新会话时把本项目状态快速交接给 AI。最后更新：2026-09-27
 
 ## 一句话现状
 
-P-Spider（fork 自 x-spider）**v1.3.2 已发布（2026-09-26，GitHub Release `v1.3.2`）**。fig-memo 自用订阅 + 本地库标签改造。1.3.1：列表与订阅解耦、本地库竞态修复、fig-memo 本地优先、标签浮窗+收藏、自研图片查看器、统一图片右键菜单+图片切割、切换秒开。**1.3.2 新增：** fig-memo 详情「上一篇/下一篇」按筛选列表跳转、快捷标签墙 + 空格下一篇、**接入 Hpoi 手办数据（候选匹配/默认自动关联第一条/手动校正/评分排序/卡片角标）**、匹配分类白名单、图片数修正（本地实际数/离线补全/未知不显示）、**数据种子内置（站点/图片数/Hpoi，不含手标标签）**、修复 XSERVER WAF（rest_route）等。
+P-Spider（fork 自 x-spider）**v1.4.0 已发布（2026-09-27，GitHub Release `v1.4.0`）**。**1.4.0 新增：** ① **moeyo 来源**（moeyo.com，克隆 fig-memo：订阅追新/建库/列表分页详情保存/自动标签树/收藏/时间流记事；分类整备为 8 项 + 别名归并 + 事件独占；**去掉厂商标签**）；② **时间流大改**——接入 moeyo 记事、**未下载转贴进时间流**（默认关闭的订阅开关、按原创/hpoi 去重、可跳 app 内 fig-memo 正文）、视频应用内播放 + 右键「保存到本地」、本地视频缓存缩略图、**置顶为默认页**（原主页改名「X主页」）、滚动位置会话保持 + 右下角刷新/回顶、分类标注 + 头像；③ **订阅修复**：失败不再每秒无限重试（此前整晚锤爆 X → 403 空体/非 JSON）、检查限流（并发 4/200ms）、转贴更新接入、「文件夹」按钮修复；④ **内置 moeyo 站点(31k)+hpoi(21.5k) 种子**（首启秒开）；⑤ 性能修复（moeyo 点年份标签卡死：标签覆盖集改为只预计算一次）。更早：1.3.2 hpoi 候选匹配 + 数据种子；1.3.1 自研查看器/统一切割菜单/缩略图 Rust 化。
 
 ## 项目关键信息
 
 - 路径：本仓库（git 仓库，分支 `master`）
 - 技术栈：Tauri v1 + React18 + TS + Vite + Tailwind + antd5 + Zustand
-- 版本：`1.3.2`（**已发布**，2026-09-26；`package.json` 与 `src-tauri/Cargo.toml` 同步）
+- 版本：`1.4.0`（**已发布 2026-09-27**；`package.json` 与 `src-tauri/Cargo.toml` 同步）
 - 文档：`DEVELOPMENT.md`（架构地图 + 功能 + 待办 + 发布流程），**改动后同步更新**
 - 回滚点：分支 `backup-1.2.2`（commit `c3fd23c`）、zip `x-spider-backup-1.2.2.zip`
 
@@ -32,7 +32,7 @@ P-Spider（fork 自 x-spider）**v1.3.2 已发布（2026-09-26，GitHub Release 
 - `figmemo-site.json`（站点缓存：posts/categories/featured/postCovers）
 - `figmemo-state.json`（订阅基线/统计）、`figmemo-favorites.json`（收藏 postId）、`downloads.jsonl`、`subscriptions.json`、`library-trace.json`
 
-## 已完成（1.3.0 ~ 1.3.2，v1.3.2 已发布 2026-09-26）
+## 已完成（1.3.0 ~ 1.4.0，v1.4.0 已发布 2026-09-27）
 
 1. **fig-memo 独立选项卡**：路由 `figmemo`；设置里「启用 fig-memo 功能」开关（`featureEnabled`）控制显隐，与分类订阅解耦。标签树数据分家（`figmemo-tags.json`）。
 2. **列表含未下载文章**：拉站点全站文章 + 本地状态合并；**列表始终显示全站文章**（1.3.1 起与订阅分类解耦）；未下载也有封面缩略图、可看详情、「保存该文章」。
@@ -83,6 +83,32 @@ P-Spider（fork 自 x-spider）**v1.3.2 已发布（2026-09-26，GitHub Release 
 41. **离线补图片数 + 文章数据内置进软件（本轮）**：① 脚本 `imgcount.py` 逐篇 `?rest_route=/wp/v2/media&parent=<id>&per_page=1` 读 `X-WP-Total` 得图片数（媒体接口不返回 `parent`，只能按 parent 查），补全 **806 篇**（`figmemo.jsonl` 备份 `.bak-imgcount`；现 2252 篇有 imageCount）。② 生成 `src/data/figmemo-meta-seed.json`（2252 条 / 555KB：title/date/link/categoryIds/imageCount/articleTags），`readMetaRecords` **合并种子**（补 imageCount/articleTags；本地缺失补建合成记录）——新装/清数据后文章列表与标签也在。加上 hpoi 种子，前端包约 2.16MB→2.7MB。
 42. **fig-memo 卡片缩略图右下角三个小角标（本轮）**：同一行 `w-4 h-4` 圆点——**已下载**（sky 蓝 + 白勾 `CheckOutlined`）、**已收藏**（rose 红 + 白心 `HeartFilled`）、**已打标签**（slate 灰 + 白 `TagOutlined`，判定 `Object.keys(item.articleTags||{}).length>0`）。条件渲染、带 `title` 提示。
 43. **站点数据内置、用户手标标签不内置（本轮）**：用户要求「可推导/共享」的随包走、**个人手标文章标签**不带。① 新增 `src/data/figmemo-site-seed.json`（整份站点缓存 854KB：posts/categories/featured/postCovers）；`readSiteCache` 本地无缓存时写入并返回 → **新用户首启秒开/离线可用**，厂商/分类/年份三类标签由 `syncSiteTags` 立即生成，随后照常增量刷新。② `figmemo-meta-seed.json` 改为**只含 imageCount**（2253 条/60KB，去掉 title/articleTags）；`readMetaRecords` 只合并 imageCount。用户手标标签仅存本地 `figmemo.jsonl`。种子共约 hpoi 733KB + site 854KB + meta 60KB ≈ 1.6MB。
+44. **修复「非 JSON 响应」长时间退避卡顿（本轮）**：主页解析卡好久——日志见 X `UserByScreenName` 返回非 JSON（`error decoding response body: expected value at line 1 column 1`），`ipc/network.ts` 原逻辑**退避重试 16 次**（100ms→…→16s，累计 ~2.5 分钟）。现改为：**响应解码失败（非 JSON）立即抛出、不再重试**（网络类错误仍照常重试）。同会话 17:44 该接口还成功 455 次、18:22 起全失败 → 属外部条件变化（**登录态/Cookie 失效、被限流、或代理节点对 x.com API 失效**），建议重新登录刷新 Cookie / 换节点。⚠️ 之后若日志出现 `Response is not JSON, abort retry` 即是此类。
+45. **时间流纳入「未下载新记事」（本轮）**：此前时间流只读 `downloads.jsonl`（未下载不进）。现：① `services/figmemo.ts` 导出 `getRecentSiteNotes(days)`（近 N 天站点文章，含未下载，带封面）；② `Timeline.tsx` 合并下载组 + 记事组（**仅当对应功能开关开启**；fig-memo 已接，moeyo 待接），记事 `kind:'note'` 显示来源/标题/封面；③ **「查看正文」按钮**：记事 **以及已下载的 fig-memo 条目**（`platform==='figmemo'`）都显示，点击 `openArticle(page,postId)` **跳转 app 内正文**（`stores/route.ts` 的 `pendingArticle`，`Figmemo.tsx` 消费）；④ 设置新增「**时间流**」区块（settings version→4）：**正文最大展示字数**（默认 200，超出折叠）、**单条最大展示图片数**（默认 6，超出折叠）。⚠️ 记事正文目前用标题（站点缓存无正文），后续可补 excerpt。
+46. **fig-memo 列表分页 + 状态保持（本轮）**：① **分页**取代无限滚动：每页 `PAGE_SIZE=60`，底部 antd `Pagination`（`showQuickJumper` 可跳页），**检索结果同样分页**；筛选/搜索/排序变化回到第 1 页。② **返回保持**：进详情再返回，**保留所在页 + 滚动位置**（`listScrollRef` + `listUiCache.scrollTop`）。③ **切标签页保持**：`listUiCache`（模块级会话缓存）记住 `filter/keyword/sort/page/scrollTop`；另 `openArticleCache` 记住**正在看的文章**（item/detail/images/localImages/navList），切到设置再切回 **连文章一起原样恢复**（不重拉；「返回列表」或时间流跳转时清空/覆盖）。④ 资源：**未保留组件挂载**，只缓存标量 + 当前文章数据 → 额外内存可忽略（列表 `itemsCache` 本就常驻）。
+47. **新增 moeyo 来源（1.4.0，本轮）**：以 fig-memo 为模板克隆出 **moeyo（moeyo.com，WordPress）**：`services/moeyo.ts`、`stores/moeyo.ts`、`stores/moeyo-tags.ts`、`stores/moeyo-favorites.ts`、`pages/Moeyo.tsx`、`components/moeyo/CategorySidebar.tsx`。**保留**：分类订阅（24h 追新）/建库/刷新、列表分页与状态保持、详情/图片（本地优先）/保存、自动标签树（**分类/厂商/年份**）、收藏、时间流新记事。**去掉**：文章级手动打标、Hpoi 匹配。API 同 fig-memo 用 `?rest_route=/wp/v2/...`（moeyo 的 `/wp-json/` 也被 XSERVER WAF 拦）。数据文件：`moeyo.jsonl`/`moeyo-state.json`/`moeyo-tags.json`/`moeyo-favorites.json`/`moeyo-site.json`。平台层 `PlatformSource` 加 `moeyo`（`PlatformBadge` 图标 `src/assets/platform-icons/moeyo.png`、下载命名/Referer 兼容）。设置页加「moeyo」区块；路由/侧栏按 `useMoeyoStore(featureEnabled)` 显隐；`main.tsx` 副作用 import 启动调度。⚠️ **moeyo 全站 5w+ 篇 → 首次快照/建库按时间倒序只取最近 `MAX_SNAPSHOT_PAGES=60` 页（≈6000 篇）**，避免拉爆。统计页暂未加 moeyo 独立项（待办）。
+48. **moeyo 分类整干净（1.4.0 补丁）**：moeyo 共 **519 个分类**，绝大多数是 `イベント` 下的**具体展会子类**，导致「分类」标签树满屏展会名。修：`fetchCategories` **翻页取全**并只保留**顶层分类**（`parent=0`）且 `count >= 100`、排除含「人気記事/限定」的，得到 **ニュース / フィギュア / イベント / ホビー・模型・プラモ / コスプレ / その他**；`syncSiteTags` 末尾**清理「分类」根下已不在该集合的旧标签**。设置里的「分类订阅」列表也只剩这几个。
+49. **moeyo 去掉「厂商」标签（1.4.0 补丁）**：moeyo 标题没有 `厂商「…」` 这种稳定格式，`guessManufacturer`（取 `「` 前缀）产生 **1349 个垃圾厂商标签**（如「コトブキヤ新作美少女フィギュア」「【アダルトフィギュア】」「【WF2026冬】…」）。修：**moeyo 不再生成「厂商」**（保留 分类/年份），`syncSiteTags` 顺带**自动删除遗留的「厂商」根**；并手动清理了 `moeyo-tags.json`（移除 1350 个标签，备份 `.bak-catfix`），现只剩根 `moeyo`(分类) + `年份`。
+50. **moeyo 分类改层级树（1.4.0 补丁，用户发现）**：`サンプルレビュー`(id 1611, **2.3 万篇**) 其实是 **`フィギュア`(1601) 的子分类**——之前「只留顶层」把它误杀了（它才是 moeyo 最大分类）。真实树：`フィギュア` → `サンプルレビュー`/`製品版レビュー`/`アキバ新発売`/`ドール`；乱的是 `イベント(1612) → その他イベント(7027) → 498 个具体展会`。修：`fetchCategories` **保留深度 ≤1** 的分类（顶层+一层子类），砍掉更深的展会；`syncSiteTags` 按分类树**建层级标签**（父分类的标签作父级，无父则挂「分类」根），文章按各分类 id 挂到对应标签；清理「分类」子树里过期标签。设置里的分类订阅列表也变成层级（约 33 项）。⚠️ 另发现 moeyo 文章正文含 `■ 商品名：`/`■ 発売元：`/`■ サイズ：`/`■ 原型制作：` 等**结构化字段**（如 article/166208），将来可据此做**可靠的「厂商」**（从 `発売元` 提）+ 尺寸。
+51. **moeyo 目标分类：正文提字段 → 厂商标签 + Hpoi 匹配（1.4.0 补丁）**：仅对 **`サンプルレビュー`(1611) / `製品版レビュー`(1588)** 两分类（正文稳定带字段）做：① 刷新时对这两类文章**批量拉正文**，解析 **`発売元`→厂商** 存入站点缓存 `makers`（`extractMakerFromHtml`）；`syncSiteTags` 据此重建 **「厂商」根**（并清理过期厂商标签）。② `parseMoeyoProduct(title, html)` 从 `商品名`/`発売元`/`サイズ` 取值；**Hpoi 候选面板**接入 moeyo 详情页（仅这两分类显示，`MOEYO_HPOI_CATEGORY_IDS`），`HpoiMatchPanel` 新增 `parse` 参数（fig-memo 用默认，moeyo 传 `parseMoeyoProduct`）。moeyo 侧加回 `hpoi`（meta/item/`setHpoiMatch`）。⚠️ 首次刷新会为这两类（数量大）批量拉正文，约 60 批请求，之后缓存增量。
+52. **修复 moeyo 详情图片为 0（1.4.0 补丁）**：moeyo **不在 `media` 里挂图**（`/media?parent=` 恒 0），图片是**正文内联 `<img src="https://moeyo.com/image/…/00Ns.jpg">`**（`s` 与不带 `s` 同图）。而克隆来的 `fetchContentImages` 正则域名残留成 `moeyo-r18.site/wp-content/uploads` → 解析不到 → 详情 0 图。修：`fetchPostImages` 直接解析正文（不再查 media）；正则改 `moeyo.com/(image|wp-content/uploads)/`；跳过列表 `thumbnail.*`。
+53. **moeyo 分类再精简 + 深层事件保留（1.4.0 补丁，用户反馈）**：用户指出 `article/166337` 应属 `メガホビEXPO2026`（它是 `イベント → メガホビEXPO(21108) → メガホビEXPO2026(26410)` 的**三级**子类）——之前「深度≤1」把它砍了。改为：**只保留白名单 6 个主分类（ニュース/フィギュア/イベント/ホビー・模型・プラモ/コスプレ/その他）及其任意深度子类，排除「人気記事/限定/その他イベント」链**（去掉那棵 498 展会毒瘤）。`syncSiteTags` 分类建树改**按深度排序通用嵌套**（不再只两级）。`fetchCategories` 同规则。另：列表封面回退用轻量 `thumbnail.jpg`（此前改成跳过 thumbnail 会让卡片加载大图更卡）。用户本地 `moeyo-tags.json` 已重置（`.bak-reset2`），下次打开重建。
+54. **moeyo 分类定为「最精简 8 项」+ 别名归并 + 修持久化损坏（1.4.0 补丁）**：① 粒度定案=最精简：**分类 = 6 主分类 + サンプルレビュー(1611) + 製品版レビュー(1588)**；其余分类经 **`categoryAlias`**（任意分类 id → 最近保留祖先）归并（メガホビEXPO2026 → イベント，アキバ新発売/ドール → フィギュア）。`fetchCategories` 返回 `{cats, alias}`；别名随站点缓存持久化（`MoeyoSiteCache.categoryAlias`），`syncSiteTags` 按别名把文章挂到保留分类。② **真正根因（「改了还是不对」）**：`zustand persist` 多次 `set` **并发写同一文件**，`tauri-file-storage` 直接覆盖 → `moeyo-tags.json` 被写成**两份 JSON 拼接**（`Extra data`）。修 `tauri-file-storage.ts`：**每 store 写队列串行化 + 临时文件原子替换**（全局修复）；`syncSiteTags` 分类建树**按层批量写**。③ 用户本地 `moeyo-site.json` 离线改为 8 分类 + 503 条 alias、`moeyo-tags.json` 清空（备份 `.bak-8`），下次打开即得：分类(6 主 + フィギュア›サンプル/製品版レビュー) + 厂商 + 年份；`166337` → イベント + サンプルレビュー。
+55. **moeyo 事件文章移出レビュー + 卡顿优化（1.4.0 补丁）**：① `166366` 等 `[メガホビEXPO2026, サンプルレビュー]` 双分类文章，在 `syncSiteTags` 里**若命中「イベント」分类则不再挂 `サンプル/製品版レビュー`**（`REVIEW_CATEGORY_NAMES`），故事件报道只在「イベント」下、不再混进レビュー。② 卡顿：侧栏「厂商」曾达 **1484** 个标签，展开 Tree 直接卡死 → **只保留出现 ≥2 篇的厂商**（`mfrCount`）+ **`Tree virtual height`**（`CategorySidebar` 用 ResizeObserver 量高度、虚拟滚动）。本地 `moeyo-tags.json` 清空（`.bak-ev`）待重建。
+56. **moeyo 分类再取舍 + 正文保留原格式（1.4.0 补丁）**：① **去掉 `コスプレ` 分类**（基本空/不准）→ 保留 **7 项**；② 分类改为**优先级独占**：一篇文章只挂**最高优先**的一类 —— **イベント > レビュー > 其它**（如 `150211` → 只 サンプルレビュー；`166366` → 只 イベント）。③ **正文保留原格式**：`fetchPostDetail` 不再删 `a/img/figure`（只清 `script/style/注释`）→ 图片/带超链接的文字都回来；`Moeyo.tsx` 正文容器**拦截 `<a>` 点击用浏览器打开**；补 `.moeyo-article` 样式与 `.moeyo-pop` 动画。
+57. **修复 moeyo 标签关系「只增不减」+ 新增プレスリリース分类（1.4.0 补丁）**：① **根因**：`syncSiteTags` 的 `applyFolderTags` **只加 paths、从不删** → 改规则后旧路径（如 `166362` 仍在サンプルレビュー）永远残留。修：同步前**先清空所有标签的 `paths`，再重建**。② 用户发现 **`プレスリリース`(2548, `/category/news/release`, 既有 3739 篇)** 正文也稳定带 `商品名/発売元/サイズ`（抽样 8/8）→ **加为独立保留分类**并纳入 **hpoi 适配**（`MOEYO_HPOI_CATEGORY_IDS = [1611,1588,2548]`，`REVIEW_CATEGORY_NAMES` 同步加）→ 现分类 **8 项**。本地缓存 alias 重算、标签清空待重建。
+
+58. **时间流置顶为默认页 + 主页改名（1.4.0）**：`constants/routes.tsx` 把「时间流」移到数组首位（默认路由 = `ROUTES[0]`，`route.ts` 用 `getRouteFromHash() || ROUTES[0]`），原「主页」改名 **「X主页」**（路由 id 仍 `home`，作者跳转等不受影响）。
+59. **时间流「未下载转贴」（1.4.0）**：订阅加 `includeRetweets`（默认关，**仅进时间流不下载**）；`twitter/api.ts` 加 `getUserRetweets`（走 UserTweets hash、**不过滤转贴**、从 `retweeted_status_result` 取原创媒体，优先 `extended_entities`）；`services/retweets.ts` 存 `retweets.jsonl`（**按原创推文 id 去重**、多人转合并 `retweetedBy`、保留 30 天）；时间流新增 `kind:'retweet'`——原作者可点 → **app 内主页**（`loadUser`，那页有订阅按钮）、小字「转推自 @x」、直接「订阅原作者」按钮；去重三档（原创 id / 原作者已订阅则跳过 / 与已下载按 postId 去重）。
+60. **时间流状态保持 + 右下角按钮（1.4.0）**：会话缓存（列表 + 已加载条数 + **滚动位置**，挂载先用缓存秒显、**同时后台重新聚合**以反映新内容）；右下角两个圆形按钮：**刷新**（先 `checkAll` 更新订阅/转贴再聚合）、**回到顶部**。
+61. **时间流媒体适配（1.4.0）**：视频/GIF 点击**应用内弹窗播放**（本地 `toAssetUrl` mp4 / 转贴用远程 `videoUrl` 流式）；右键加「**保存到本地**」（图片/视频都有，走正常下载管线）；本地视频用**缓存缩略图**（`utils/thumbnail.ts` 新增 `generateVideoThumbUrl`：WebView 解一帧→canvas→存 `thumb-cache`，`LocalThumb` 加 `kind="video"`；本地库 `FileGrid` 网格也从内联 `<video>` 换成缓存缩略图）。
+62. **时间流分类标注 + 头像（1.4.0）**：fig-memo/moeyo 条目标注**分类标签**（新记事 + 已下载，`getSiteCategoryMap` 回填）；**头像**——下载/转贴用真人，网页来源（fig-memo/moeyo）用其**平台图标**。
+63. **设置新增（1.4.0）**：时间流「**保留天数**」（1~30 默认 7，替换写死的 7 天）；moeyo 区块加「**进「时间流的分类**」多选白名单（`settings.timeline.moeyoCategoryIds`，**全不选 = 都不进**）；「parukamun 自用订阅」标题规范化改为「fig-memo」。
+64. **moeyo 去厂商标签 + 性能（1.4.0）**：`syncSiteTags` 不再生成「厂商」根/子（448 个太卡）并清历史遗留；**停掉为提厂商而做的正文批量抓取**；新增 `ensureTagsSynced` —— **站点缓存未变就跳过标签树重建**（原每次进 moeyo 遍历 3 万篇重建）。
+65. **moeyo 内置种子（1.4.0）**：`src/data/moeyo-site-seed.json`（**31083 篇**清单 + 分类/别名/封面）+ `src/data/moeyo-hpoi.json`（**21581 条** hpoi 匹配）；`readSiteCache` 本地无缓存用种子、本地比种子旧/少则**一次性并集合并（种子为准，含 id 修正为字符串）**；hpoi 用 `resolveHpoi` 回退种子。首启秒开。
+66. **订阅修复 + 提速（1.4.0）**：① 失败也写 `lastCheckedAt`（原失败不写 → 调度器每秒判定「从未检查」→ **整晚无限重试把 X 锤成 403 空体/非 JSON**）；② 出错订阅重试间隔 `ERROR_RETRY_MS=5min`；③ 检查**限流**并发 4 / 间隔 200ms + 全局闸门（手动与定时不叠加）；④ 时间流「刷新」接入 `checkAll`（转贴随之更新）；⑤ 订阅「文件夹」按钮取值形状修复（`post.creator.name`，原写 `post.user.name` → 解析成 `undefined` 打不开）。
+67. **性能修复：moeyo 点年份标签卡死（1.4.0）**：`Moeyo.tsx` 的 `filtered` 原对**每条**文章调 `matchesFilter`（内部每条都重算 `tagCoveredSet`，年份 2014 有 1430 条 → 3 万 × 1430 ≈ 千万级）→ 卡死。改为**每个选中标签的覆盖集只预计算一次**，逐条仅做 Set 查询。
+68. **moeyo hpoi 离线全量匹配（1.4.0）**：三分类（サンプル/製品版/プレスリリース）**29083 篇全量**跑 hpoi（命中 **21581**，对应 **11528** 个词条；事件类 7065 篇无单一商品跳过）。脚本与数据在仓库外 `E:\OPENCODE\moeyo-batch\`（`run-match.cmd` 带实时进度条、断点续跑）。
 
 ## 待办（下一步候选，按优先级）
 
@@ -107,12 +133,12 @@ P-Spider（fork 自 x-spider）**v1.3.2 已发布（2026-09-26，GitHub Release 
 
 ```
 我在开发 P-Spider（fork 自 x-spider 的桌面下载器），仓库在 <项目路径>，
-Tauri v1 + React18 + TS + Vite + Tailwind + antd5 + Zustand，当前版本 1.3.2（已发布）。
+Tauri v1 + React18 + TS + Vite + Tailwind + antd5 + Zustand，当前版本 1.4.0（已发布）。
 请先读 项目根目录的 DEVELOPMENT.md 和 HANDOFF.md 了解现状，再开始。
 
 约定：
 - 改完跑 pnpm typeCheck + npx eslint ./src（必要时 pnpm build）；除非我说“打包”，否则别 pnpm tauri build。
-- 打包后把 P-Spider.exe / aria2c.exe / P-Spider_1.3.2_x64-setup.exe 拷到 <测试目录>（app 开着会被占用，需先退出）。
+- 打包后把 P-Spider.exe / aria2c.exe / P-Spider_1.4.0_x64-setup.exe 拷到 <测试目录>（app 开着会被占用，需先退出）。
 - git push 要走代理：git -c http.proxy=http://127.0.0.1:7897 -c https.proxy=http://127.0.0.1:7897 push origin master；发 Release 前设 $env:HTTPS_PROXY='http://127.0.0.1:7897' 再用 gh。
 - 别用 PowerShell 直接读写源码（破坏 UTF-8中文）；用 .NET [IO.File] + UTF8Encoding($false)。
 - 用户数据（标签/收藏/订阅/历史/设置）都在 %APPDATA%\p-spider\，仓库里不放任何数据文件。

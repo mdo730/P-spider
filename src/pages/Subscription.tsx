@@ -107,6 +107,7 @@ export const SubscriptionPage: React.FC = () => {
     username: string;
     intervalMin: number;
     mediaTypes: MediaType[];
+    includeRetweets?: boolean;
     source: PlatformSource;
   }) => {
     const username = values.username?.trim();
@@ -125,6 +126,7 @@ export const SubscriptionPage: React.FC = () => {
         username,
         intervalMin: values.intervalMin,
         mediaTypes: values.mediaTypes,
+        includeRetweets: values.includeRetweets === true,
       });
       message.success(
         `已订阅 ${username}，首次检查将建立基线，后续新内容将自动下载`,
@@ -166,6 +168,7 @@ export const SubscriptionPage: React.FC = () => {
             source: 'twitter',
             intervalMin: 720,
             mediaTypes: [MediaType.Photo, MediaType.Video, MediaType.Gif],
+            includeRetweets: false,
           }}
           disabled={addSource === 'twitter' && !cookieString}
         >
@@ -198,6 +201,13 @@ export const SubscriptionPage: React.FC = () => {
                 { label: 'GIF', value: MediaType.Gif },
               ]}
             />
+          </Form.Item>
+          <Form.Item
+            name="includeRetweets"
+            valuePropName="checked"
+            tooltip="勾选后，该用户转贴的媒体会出现在时间流（不下载到本地）"
+          >
+            <Checkbox>同时抓取转贴（仅进时间流）</Checkbox>
           </Form.Item>
           <Form.Item>
             <Button type="primary" htmlType="submit" loading={adding}>
@@ -262,6 +272,7 @@ const SubscriptionItem: React.FC<SubscriptionItemProps> = ({
   const [form] = Form.useForm<{
     intervalMin: number;
     mediaTypes: MediaType[];
+    includeRetweets?: boolean;
   }>();
   const status = STATUS_MAP[sub.status];
   const intervalLabel =
@@ -272,6 +283,7 @@ const SubscriptionItem: React.FC<SubscriptionItemProps> = ({
     form.setFieldsValue({
       intervalMin: sub.intervalMin,
       mediaTypes: sub.mediaTypes,
+      includeRetweets: sub.includeRetweets === true,
     });
     setEditing(true);
   };
@@ -280,16 +292,21 @@ const SubscriptionItem: React.FC<SubscriptionItemProps> = ({
     const settings = useSettingsStore.getState();
     const dirName = resolveVariables(
       settings.download.dirTemplate,
-      // 目录模板通常只依赖用户字段（如 %USER_NAME%），构造最小数据即可
+      // 模板 replacer 读取的是 post.creator（见 constants/file-name-template）
       {
         post: {
-          user: {
-            name: sub.displayName || sub.username,
-            screenName: sub.username,
+          id: '',
+          creator: {
             id: '',
+            name: sub.displayName || sub.username,
+            username: sub.username,
             avatar: '',
           },
+          medias: [],
+          tags: [],
+          links: [],
         },
+        media: { id: '', type: MediaType.Photo },
       } as unknown as Parameters<typeof resolveVariables>[1],
     );
     const dir = await path.join(settings.download.saveDirBase, dirName);
@@ -309,6 +326,7 @@ const SubscriptionItem: React.FC<SubscriptionItemProps> = ({
     onUpdate(sub.id, {
       intervalMin: values.intervalMin,
       mediaTypes: values.mediaTypes,
+      includeRetweets: values.includeRetweets === true,
     });
     message.success(`已更新 ${sub.username} 的订阅设置`);
     setEditing(false);
@@ -347,6 +365,7 @@ const SubscriptionItem: React.FC<SubscriptionItemProps> = ({
                 <Tag color="error">错误详情</Tag>
               </Tooltip>
             )}
+            {sub.includeRetweets && <Tag color="magenta">含转贴</Tag>}
           </div>
           <p className="text-sm text-gray-400 truncate">
             {sub.source === 'twitter' ? `@${sub.username}` : sub.username} ·
@@ -420,6 +439,13 @@ const SubscriptionItem: React.FC<SubscriptionItemProps> = ({
                 { label: 'GIF', value: MediaType.Gif },
               ]}
             />
+          </Form.Item>
+          <Form.Item
+            name="includeRetweets"
+            valuePropName="checked"
+            tooltip="勾选后，该用户转贴的媒体会出现在时间流（不下载到本地）"
+          >
+            <Checkbox>同时抓取转贴（仅进时间流）</Checkbox>
           </Form.Item>
         </Form>
       </Modal>

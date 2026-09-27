@@ -9,12 +9,14 @@ import {
   FolderOutlined,
   GlobalOutlined,
   ScissorOutlined,
+  ClockCircleOutlined,
 } from '@ant-design/icons';
 import Joi from 'joi';
 import { SavePathSelector } from '../components/settings/SavePathSelector';
 import {
   App,
   Button,
+  Checkbox,
   DatePicker,
   Input,
   InputNumber,
@@ -22,6 +24,7 @@ import {
   Segmented,
   Switch,
 } from 'antd';
+import { useSettingsStore } from '../stores/settings';
 import { FileNameTemplateInput } from '../components/settings/FileNameTemplateInput';
 import { showInFolder } from '../utils/shell';
 import { path } from '@tauri-apps/api';
@@ -32,6 +35,11 @@ import { useLibraryTraceStore } from '../stores/library-trace';
 import { useThumbCacheStore } from '../stores/library-thumb-cache';
 import { useFigmemoStore } from '../stores/figmemo';
 import { FigmemoCategory, fetchCategories } from '../services/figmemo';
+import { useMoeyoStore } from '../stores/moeyo';
+import {
+  MoeyoCategory,
+  fetchCategories as fetchMoeyoCategories,
+} from '../services/moeyo';
 import dayjs, { Dayjs } from 'dayjs';
 
 export const Settings: React.FC = () => {
@@ -44,12 +52,23 @@ export const Settings: React.FC = () => {
   const [figmemoCategories, setFigmemoCategories] = useState<FigmemoCategory[]>(
     [],
   );
+  const moeyo = useMoeyoStore();
+  const [moeyoCategories, setMoeyoCategories] = useState<MoeyoCategory[]>([]);
+  const updateOne = useSettingsStore((s) => s.updateOne);
+  const moeyoTimelineSetting = useSettingsStore(
+    (s) => s.timeline?.moeyoCategoryIds,
+  );
+  // 未设置 = 全部进时间流（呈现为全选）
+  const timelineCats = moeyoTimelineSetting ?? moeyoCategories.map((c) => c.id);
   const [buildYears, setBuildYears] = useState<[Dayjs, Dayjs] | null>(null);
 
   useEffect(() => {
     fetchCategories()
       .then((map) => setFigmemoCategories([...map.values()]))
       .catch((err) => log.warn('读取 fig-memo 分类失败', err));
+    fetchMoeyoCategories()
+      .then(({ cats }) => setMoeyoCategories([...cats.values()]))
+      .catch((err) => log.warn('读取 moeyo 分类失败', err));
   }, []);
 
   const figmemoStatusText = (() => {
@@ -73,6 +92,31 @@ export const Settings: React.FC = () => {
     }
     if (figmemo.downloadedCount > 0) {
       return `未订阅 · 累计下载 ${figmemo.downloadedCount}`;
+    }
+    return '默认关闭';
+  })();
+
+  const moeyoStatusText = (() => {
+    if (moeyo.running && moeyo.progress) {
+      const p = moeyo.progress;
+      const verb = p.phase === 'building' ? '建库中' : '检查中';
+      return `${verb} ${p.done}/${p.total}…`;
+    }
+    if (moeyo.lastError) return `上次出错：${moeyo.lastError}`;
+    if (moeyo.enabledCategories.length > 0) {
+      const parts: string[] = [
+        `已订阅 ${moeyo.enabledCategories.length} 个分类`,
+      ];
+      if (moeyo.lastCheckedAt) {
+        parts.push(
+          `上次检查 ${dayjs(moeyo.lastCheckedAt).format('MM-DD HH:mm')}`,
+        );
+      }
+      parts.push(`累计下载 ${moeyo.downloadedCount}`);
+      return parts.join(' · ');
+    }
+    if (moeyo.downloadedCount > 0) {
+      return `未订阅 · 累计下载 ${moeyo.downloadedCount}`;
     }
     return '默认关闭';
   })();
@@ -313,6 +357,33 @@ export const Settings: React.FC = () => {
           <InputNumber min={2} max={20} />
         </Item>
       </Section>
+      <Section
+        title="时间流"
+        name="timeline"
+        titleIcon={<ClockCircleOutlined />}
+      >
+        <Item
+          settingKey="maxTextLen"
+          label="正文最大展示字数"
+          description="时间流每条正文超过此字数即折叠；记事可点「查看正文」跳转到 app 内正文"
+        >
+          <InputNumber min={20} max={5000} />
+        </Item>
+        <Item
+          settingKey="maxImages"
+          label="单条最大展示图片数"
+          description="时间流每条最多展示的图片数，超出折叠"
+        >
+          <InputNumber min={1} max={50} />
+        </Item>
+        <Item
+          settingKey="rangeDays"
+          label="保留天数"
+          description="时间流展示最近多少天的内容（1~30，默认 7）"
+        >
+          <InputNumber min={1} max={30} />
+        </Item>
+      </Section>
       <Section title="代理" name="proxy" titleIcon={<GlobalOutlined />}>
         <Item label="启用代理" settingKey="enable" valuePropName="checked">
           <Switch />
@@ -385,7 +456,7 @@ export const Settings: React.FC = () => {
           打开日志文件夹
         </Button>
       </Section>
-      <Section title="parukamun 自用订阅" name="parukamun">
+      <Section title="fig-memo" name="parukamun">
         <div className="flex items-center gap-2 mb-3">
           <span className="font-medium">启用 fig-memo 功能</span>
           <Switch
@@ -457,6 +528,87 @@ export const Settings: React.FC = () => {
           小时自动检查新文章；「刷新」立即检查；「建库」按已开启分类+年份范围下载现存文章（⚠️
           量大）。标签（分类/厂商/年份/姿势·发型·体型）由站点数据**自动生成**，覆盖全部文章（含未下载），打开
           fig-memo 选项卡时即会刷新。
+        </p>
+      </Section>
+      <Section title="moeyo（手办资讯）" name="moeyo">
+        <div className="flex items-center gap-2 mb-3">
+          <span className="font-medium">启用 moeyo 功能</span>
+          <Switch
+            checked={moeyo.featureEnabled}
+            onChange={(v) => moeyo.setFeatureEnabled(v)}
+          />
+          <span className="text-sm text-gray-400">
+            开启后左侧显示「moeyo」选项卡
+          </span>
+        </div>
+        <div className="flex items-center flex-wrap gap-3">
+          <span className="font-medium">moeyo</span>
+          <Button
+            onClick={() => moeyo.build()}
+            loading={moeyo.running && moeyo.progress?.phase === 'building'}
+            disabled={moeyo.running}
+          >
+            建库
+          </Button>
+          <Button
+            onClick={() => moeyo.checkNow()}
+            loading={moeyo.running && moeyo.progress?.phase === 'checking'}
+            disabled={moeyo.running}
+          >
+            刷新
+          </Button>
+          <span className="text-sm text-gray-500">{moeyoStatusText}</span>
+        </div>
+        <div className="mt-3">
+          <div className="text-sm text-gray-500 mb-1">
+            分类订阅（开关 = 接收该类新文章；「建库」只建已开启的分类）
+          </div>
+          {moeyoCategories.length === 0 ? (
+            <p className="text-xs text-gray-300">读取分类中…</p>
+          ) : (
+            <ul className="space-y-1">
+              {moeyoCategories.map((c) => (
+                <li key={c.id} className="flex items-center gap-2 text-sm">
+                  <Switch
+                    size="small"
+                    checked={moeyo.enabledCategories.includes(c.id)}
+                    onChange={(checked) =>
+                      moeyo.setCategoryEnabled(c.id, checked)
+                    }
+                  />
+                  <span>{c.name}</span>
+                  <span className="text-xs text-gray-400">
+                    （{c.count} 篇）
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <div className="mt-3">
+          <div className="text-sm text-gray-500 mb-1">
+            进「时间流」的分类（不勾选的分类不会作为新记事出现在时间流；全部不勾
+            = 都不进）
+          </div>
+          {moeyoCategories.length === 0 ? (
+            <p className="text-xs text-gray-300">读取分类中…</p>
+          ) : (
+            <Checkbox.Group
+              options={moeyoCategories.map((c) => ({
+                label: c.name,
+                value: c.id,
+              }))}
+              value={timelineCats}
+              onChange={(vals) =>
+                updateOne('timeline', 'moeyoCategoryIds', vals as number[])
+              }
+            />
+          )}
+        </div>
+        <p className="text-sm text-gray-400 mt-2">
+          订阅 moeyo（moeyo.com）。开启分类后每 24
+          小时自动检查新文章；「刷新」立即检查；「建库」按已开启分类下载现存文章（⚠️
+          量大）。标签（分类/厂商/年份）由站点数据**自动生成**，覆盖全部文章（含未下载）。
         </p>
       </Section>
     </>

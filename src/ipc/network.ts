@@ -51,6 +51,16 @@ export async function request(options: RequestOptions) {
       );
     } catch (err: any) {
       lastErr = err;
+      // 响应体不是 JSON（如站点返回 HTML/空体/被墙页）→ 重试无意义，立即失败，避免长时间退避卡住
+      const msg = String(err?.message ?? err);
+      if (
+        /decoding response body|expected value|invalid type|EOF while parsing|key must be a string/i.test(
+          msg,
+        )
+      ) {
+        log.error('Response is not JSON, abort retry:', msg);
+        throw err;
+      }
       log.warn(
         `Request failed, retry after ${retryDelay}ms, remaining retry count: ${remainingRetryCount}`,
         err,

@@ -1,4 +1,4 @@
-import dayjs from 'dayjs';
+import dayjs, { Dayjs } from 'dayjs';
 import * as R from 'ramda';
 import { Response } from '../interfaces/Response';
 import { TwitterAccountInfo } from '../interfaces/TwitterAccountInfo';
@@ -184,9 +184,14 @@ const mapTwitterPosts = (posts: any[]) => {
       replyCount: item?.legacy?.reply_count,
       retweeted: item?.legacy?.retweeted,
       retweetCount: item?.legacy?.retweet_count,
-      medias: item?.legacy?.entities?.media
-        ? mapTwitterMedias(item.legacy?.entities?.media)
-        : undefined,
+      // 视频的 video_info 常在 extended_entities 里；优先用它，回退 entities
+      medias:
+        item?.legacy?.extended_entities?.media || item?.legacy?.entities?.media
+          ? mapTwitterMedias(
+              item.legacy.extended_entities?.media ||
+                item.legacy.entities.media,
+            )
+          : undefined,
       tags: R.pipe<any, any[], string[]>(
         R.path<any>(['legacy', 'entities', 'hashtags']),
         R.ifElse(R.isNotNil, R.map(R.prop('text')), R.always([])),
@@ -472,6 +477,7 @@ export async function getUserTweets(
   };
 
   const twitterPosts = extractTwitterPosts(pathToInstructions, resp.body);
+
   const nextCursor = extractNextCursor(pathToInstructions, resp.body);
   if (!twitterPosts || twitterPosts.length === 0) {
     return {
@@ -486,4 +492,158 @@ export async function getUserTweets(
     twitterPosts,
     cursor: nextCursor,
   };
+}
+
+/** 一条「被转贴的原创推文」：原创内容 + 转贴时间 */
+export interface TwitterRetweet {
+  original: TwitterPost;
+  retweetedAt?: Dayjs;
+}
+
+/**
+ * 该用户时间线里的**转贴媒体**（UserTweets 接口，但保留转贴、只取带媒体的）。
+ * 与 getUserTweets 的区别：不过滤 `retweeted_status_result`，从被转贴的原创推文里取媒体。
+ * 仅用于「转贴进时间流」，不做下载。
+ */
+export async function getUserRetweets(
+  userId: string,
+  cursor?: string,
+  count = 20,
+): Promise<{ retweets: TwitterRetweet[]; cursor: string | null }> {
+  const resp = await request({
+    method: 'GET',
+    url: `https://${HOST}/i/api/graphql/9zyyd1hebl7oNWIPdA8HRw/UserTweets`,
+    responseType: 'json',
+    query: {
+      features: JSON.stringify({
+        rweb_tipjar_consumption_enabled: true,
+        responsive_web_graphql_exclude_directive_enabled: true,
+        verified_phone_label_enabled: false,
+        creator_subscriptions_tweet_preview_api_enabled: true,
+        responsive_web_graphql_timeline_navigation_enabled: true,
+        responsive_web_graphql_skip_user_profile_image_extensions_enabled:
+          false,
+        communities_web_enable_tweet_community_results_fetch: true,
+        c9s_tweet_anatomy_moderator_badge_enabled: true,
+        articles_preview_enabled: false,
+        tweetypie_unmention_optimization_enabled: true,
+        responsive_web_edit_tweet_api_enabled: true,
+        graphql_is_translatable_rweb_tweet_is_translatable_enabled: true,
+        view_counts_everywhere_api_enabled: true,
+        longform_notetweets_consumption_enabled: true,
+        responsive_web_twitter_article_tweet_consumption_enabled: true,
+        tweet_awards_web_tipping_enabled: false,
+        creator_subscriptions_quote_tweet_preview_enabled: false,
+        freedom_of_speech_not_reach_fetch_enabled: true,
+        standardized_nudges_misinfo: true,
+        tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled:
+          true,
+        tweet_with_visibility_results_prefer_gql_media_interstitial_enabled:
+          false,
+        rweb_video_timestamps_enabled: true,
+        longform_notetweets_rich_text_read_enabled: true,
+        longform_notetweets_inline_media_enabled: true,
+        responsive_web_enhance_cards_enabled: false,
+      }),
+      variables: JSON.stringify({
+        userId,
+        count,
+        cursor,
+        includePromotedContent: true,
+        withQuickPromoteEligibilityTweetFields: true,
+        withVoice: true,
+        withV2Timeline: true,
+      }),
+    },
+    headers: getCommonHeaders(),
+  });
+  ensureResponse(resp);
+
+  const unwrap = (r: any): any =>
+    r?.__typename === 'TweetWithVisibilityResults' ? r.tweet : r;
+
+  const pathToTwitterPostItems = (instructions: any): any[] => {
+    return R.pipe(
+      R.find(R.pathEq('TimelineAddEntries', ['type'])),
+      R.defaultTo({}),
+      R.prop('entries'),
+      R.defaultTo([]),
+      R.map(
+        R.cond([
+          [
+            R.pathSatisfies(R.startsWith('tweet'), ['entryId']),
+            R.path(['content', 'itemContent', 'tweet_results', 'result']),
+          ],
+          [
+            R.pathSatisfies(R.startsWith('profile-conversation'), ['entryId']),
+            R.pipe(
+              R.path<any>(['content', 'items']),
+              R.map(R.path(['item', 'itemContent', 'tweet_results', 'result'])),
+            ),
+          ],
+          [R.T, R.always(undefined)],
+        ]),
+      ),
+      R.flatten,
+      R.filter(R.isNotNil),
+    )(instructions);
+  };
+
+  const entries = pathToTwitterPostItems(
+    R.path([
+      'data',
+      'user',
+      'result',
+      'timeline_v2',
+      'timeline',
+      'instructions',
+    ])(resp.body),
+  );
+
+  const retweets: TwitterRetweet[] = [];
+  for (const raw of entries) {
+    const outer = unwrap(raw);
+    const inner = unwrap(outer?.legacy?.retweeted_status_result?.result);
+    if (!inner) continue;
+    const innerLegacy = inner?.legacy;
+    const medias = (innerLegacy?.extended_entities?.media ||
+      innerLegacy?.entities?.media) as any[] | undefined;
+    if (!medias || medias.length === 0) continue;
+    const original = mapTwitterPosts([inner])[0];
+    if (!original?.id) continue;
+    retweets.push({
+      original,
+      retweetedAt: outer?.legacy?.created_at
+        ? dayjs(outer.legacy.created_at)
+        : undefined,
+    });
+  }
+
+  const nextCursor = R.pipe<
+    any,
+    any,
+    any,
+    any,
+    any,
+    string | undefined,
+    string | null
+  >(
+    R.path([
+      'data',
+      'user',
+      'result',
+      'timeline_v2',
+      'timeline',
+      'instructions',
+    ]),
+    R.find(R.pathEq('TimelineAddEntries', ['type'])),
+    R.prop('entries'),
+    R.find(R.pathEq('Bottom', ['content', 'cursorType'])),
+    R.path(['content', 'value']),
+    R.defaultTo(null),
+  )(resp.body);
+
+  log.info('twitterRetweets', retweets);
+
+  return { retweets, cursor: nextCursor };
 }

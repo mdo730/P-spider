@@ -5,6 +5,7 @@ import { ROUTES } from '../constants/routes';
 import { Route } from '../interfaces/Route';
 import { useRouteStore } from '../stores/route';
 import { useFigmemoStore } from '../stores/figmemo';
+import { useMoeyoStore } from '../stores/moeyo';
 import { Account } from './Account';
 
 interface SideBarItemProps {
@@ -38,10 +39,15 @@ const Item: React.FC<SideBarItemProps> = ({ route, active }) => {
 export const SideBar: React.FC = () => {
   const current = useRouteStore((state) => state.route);
   const figmemoEnabled = useFigmemoStore((s) => s.featureEnabled);
+  const moeyoEnabled = useMoeyoStore((s) => s.featureEnabled);
 
   if (!current) return null;
 
-  const routes = ROUTES.filter((r) => r.id !== 'figmemo' || figmemoEnabled);
+  const routes = ROUTES.filter(
+    (r) =>
+      (r.id !== 'figmemo' || figmemoEnabled) &&
+      (r.id !== 'moeyo' || moeyoEnabled),
+  );
 
   return (
     <aside

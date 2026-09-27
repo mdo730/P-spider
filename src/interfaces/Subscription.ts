@@ -19,6 +19,8 @@ export interface Subscription {
   enabled: boolean;
   /** 媒体类型过滤 */
   mediaTypes: MediaType[];
+  /** 是否额外抓取该用户转贴的媒体（仅进时间流，不下载；默认 false） */
+  includeRetweets?: boolean;
   /** 上次检查到的最后一条推文 id，用于增量去重 */
   lastTweetId?: string;
   /** 上次成功检查时间 */

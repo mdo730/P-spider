@@ -15,6 +15,10 @@ function setRouteToHash(route: Route) {
 export interface RouteStore {
   route: Route | null;
   setRoute: (route: Route) => void;
+  /** 跨页跳转并打开指定文章（时间流「查看正文」用） */
+  pendingArticle: { page: string; postId: string } | null;
+  openArticle: (page: string, postId: string) => void;
+  clearPendingArticle: () => void;
 }
 
 export const useRouteStore = create<RouteStore>((set) => ({
@@ -25,6 +29,15 @@ export const useRouteStore = create<RouteStore>((set) => ({
     });
     setRouteToHash(route);
   },
+  pendingArticle: null,
+  openArticle: (page: string, postId: string) => {
+    const route = ROUTES.find((r) => r.id === page) || null;
+    if (route) {
+      set({ route, pendingArticle: { page, postId } });
+      setRouteToHash(route);
+    }
+  },
+  clearPendingArticle: () => set({ pendingArticle: null }),
 }));
 
 // 推迟设置 route，避免因循环引用导致报错

@@ -115,8 +115,8 @@ export async function prepareDownloadTask({
   let dir: string;
   let fileName: string;
 
-  if (source === 'figmemo') {
-    // fig-memo：saveDirBase/fig-memo/<日期 标题>/<日期 原文件名>
+  if (source === 'figmemo' || source === 'moeyo') {
+    // fig-memo / moeyo：saveDirBase/<站点名>/<日期 标题>/<日期 原文件名>
     const creatorName = unicodeFilenamify(
       post.creator?.name || post.creator?.username || 'fig-memo',
     );
@@ -186,7 +186,9 @@ function aria2DownloadOptions(task: DownloadTask): Record<string, any> {
     const referer =
       task.source === 'figmemo'
         ? 'https://fig-memo-r18.site/'
-        : 'https://pawchive.pw/';
+        : task.source === 'moeyo'
+          ? 'https://moeyo.com/'
+          : 'https://pawchive.pw/';
     options.header = [
       'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       `Referer: ${referer}`,

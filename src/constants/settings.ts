@@ -23,6 +23,11 @@ export const DEFAULT_SETTINGS: Settings = {
     direction: 'horizontal',
     parts: 4,
   },
+  timeline: {
+    maxTextLen: 200,
+    maxImages: 6,
+    rangeDays: 7,
+  },
 };
 
-export const CURRENT_SETTINGS_VERSION = 3;
+export const CURRENT_SETTINGS_VERSION = 4;

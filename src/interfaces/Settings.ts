@@ -40,4 +40,18 @@ export interface Settings_V2 {
   };
 }
 
-export type Settings = Settings_V2;
+export interface Settings_V3 extends Settings_V2 {
+  /** 时间流展示限制 */
+  timeline: {
+    /** 正文最大展示字数（超出折叠） */
+    maxTextLen: number;
+    /** 单条最大展示图片数（超出折叠） */
+    maxImages: number;
+    /** 进时间流的 moeyo 分类 id 白名单（不设置 = 全部；设置后只显示这些） */
+    moeyoCategoryIds?: number[];
+    /** 时间流保留天数（1~30，默认 7） */
+    rangeDays?: number;
+  };
+}
+
+export type Settings = Settings_V3;

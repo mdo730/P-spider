@@ -1,6 +1,7 @@
 import { fs, path } from '@tauri-apps/api';
 import { convertFileSrc } from '@tauri-apps/api/tauri';
 import MediaType from '../enums/MediaType';
+import { PlatformSource } from '../platforms';
 import { buildPostUrl } from '../twitter/url';
 import { onTaskCompleted } from './download';
 
@@ -27,8 +28,10 @@ export interface DownloadHistoryRecord {
   avatar?: string;
   /** 媒体类型 */
   mediaType: MediaType;
-  /** 媒体原始 URL */
+  /** 媒体原始 URL（视频为封面图） */
   mediaUrl?: string;
+  /** 视频/GIF 可播放地址（转贴等未下载媒体的远程 mp4） */
+  videoUrl?: string;
   /** 本地保存完整路径 */
   filePath: string;
   /** 本地文件名 */
@@ -37,8 +40,8 @@ export interface DownloadHistoryRecord {
   downloadedAt: number;
   /** 来源：subscription=订阅自动下载，manual=手动下载 */
   source: 'subscription' | 'manual';
-  /** 来源平台（twitter/pawchive/figmemo），用于还原原帖链接 */
-  platform?: 'twitter' | 'pawchive' | 'figmemo';
+  /** 来源平台（twitter/pawchive/figmemo/moeyo），用于还原原帖链接 */
+  platform?: PlatformSource;
   /** 帖子详情页 URL */
   postUrl?: string;
 }
@@ -100,6 +103,22 @@ export interface TimelineGroup {
   username?: string;
   displayName?: string;
   records: DownloadHistoryRecord[];
+  /** 'note' = 未下载的新记事（fig-memo/moeyo）；'retweet' = 订阅用户转贴（仅展示，不下载） */
+  kind?: 'download' | 'note' | 'retweet';
+  /** 记事标题 */
+  title?: string;
+  /** 跳转 app 内正文的目标页 id（figmemo / moeyo） */
+  articlePage?: string;
+  /** 记事来源显示名（fig-memo / moeyo） */
+  sourceLabel?: string;
+  /** 转贴：转推者 screenName（显示「转推自 @x」） */
+  retweetedBy?: string;
+  /** 转贴：转推者数量（>1 显示「等 N 人」） */
+  retweetedByCount?: number;
+  /** 头像 URL（下载条目来自推文；转贴为原作者头像；记事用平台图标，留空） */
+  avatar?: string;
+  /** 记事所属分类名（fig-memo/moeyo），用于时间流标注 */
+  categories?: string[];
 }
 
 /**
@@ -126,6 +145,7 @@ export async function getTimelineGroups(
         fullText: r.fullText,
         username: r.username,
         displayName: r.displayName,
+        avatar: r.avatar,
         records: [],
       };
       map.set(r.postId, g);
