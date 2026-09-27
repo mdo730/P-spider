@@ -13,6 +13,7 @@ import {
 } from 'antd';
 import {
   ArrowUpOutlined,
+  CalendarOutlined,
   DownloadOutlined,
   FileOutlined,
   FolderOpenOutlined,
@@ -21,7 +22,13 @@ import {
   ReloadOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { PageHeader } from '../components/PageHeader';
 import { LocalThumb } from '../components/library/LocalThumb';
 import { useRemoteVideo } from '../hooks/useRemoteVideo';
@@ -46,10 +53,12 @@ import { buildUserUrl } from '../twitter/url';
 import {
   getRecentSiteNotes,
   getSiteCategoryMap as getFigmemoCategoryMap,
+  refreshSitePosts as refreshFigmemoSites,
 } from '../services/figmemo';
 import {
   getRecentSiteNotes as getMoeyoNotes,
   getSiteCategoryMap as getMoeyoCategoryMap,
+  refreshSitePosts as refreshMoeyoSites,
 } from '../services/moeyo';
 import { getRecentRetweetNotes, RetweetNote } from '../services/retweets';
 import { useFigmemoStore } from '../stores/figmemo';
@@ -71,12 +80,27 @@ ensureMediaProxy();
 const PAGE_SIZE = 25;
 const LOAD_MORE_STEP = 5;
 const RANGE_DAYS = 7;
+/** 自动刷新间隔（仅 moeyo / fig-memo 站点列表） */
+const AUTO_REFRESH_MS = 20 * 60 * 1000;
+/** 日期刻度条展开高度（px） */
+const OPEN_HEIGHT = 360;
 
 const MEDIA_TYPE_LABEL: Record<string, string> = {
   photo: '图片',
   video: '视频',
   animated_gif: 'GIF',
 };
+
+/**
+ * 站点日期归一：moeyo/fig-memo 的日期是站点本地时间（日本 +09:00，无时区）。
+ * 不换算的话，字符串排序会让它们相对 UTC 的下载记录「虚高约 9 小时」而浮在时间流顶端。
+ */
+function siteIso(dateStr: string): string {
+  if (!dateStr) return dateStr;
+  if (/[zZ]$|[+-]\d{2}:?\d{2}$/.test(dateStr)) return dateStr;
+  const d = new Date(`${dateStr}+09:00`);
+  return Number.isNaN(d.getTime()) ? dateStr : d.toISOString();
+}
 
 /** 把站点「新记事」（未下载文章）转成时间流分组 */
 function noteGroup(
@@ -91,9 +115,10 @@ function noteGroup(
     categories: string[];
   },
 ): TimelineGroup {
+  const iso = siteIso(n.date);
   return {
     postId: n.postId,
-    tweetTime: n.date,
+    tweetTime: iso,
     fullText: n.title,
     title: n.title,
     kind: 'note',
@@ -104,7 +129,7 @@ function noteGroup(
       ? [
           {
             postId: n.postId,
-            tweetTime: n.date,
+            tweetTime: iso,
             mediaType: MediaType.Photo,
             mediaUrl: n.coverUrl,
             filePath: '',
@@ -310,6 +335,35 @@ export const TimelinePage: React.FC = () => {
     }
   }, [build, visibleCount, message, resolveMissingMedia]);
 
+  // 自动刷新：只刷新 moeyo / fig-memo 的站点列表（不触发订阅检查），然后重新聚合时间流
+  const refreshSites = useCallback(async () => {
+    try {
+      if (useFigmemoStore.getState().featureEnabled) {
+        await refreshFigmemoSites().catch(() => {
+          /* 忽略 */
+        });
+      }
+      if (useMoeyoStore.getState().featureEnabled) {
+        await refreshMoeyoSites().catch(() => {
+          /* 忽略 */
+        });
+      }
+      const merged = await build();
+      groupsCache = merged;
+      setGroups(merged);
+      void resolveMissingMedia(merged);
+    } catch {
+      /* 忽略 */
+    }
+  }, [build, resolveMissingMedia]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      void refreshSites();
+    }, AUTO_REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [refreshSites]);
+
   const loadMore = useCallback(() => {
     setLoadingMore(true);
     // 模拟异步，避免快速连续触发
@@ -336,8 +390,21 @@ export const TimelinePage: React.FC = () => {
   }, [groups.length, visibleCount, loadMore]);
 
   // 滚动位置保存/恢复（滚动容器是外层 <main>，切标签会重建）
-  const getScroller = () =>
-    (rootRef.current?.closest('main') as HTMLElement | null) || null;
+  // 找到真正可滚动的祖先（App 外层 overflow-auto 的 div，而非 <main>）
+  const getScroller = (): HTMLElement | null => {
+    let el = rootRef.current?.parentElement ?? null;
+    while (el) {
+      const oy = window.getComputedStyle(el).overflowY;
+      if (
+        (oy === 'auto' || oy === 'scroll') &&
+        el.scrollHeight > el.clientHeight
+      ) {
+        return el;
+      }
+      el = el.parentElement;
+    }
+    return (document.scrollingElement as HTMLElement | null) || null;
+  };
   useEffect(() => {
     if (loading) return;
     const scroller = getScroller();
@@ -367,6 +434,28 @@ export const TimelinePage: React.FC = () => {
   };
 
   const visibleGroups = groups.slice(0, visibleCount);
+
+  // 拖日期刻度条 → 定位到该日期（必要时先展开渲染到该条，再滚动到它）
+  const jumpToDate = useCallback(
+    (ms: number) => {
+      if (groups.length === 0) return;
+      let idx = groups.findIndex((g) => new Date(g.tweetTime).getTime() <= ms);
+      if (idx < 0) idx = groups.length - 1;
+      const need = idx + 1;
+      if (need > visibleCount) {
+        visibleCountCache = need;
+        setVisibleCount(need);
+      }
+      requestAnimationFrame(() => {
+        const g = groups[idx];
+        const el = document.getElementById(
+          `tl-${g.kind || 'download'}-${g.postId}`,
+        );
+        el?.scrollIntoView({ block: 'start' });
+      });
+    },
+    [groups, visibleCount],
+  );
 
   return (
     <div ref={rootRef}>
@@ -410,8 +499,13 @@ export const TimelinePage: React.FC = () => {
         )}
       </section>
 
-      {/* 右下角圆形按钮：刷新 / 回到顶部 */}
-      <div className="fixed right-6 bottom-6 z-50 flex flex-col gap-3">
+      {/* 右下角圆形按钮：日期定位 / 刷新 / 回到顶部 */}
+      <div className="fixed right-6 bottom-6 z-50 flex flex-col items-end gap-3">
+        <TimelineDateScrubber
+          groups={groups}
+          rangeDays={rangeDays}
+          onJump={jumpToDate}
+        />
         <button
           type="button"
           title="刷新"
@@ -457,6 +551,156 @@ function dedupeMediaRecords(
   }
   return out;
 }
+
+/** 时间流「日期刻度条」：圆形按钮 → 点击展开为长条，按自定义保留天数做刻度，拖动定位到某天 */
+const TimelineDateScrubber: React.FC<{
+  groups: TimelineGroup[];
+  rangeDays: number;
+  onJump: (ms: number) => void;
+}> = ({ groups, rangeDays, onJump }) => {
+  const [open, setOpen] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const [frac, setFrac] = useState(0); // 默认手柄在顶部（最新，0 天前）
+  const [ball, setBall] = useState<{
+    x: number;
+    y: number;
+    text: string;
+  } | null>(null);
+  const barRef = useRef<HTMLDivElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+
+  // 点击空白处 → 取消本次跳转并缩回
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => {
+      if (btnRef.current && !btnRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setBall(null);
+      }
+    };
+    window.addEventListener('pointerdown', onDown);
+    return () => window.removeEventListener('pointerdown', onDown);
+  }, [open]);
+
+  const newest = useMemo(() => {
+    let m = 0;
+    for (const g of groups) {
+      const t = new Date(g.tweetTime).getTime();
+      if (t > m) m = t;
+    }
+    return m || Date.now();
+  }, [groups]);
+  const spanMs = Math.max(1, rangeDays) * 86400000;
+  const dateFor = (f: number) => newest - f * spanMs;
+
+  const ticks = useMemo(() => {
+    const step = rangeDays <= 7 ? 1 : rangeDays <= 15 ? 2 : 5;
+    const arr: number[] = [];
+    for (let d = 0; d <= rangeDays; d += step) arr.push(d);
+    if (arr[arr.length - 1] !== rangeDays) arr.push(rangeDays);
+    return arr;
+  }, [rangeDays]);
+
+  const FRAC_INSET = 12; // 上下留白（px）
+  const fracFromEvent = (clientY: number) => {
+    const el = barRef.current;
+    if (!el) return 1;
+    const rect = el.getBoundingClientRect();
+    const usable = Math.max(1, rect.height - FRAC_INSET * 2);
+    return Math.min(1, Math.max(0, (clientY - rect.top - FRAC_INSET) / usable));
+  };
+  const posOf = (f: number) => FRAC_INSET + f * (OPEN_HEIGHT - FRAC_INSET * 2);
+
+  if (groups.length === 0) return null;
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        title="按日期快速定位"
+        onClick={() => {
+          if (!open) {
+            setFrac(0);
+            setOpen(true);
+          }
+        }}
+        className="flex items-center justify-center self-end overflow-hidden rounded-full bg-white text-gray-600 shadow-lg ring-1 ring-black/5 transition-[height,width] duration-200 ease-out will-change-[height,width] hover:text-ant-color-primary"
+        style={{ width: open ? 58 : 44, height: open ? OPEN_HEIGHT : 44 }}
+      >
+        {open ? (
+          <div
+            ref={barRef}
+            className="relative h-full w-full cursor-ns-resize select-none"
+            onPointerDown={(e) => {
+              e.currentTarget.setPointerCapture?.(e.pointerId);
+              setDragging(true);
+              setFrac(fracFromEvent(e.clientY));
+              setBall(null);
+            }}
+            onPointerMove={(e) => {
+              const f = fracFromEvent(e.clientY);
+              if (dragging) setFrac(f);
+              setBall({
+                x: e.clientX,
+                y: e.clientY,
+                text: `${dayjs(dateFor(f)).format('MM-DD')}（${Math.round(
+                  f * rangeDays,
+                )} 天前）`,
+              });
+            }}
+            onPointerUp={(e) => {
+              const f = fracFromEvent(e.clientY);
+              setDragging(false);
+              setFrac(f);
+              setBall(null);
+              setOpen(false);
+              onJump(dateFor(f));
+            }}
+            onPointerLeave={() => setBall(null)}
+          >
+            {/* 竖线 */}
+            <div
+              className="absolute left-[18px] w-px bg-gray-200"
+              style={{ top: FRAC_INSET, bottom: FRAC_INSET }}
+            />
+            {/* 刻度：左侧竖线上小横线，右侧标数字 */}
+            {ticks.map((d) => {
+              const f = d / rangeDays;
+              return (
+                <div
+                  key={d}
+                  className="absolute left-[18px] -translate-y-1/2"
+                  style={{ top: posOf(f) }}
+                >
+                  <div className="h-px w-2.5 bg-gray-300" />
+                  <div className="absolute left-4 top-1/2 -translate-y-1/2 text-[10px] leading-none text-gray-400">
+                    {d}
+                  </div>
+                </div>
+              );
+            })}
+            {/* 当前手柄 */}
+            <div
+              className="absolute left-[18px] h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-ant-color-primary shadow"
+              style={{ top: posOf(frac) }}
+            />
+          </div>
+        ) : (
+          <CalendarOutlined className="text-lg" />
+        )}
+      </button>
+      {ball && (
+        <div
+          className="pointer-events-none fixed z-[1000] -translate-x-full -translate-y-1/2 whitespace-nowrap rounded-full bg-black/80 px-2 py-1 text-xs text-white"
+          style={{ left: ball.x - 10, top: ball.y }}
+        >
+          {ball.text}
+        </div>
+      )}
+    </>
+  );
+};
 
 const TimelineItem: React.FC<{
   group: TimelineGroup;
@@ -616,7 +860,10 @@ const TimelineItem: React.FC<{
         : undefined;
 
   return (
-    <li className="bg-white rounded-md border-[1px] p-4">
+    <li
+      id={`tl-${group.kind || 'download'}-${group.postId}`}
+      className="bg-white rounded-md border-[1px] p-4"
+    >
       <div className="flex items-start justify-between mb-2">
         <div className="flex items-start gap-2 min-w-0">
           <Avatar src={avatarSrc} size={36} className="shrink-0">

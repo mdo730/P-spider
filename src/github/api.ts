@@ -1,7 +1,8 @@
 import { request } from '../ipc/network';
-import * as R from 'ramda';
 
-const REPO_API_URL = 'https://api.github.com/repos/mdo730/P-spider/releases';
+// 用 releases.atom 订阅源而非 api.github.com：
+// 匿名调用 GitHub REST API 很容易触发限流（403 rate limit，代理出口 IP 常被共享）。
+const FEED_URL = 'https://github.com/mdo730/P-spider/releases.atom';
 
 export interface GithubRelease {
   tag_name: string;
@@ -9,54 +10,30 @@ export interface GithubRelease {
   prerelease: boolean;
 }
 
-export async function getLatestReleases(
-  pre = false,
-): Promise<GithubRelease | null> {
-  let url = REPO_API_URL;
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
-    const resp = await request({
-      method: 'GET',
-      responseType: 'text',
-      url,
-      headers: {
-        'User-Agent': 'P-Spider',
-      },
-    });
+/** 取最新 release（atom feed 第一条，按时间倒序） */
+export async function getLatestReleases(): Promise<GithubRelease | null> {
+  const resp = await request({
+    method: 'GET',
+    responseType: 'text',
+    url: FEED_URL,
+    headers: {
+      'User-Agent': 'P-Spider',
+      Accept: 'application/atom+xml',
+    },
+  });
 
-    if (resp.status !== 200) {
-      throw new Error('无法获取最新软件版本，请稍后再试。');
-    }
-
-    const body = JSON.parse(resp.body);
-
-    if (!body[0]) {
-      throw new Error('无法获取最新软件版本，请稍后再试。');
-    }
-
-    if (pre) {
-      return body[0] || null;
-    }
-
-    const latest = body.find((item: any) => !item.prerelease);
-
-    if (latest) {
-      return latest;
-    }
-
-    if (!resp.headers.link || resp.headers.link.length === 0) {
-      return null;
-    }
-
-    const links = R.fromPairs(
-      resp.headers.link[0].split(', ').map((item: string) => {
-        const [link, rel] = item.split('; rel=');
-        return [rel.replace(/"(.+)"/, '$1'), link.replace(/<(.+)>/, '$1')];
-      }),
-    );
-
-    if (!links.next) return null;
-
-    url = links.next;
+  if (resp.status !== 200) {
+    throw new Error('无法获取最新软件版本，请稍后再试。');
   }
+
+  const body = String(resp.body || '');
+  // 第一条 entry 即最新
+  const m = /<entry>[\s\S]*?<link[^>]*rel="alternate"[^>]*href="([^"]+)"/.exec(
+    body,
+  );
+  if (!m) return null;
+  const html_url = m[1];
+  const tm = html_url.match(/\/releases\/tag\/([^/?#]+)/);
+  if (!tm) return null;
+  return { tag_name: tm[1], html_url, prerelease: false };
 }

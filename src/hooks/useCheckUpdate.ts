@@ -6,7 +6,7 @@ import { open } from '@tauri-apps/api/shell';
 
 export function useCheckUpdate() {
   return useLockFn(async () => {
-    const release = await getLatestReleases(false);
+    const release = await getLatestReleases();
     if (!release) {
       throw new Error('无法获取最新软件版本');
     }

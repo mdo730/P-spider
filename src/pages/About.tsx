@@ -4,10 +4,13 @@ import { PageHeader } from '../components/PageHeader';
 import Logo from '../../src-tauri/icons/128x128.png';
 import { useCheckUpdate } from '../hooks/useCheckUpdate';
 import { message } from '@tauri-apps/api/dialog';
+import { useUpdateStore } from '../stores/update';
 
 export const About: React.FC = () => {
   const checkForUpdate = useCheckUpdate();
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
+  const hasUpdate = useUpdateStore((s) => s.hasUpdate);
+  const latestVersion = useUpdateStore((s) => s.latestVersion);
 
   const onCheckUpdate = async () => {
     setIsCheckingUpdate(true);
@@ -46,6 +49,11 @@ export const About: React.FC = () => {
           >
             {isCheckingUpdate ? '请稍候...' : '检查更新'}
           </button>
+          {hasUpdate && (
+            <span className="ml-2 text-red-500">
+              有新版本 v{latestVersion} 可用
+            </span>
+          )}
         </li>
         <li>
           <strong>作者：</strong>

@@ -6,14 +6,17 @@ import { Route } from '../interfaces/Route';
 import { useRouteStore } from '../stores/route';
 import { useFigmemoStore } from '../stores/figmemo';
 import { useMoeyoStore } from '../stores/moeyo';
+import { useUpdateStore } from '../stores/update';
 import { Account } from './Account';
 
 interface SideBarItemProps {
   route: Route;
   active: boolean;
+  /** 右上角红点（如有新版） */
+  dot?: boolean;
 }
 
-const Item: React.FC<SideBarItemProps> = ({ route, active }) => {
+const Item: React.FC<SideBarItemProps> = ({ route, active, dot }) => {
   const setRoute = useRouteStore((state) => state.setRoute);
   return (
     <li className="text-ant-color-white pr-2">
@@ -30,7 +33,15 @@ const Item: React.FC<SideBarItemProps> = ({ route, active }) => {
         }}
       >
         <span className="float-left">{route.icon}</span>
-        <span>{route.name}</span>
+        <span className="relative">
+          {route.name}
+          {dot && (
+            <span
+              aria-label="有可用更新"
+              className="absolute -right-2.5 -top-1 h-2 w-2 rounded-full bg-red-500"
+            />
+          )}
+        </span>
       </button>
     </li>
   );
@@ -40,6 +51,7 @@ export const SideBar: React.FC = () => {
   const current = useRouteStore((state) => state.route);
   const figmemoEnabled = useFigmemoStore((s) => s.featureEnabled);
   const moeyoEnabled = useMoeyoStore((s) => s.featureEnabled);
+  const hasUpdate = useUpdateStore((s) => s.hasUpdate);
 
   if (!current) return null;
 
@@ -62,6 +74,7 @@ export const SideBar: React.FC = () => {
               key={route.id}
               route={route}
               active={current.id === route.id}
+              dot={route.id === 'about' && hasUpdate}
             />
           ))}
         </ul>
