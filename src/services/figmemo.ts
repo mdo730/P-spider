@@ -10,6 +10,7 @@ import { getMediaKind, isMediaFile, mapLimit } from '../utils/library';
 import { unicodeFilenamify } from '../utils/unicode';
 import { HpoiMatch } from './hpoi';
 import hpoiSeedData from '../data/hpoi-matches.json';
+import { FIGMEMO_MANUFACTURER_ALIAS } from './figmemo-manufacturer-alias';
 import figmemoMetaSeedData from '../data/figmemo-meta-seed.json';
 import figmemoSiteSeedData from '../data/figmemo-site-seed.json';
 
@@ -437,15 +438,18 @@ export async function setArticleTags(
   // 同步进标签树：差分出要挂/摘的标签
   const relPath = figmemoRelDir(post.title, post.date);
   const groups = new Set([...Object.keys(prev), ...Object.keys(clean)]);
-  const rootMap = useFigmemoTagsStore
-    .getState()
-    .addTagsBatch([...groups].map((g) => ({ name: g, parentId: null })));
+  const rootMap = useFigmemoTagsStore.getState().addTagsBatch(
+    [...groups].map((g) => ({ name: g, parentId: null })),
+    'user',
+  );
   const childSpecs = [...groups].flatMap((g) => {
     const pid = rootMap[tagKeyOf(null, g)];
     if (!pid) return [];
     return (clean[g] || []).map((v) => ({ name: v, parentId: pid }));
   });
-  const childMap = useFigmemoTagsStore.getState().addTagsBatch(childSpecs);
+  const childMap = useFigmemoTagsStore
+    .getState()
+    .addTagsBatch(childSpecs, 'user');
 
   const nextIds = new Set<string>();
   for (const g of Object.keys(clean)) {
@@ -576,12 +580,25 @@ export async function getHpoiPostIndex(): Promise<
   return map;
 }
 
-/** 从标题猜厂商：取第一个「之前的文本（如 `BINDing「…」` → `BINDing`） */
+/** 不作厂商的写法（文库/栏目等）：命中则不打厂商标签 */
+const MANUFACTURER_DROP = new Set([
+  'メディアワークス',
+  'アスキー・メディアワークス',
+]);
+
+/** 从标题猜厂商：取第一个「之前的文本（如 `BINDing「…」` → `BINDing`），并归一为 hpoi 中文规范名 */
 function guessManufacturer(title: string): string {
   const idx = title.indexOf('「');
-  const prefix = (idx > 0 ? title.slice(0, idx) : title).trim();
+  // 没有「 就不是「厂商「商品名」」格式 → 不猜（避免把展会/栏目名当厂商）
+  if (idx <= 0) return '';
+  const prefix = title.slice(0, idx).trim();
   if (!prefix || prefix.length > 30) return '';
-  return prefix;
+  // 以【…】开头的是限定/贩卖说明等噪音，不是厂商
+  if (prefix.startsWith('【')) return '';
+  if (MANUFACTURER_DROP.has(prefix)) return '';
+  const name = FIGMEMO_MANUFACTURER_ALIAS[prefix] ?? prefix;
+  if (MANUFACTURER_DROP.has(name)) return '';
+  return name;
 }
 
 /** 在标签树中按「根名 + 子名」查标签 id */
@@ -600,6 +617,90 @@ const tagKeyOf = (pid: string | null, name: string) =>
   `${pid ?? ''}\u0000${name}`;
 
 /**
+ * 厂商标签一次性归一（升级兼容）：
+ * 1.4.x 的厂商标签是按标题原文直接生成的（还包含无「」的垃圾词条），
+ * 1.5 起才归一为 hpoi 规范名。若不处理，老库会堆满重复/垃圾标签。
+ * 做法：清空「厂商」子树里自动标签的 paths → 重新同步 → 删掉没被用到的。
+ */
+const MAKER_NORMALIZE_VERSION = 1;
+
+/** 「厂商」根及其全部子孙的标签 id */
+function makerSubtreeIds(): Set<string> {
+  const tags = useFigmemoTagsStore.getState().tags;
+  const root = tags.find(
+    (t) => (t.parentId ?? null) === null && t.name === MANUFACTURER_ROOT,
+  );
+  const out = new Set<string>();
+  if (!root) return out;
+  const childrenOf = new Map<string, string[]>();
+  for (const t of tags) {
+    const pid = t.parentId ?? null;
+    if (!pid) continue;
+    const arr = childrenOf.get(pid);
+    if (arr) arr.push(t.id);
+    else childrenOf.set(pid, [t.id]);
+  }
+  const stack = [root.id];
+  while (stack.length) {
+    const cur = stack.pop()!;
+    if (out.has(cur)) continue;
+    out.add(cur);
+    for (const c of childrenOf.get(cur) || []) stack.push(c);
+  }
+  return out;
+}
+
+/** 清空「厂商」子树里自动标签的 paths（用户手动标签不动） */
+function clearMakerPaths(): void {
+  const ids = makerSubtreeIds();
+  if (ids.size === 0) return;
+  const store = useFigmemoTagsStore.getState();
+  let changed = false;
+  const next = store.tags.map((t) => {
+    if (t.origin === 'user' || !t.paths.length || !ids.has(t.id)) return t;
+    changed = true;
+    return { ...t, paths: [] };
+  });
+  if (changed) useFigmemoTagsStore.setState({ tags: next });
+}
+
+/** 删除「厂商」根下没有文章挂着的自动标签（用户手动标签不动）；返回删除数 */
+function pruneEmptyMakerTags(): number {
+  const store = useFigmemoTagsStore.getState();
+  const root = store.tags.find(
+    (t) => (t.parentId ?? null) === null && t.name === MANUFACTURER_ROOT,
+  );
+  if (!root) return 0;
+  const dead = store.tags.filter(
+    (t) =>
+      (t.parentId ?? null) === root.id &&
+      t.origin !== 'user' &&
+      !t.paths.length,
+  );
+  if (!dead.length) return 0;
+  const deadIds = new Set(dead.map((t) => t.id));
+  useFigmemoTagsStore.setState({
+    tags: store.tags.filter((t) => !deadIds.has(t.id)),
+  });
+  return dead.length;
+}
+
+function needMakerNormalize(): boolean {
+  return (
+    (useFigmemoTagsStore.getState().makerNormalized ?? 0) <
+    MAKER_NORMALIZE_VERSION
+  );
+}
+
+/** 手动「重建标签树」：强制再跑一次厂商归一，返回清理掉的标签数 */
+export async function rebuildFigmemoMakerTags(): Promise<number> {
+  const before = makerSubtreeIds().size;
+  useFigmemoTagsStore.setState({ makerNormalized: 0 });
+  await loadCachedSitePosts();
+  return before - makerSubtreeIds().size;
+}
+
+/**
  * 由**站点文章数据**生成标签树（分类 / 厂商 / 年份 / 文章级标签），
  * 覆盖全部文章（含未下载）。一次写盘生成关系。
  */
@@ -608,6 +709,8 @@ async function syncSiteTags(
   cats: Map<number, FigmemoCategory>,
   metaRecords: FigmemoMeta[],
 ): Promise<number> {
+  const normalize = needMakerNormalize();
+  if (normalize) clearMakerPaths();
   const namesById = new Map<number, string>();
   for (const c of cats.values()) namesById.set(c.id, c.name);
   for (const r of metaRecords) {
@@ -730,6 +833,18 @@ async function syncSiteTags(
     }
   }
   useFigmemoTagsStore.getState().applyFolderTags(relEntries);
+
+  if (normalize) {
+    if (entries.length > 0) {
+      const removed = pruneEmptyMakerTags();
+      useFigmemoTagsStore.setState({
+        makerNormalized: MAKER_NORMALIZE_VERSION,
+      });
+      log().info('厂商标签归一完成', { entries: entries.length, removed });
+    } else {
+      log().warn('厂商标签归一：无文章数据，跳过清理');
+    }
+  }
   return tagged;
 }
 
@@ -920,6 +1035,8 @@ export interface FigmemoListItem {
   articleTags?: Record<string, string[]>;
   /** 已确认的 hpoi 词条关联快照 */
   hpoi?: HpoiMatch;
+  /** 用户显式解除过 hpoi 关联（自动匹配不再回填） */
+  hpoiRemoved?: boolean;
 }
 
 /** 本地文件夹的图片数 + 首图（会话缓存，避免重复 readDir） */
@@ -983,6 +1100,7 @@ export async function listLocalPosts(
       coverPath: localInfo?.first,
       articleTags: r.articleTags,
       hpoi: resolveHpoi(r, r.postId),
+      hpoiRemoved: r.hpoiRemoved === true,
     };
     onEach?.(item);
     return item;
@@ -1179,6 +1297,7 @@ async function buildItems(
       coverUrl,
       articleTags: meta?.articleTags,
       hpoi: resolveHpoi(meta, p.id),
+      hpoiRemoved: meta?.hpoiRemoved === true,
     };
   });
 }

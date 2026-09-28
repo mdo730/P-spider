@@ -1,7 +1,7 @@
 import { nanoid } from 'nanoid';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { createTauriFileStorage } from './persist/tauri-file-storage';
+import { createSplitTagsStorage } from './persist/split-tags-storage';
 
 /** 本地库标签（多级树） */
 export interface LibraryTag {
@@ -13,6 +13,8 @@ export interface LibraryTag {
   paths: string[];
   /** 同级排序 */
   sortOrder: number;
+  /** auto = 站点同步生成；user = 用户手动创建（分文件存储） */
+  origin?: 'auto' | 'user';
 }
 
 export interface LibraryStore {
@@ -38,6 +40,7 @@ export interface LibraryStore {
   /** 批量取/建标签（已存在则复用），返回 `parentId\u0000name` → id */
   addTagsBatch: (
     specs: { name: string; parentId: string | null }[],
+    origin?: 'auto' | 'user',
   ) => Record<string, string>;
   /** 批量设置文件夹→标签关系（一次写入，取并集） */
   applyFolderTags: (entries: { relPath: string; tagIds: string[] }[]) => void;
@@ -90,7 +93,14 @@ export const useMoeyoTagsStore = create(
         set({
           tags: [
             ...get().tags,
-            { id, name: trimmed, parentId: pid, paths: [], sortOrder },
+            {
+              id,
+              name: trimmed,
+              parentId: pid,
+              paths: [],
+              sortOrder,
+              origin: 'user',
+            },
           ],
         });
         return id;
@@ -184,7 +194,7 @@ export const useMoeyoTagsStore = create(
           .tags.filter((t) => t.paths.includes(relPath))
           .map((t) => t.id),
 
-      addTagsBatch: (specs) => {
+      addTagsBatch: (specs, origin = 'auto') => {
         const tagKey = (pid: string | null, name: string) =>
           `${pid ?? ''}\u0000${name}`;
         const tags = get().tags;
@@ -211,7 +221,14 @@ export const useMoeyoTagsStore = create(
           const id = nanoid();
           const sortOrder = (nextOrder.get(pid) ?? -1) + 1;
           nextOrder.set(pid, sortOrder);
-          created.push({ id, name, parentId: pid, paths: [], sortOrder });
+          created.push({
+            id,
+            name,
+            parentId: pid,
+            paths: [],
+            sortOrder,
+            origin,
+          });
           byKey.set(k, id);
           result[k] = id;
         }
@@ -263,8 +280,8 @@ export const useMoeyoTagsStore = create(
     }),
     {
       name: 'moeyo-tags',
-      storage: createTauriFileStorage(),
-      version: 2,
+      storage: createSplitTagsStorage<LibraryStore>('moeyo-tags'),
+      version: 3,
       migrate(state: any, version) {
         if (version < 2) {
           state.tags = (state.categories || []).map(

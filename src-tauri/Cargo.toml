@@ -1,6 +1,6 @@
 [package]
 name = "p-spider"
-version = "1.4.3"
+version = "1.5.0"
 description = "A spider for P"
 authors = ["you"]
 license = ""
@@ -25,6 +25,8 @@ tiny_http = "0.12"
 percent-encoding = "2"
 # 缩略图在 Rust 端生成（解码/缩放/编码），避免占用 WebView 主线程导致白屏/OOM
 image = { version = "0.24", default-features = false, features = ["jpeg", "png", "webp", "gif", "bmp"] }
+# 用户数据备份：导出/导入 zip（仅 deflate，避免引入 bzip2/zstd 等 C 依赖）
+zip = { version = "0.6", default-features = false, features = ["deflate"] }
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem

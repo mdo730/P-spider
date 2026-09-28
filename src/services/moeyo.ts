@@ -651,10 +651,11 @@ async function syncSiteTags(
     }
   }
   // 标签关系「只增不减」会让旧规则残留 → 先清空所有标签的 paths 再重建
+  // 只清自动标签；用户手动标签的关联一律不动
   {
     const store = useMoeyoTagsStore.getState();
     const cleared = store.tags.map((t) =>
-      t.paths.length ? { ...t, paths: [] } : t,
+      t.origin === 'user' || !t.paths.length ? t : { ...t, paths: [] },
     );
     useMoeyoTagsStore.setState({ tags: cleared });
   }
@@ -669,6 +670,7 @@ async function syncSiteTags(
     ) => {
       const byParent = new Map<string, string[]>();
       for (const t of store.tags) {
+        if (t.origin === 'user') continue;
         const pid = t.parentId ?? null;
         if (!pid) continue;
         const arr = byParent.get(pid);

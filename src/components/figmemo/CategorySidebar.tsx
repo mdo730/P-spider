@@ -1,11 +1,5 @@
 /* eslint-disable react/prop-types */
-import {
-  DeleteOutlined,
-  EditOutlined,
-  HeartFilled,
-  HeartOutlined,
-  PlusOutlined,
-} from '@ant-design/icons';
+import { DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
 import {
   App,
   Button,
@@ -31,9 +25,9 @@ import {
 interface Props {
   filter: LibraryFilter;
   counts: { all: number; unclassified: number; byId: Record<string, number> };
-  /** 已收藏文章数（当前列表范围） */
-  favoriteCount: number;
   onChange: (filter: LibraryFilter) => void;
+  /** 不在树里显示的分类根名（这些已挪到顶部下拉） */
+  hideRoots?: string[];
 }
 
 function toTreeData(nodes: TagNode[]): DataNode[] {
@@ -48,8 +42,8 @@ function toTreeData(nodes: TagNode[]): DataNode[] {
 export const CategorySidebar: React.FC<Props> = ({
   filter,
   counts,
-  favoriteCount,
   onChange,
+  hideRoots = [],
 }) => {
   const { modal, message } = App.useApp();
   const tags = useFigmemoTagsStore((s) => s.tags);
@@ -59,7 +53,10 @@ export const CategorySidebar: React.FC<Props> = ({
   const moveTag = useFigmemoTagsStore((s) => s.moveTag);
 
   const index = useMemo(() => buildTagIndex(tags), [tags]);
-  const treeData = useMemo(() => toTreeData(index.roots), [index]);
+  const treeData = useMemo(
+    () => toTreeData(index.roots.filter((r) => !hideRoots.includes(r.name))),
+    [index, hideRoots],
+  );
 
   const [editModal, setEditModal] = useState<
     | { mode: 'create'; parentId: string | null }
@@ -244,20 +241,6 @@ export const CategorySidebar: React.FC<Props> = ({
         >
           未打标签{' '}
           <span className="opacity-60 ml-1">{counts.unclassified}</span>
-        </Button>
-        <Button
-          size="small"
-          type={filter.favoritesOnly ? 'primary' : 'default'}
-          icon={
-            filter.favoritesOnly ? (
-              <HeartFilled className="text-rose-500" />
-            ) : (
-              <HeartOutlined />
-            )
-          }
-          onClick={() => setFilter({ favoritesOnly: !filter.favoritesOnly })}
-        >
-          收藏 <span className="opacity-60 ml-1">{favoriteCount}</span>
         </Button>
       </div>
 

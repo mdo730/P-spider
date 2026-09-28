@@ -1,6 +1,7 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod backup;
 mod fsutil;
 mod image_search;
 mod media_proxy;
@@ -61,11 +62,14 @@ fn main() {
           network::set_auto_start,
           network::get_auto_start,
           network::quit_app,
+          network::relaunch_app,
           media_proxy::media_proxy_port,
           image_search::reverse_image_search,
           image_search::take_image_search_arg,
           image_search::take_pending_image_search,
           image_search::set_image_search_explorer_menu,
+          backup::export_user_backup,
+          backup::import_user_backup,
           fsutil::get_path_mtimes,
           fsutil::get_folder_stats,
           fsutil::generate_thumbnail,

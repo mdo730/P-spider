@@ -35,17 +35,24 @@ import { LibraryFolderStats, formatBytes } from '../utils/library';
 import { useLibraryTraceStore } from '../stores/library-trace';
 import { useThumbCacheStore } from '../stores/library-thumb-cache';
 import { useFigmemoStore } from '../stores/figmemo';
-import { FigmemoCategory, fetchCategories } from '../services/figmemo';
+import {
+  FigmemoCategory,
+  fetchCategories,
+  rebuildFigmemoMakerTags,
+} from '../services/figmemo';
 import { useMoeyoStore } from '../stores/moeyo';
 import {
   MoeyoCategory,
   fetchCategories as fetchMoeyoCategories,
 } from '../services/moeyo';
 import dayjs, { Dayjs } from 'dayjs';
+import { exportUserBackup, importUserBackup } from '../services/user-backup';
 
 export const Settings: React.FC = () => {
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const { exportSubscriptions, importSubscriptions } = useSubscriptionStore();
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [rebuildingTags, setRebuildingTags] = useState(false);
   const [cacheStats, setCacheStats] = useState<LibraryFolderStats | null>(null);
   const trace = useLibraryTraceStore();
   const thumbCache = useThumbCacheStore();
@@ -225,6 +232,37 @@ export const Settings: React.FC = () => {
       message.error(`导入失败：${err?.message || '未知原因'}`);
     }
   };
+
+  const onExportBackup = async () => {
+    setBackupBusy(true);
+    try {
+      const dest = await exportUserBackup();
+      if (dest) message.success('用户数据已导出');
+    } catch (err: any) {
+      message.error(`导出失败：${err?.message || '未知原因'}`);
+    } finally {
+      setBackupBusy(false);
+    }
+  };
+
+  const onImportBackup = async () => {
+    setBackupBusy(true);
+    try {
+      const res = await importUserBackup();
+      if (!res) return;
+      modal.confirm({
+        title: '导入完成，需重启生效',
+        content: `已恢复 ${res.restored.length} 个数据文件。原数据已备份为 *.pre-import。是否立即重启？`,
+        okText: '立即重启',
+        cancelText: '稍后手动重启',
+        onOk: () => invoke('relaunch_app'),
+      });
+    } catch (err: any) {
+      message.error(`导入失败：${err?.message || '未知原因'}`);
+    } finally {
+      setBackupBusy(false);
+    }
+  };
   return (
     <>
       <PageHeader />
@@ -237,6 +275,23 @@ export const Settings: React.FC = () => {
         </div>
         <p className="text-sm text-gray-400 mt-2">
           导出为 JSON 文件；导入为追加模式，已存在的订阅会自动跳过，不会覆盖。
+        </p>
+      </Section>
+      <Section title="用户数据备份" name="userBackup">
+        <div className="flex items-center space-x-2">
+          <Button type="primary" loading={backupBusy} onClick={onExportBackup}>
+            导出用户数据
+          </Button>
+          <Button loading={backupBusy} onClick={onImportBackup}>
+            导入用户数据
+          </Button>
+        </div>
+        <p className="text-sm text-gray-400 mt-2">
+          导出为 zip 压缩包，包含：设置、订阅、fig-memo/moeyo
+          的标签与收藏、本地库标签、转贴记录等（不含下载历史与站点缓存）。
+          导入识别 zip，逐个覆盖对应数据文件，导入后
+          <span className="text-gray-500">需重启应用生效</span>
+          （原文件会保留为 *.pre-import 备份）。
         </p>
       </Section>
       <Section title="下载" name="download" titleIcon={<DownloadOutlined />}>
@@ -592,6 +647,36 @@ export const Settings: React.FC = () => {
           量大）。标签（分类/厂商/年份/姿势·发型·体型）由站点数据**自动生成**，覆盖全部文章（含未下载），打开
           fig-memo 选项卡时即会刷新。
         </p>
+        <div className="mt-3 pt-3 border-t-[1px] border-gray-100">
+          <Button
+            loading={rebuildingTags}
+            onClick={() => {
+              modal.confirm({
+                title: '重建标签树',
+                content:
+                  '会按当前站点数据重算「厂商」等自动标签（清空后重挂），并删除不再使用的自动标签。用户手动标签不受影响。是否继续？',
+                okText: '开始重建',
+                cancelText: '取消',
+                onOk: async () => {
+                  setRebuildingTags(true);
+                  try {
+                    const removed = await rebuildFigmemoMakerTags();
+                    message.success(`重建完成，清理了 ${removed} 个冗余标签`);
+                  } catch (err: any) {
+                    message.error(`重建失败：${err?.message || '未知原因'}`);
+                  } finally {
+                    setRebuildingTags(false);
+                  }
+                },
+              });
+            }}
+          >
+            重建标签树
+          </Button>
+          <span className="ml-2 text-sm text-gray-400">
+            升级/标签错乱时可用（重算自动标签、清理冗余）
+          </span>
+        </div>
       </Section>
       <Section title="moeyo（手办资讯）" name="moeyo">
         <div className="flex items-center gap-2 mb-3">

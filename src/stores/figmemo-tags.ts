@@ -1,7 +1,7 @@
 import { nanoid } from 'nanoid';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { createTauriFileStorage } from './persist/tauri-file-storage';
+import { createSplitTagsStorage } from './persist/split-tags-storage';
 
 /** 本地库标签（多级树） */
 export interface LibraryTag {
@@ -13,12 +13,19 @@ export interface LibraryTag {
   paths: string[];
   /** 同级排序 */
   sortOrder: number;
+  /**
+   * 来源：auto = 站点同步生成；user = 用户手动创建。
+   * 分别持久化到 figmemo-tags.json / figmemo-tags-user.json，同步不会动 user。
+   */
+  origin?: 'auto' | 'user';
 }
 
 export interface LibraryStore {
   tags: LibraryTag[];
   /** 自定义缩略图：一级文件夹名 → 用作封面的图片绝对路径 */
   folderCovers: Record<string, string>;
+  /** 一次性迁移标记：厂商标签已归一的版本（0 = 未归一） */
+  makerNormalized?: number;
 
   /** 新建标签（parentId 为 null 表示根标签）；同级重名报错 */
   addTag: (name: string, parentId?: string | null) => string;
@@ -38,6 +45,7 @@ export interface LibraryStore {
   /** 批量取/建标签（已存在则复用），返回 `parentId\u0000name` → id */
   addTagsBatch: (
     specs: { name: string; parentId: string | null }[],
+    origin?: 'auto' | 'user',
   ) => Record<string, string>;
   /** 批量设置文件夹→标签关系（一次写入，取并集） */
   applyFolderTags: (entries: { relPath: string; tagIds: string[] }[]) => void;
@@ -74,6 +82,7 @@ export const useFigmemoTagsStore = create(
     (set, get) => ({
       tags: [],
       folderCovers: {},
+      makerNormalized: 0,
 
       addTag: (name, parentId = null) => {
         const trimmed = name.trim();
@@ -90,7 +99,14 @@ export const useFigmemoTagsStore = create(
         set({
           tags: [
             ...get().tags,
-            { id, name: trimmed, parentId: pid, paths: [], sortOrder },
+            {
+              id,
+              name: trimmed,
+              parentId: pid,
+              paths: [],
+              sortOrder,
+              origin: 'user',
+            },
           ],
         });
         return id;
@@ -184,7 +200,7 @@ export const useFigmemoTagsStore = create(
           .tags.filter((t) => t.paths.includes(relPath))
           .map((t) => t.id),
 
-      addTagsBatch: (specs) => {
+      addTagsBatch: (specs, origin = 'auto') => {
         const tagKey = (pid: string | null, name: string) =>
           `${pid ?? ''}\u0000${name}`;
         const tags = get().tags;
@@ -211,7 +227,14 @@ export const useFigmemoTagsStore = create(
           const id = nanoid();
           const sortOrder = (nextOrder.get(pid) ?? -1) + 1;
           nextOrder.set(pid, sortOrder);
-          created.push({ id, name, parentId: pid, paths: [], sortOrder });
+          created.push({
+            id,
+            name,
+            parentId: pid,
+            paths: [],
+            sortOrder,
+            origin,
+          });
           byKey.set(k, id);
           result[k] = id;
         }
@@ -263,8 +286,8 @@ export const useFigmemoTagsStore = create(
     }),
     {
       name: 'figmemo-tags',
-      storage: createTauriFileStorage(),
-      version: 2,
+      storage: createSplitTagsStorage<LibraryStore>('figmemo-tags'),
+      version: 3,
       migrate(state: any, version) {
         if (version < 2) {
           state.tags = (state.categories || []).map(

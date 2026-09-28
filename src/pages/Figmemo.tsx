@@ -36,6 +36,7 @@ import React, {
   useState,
 } from 'react';
 import { CategorySidebar } from '../components/figmemo/CategorySidebar';
+import { autoMatchHpoi } from '../services/hpoi-automatch';
 import { PageHeader } from '../components/PageHeader';
 import { PlatformMedia } from '../platforms';
 import {
@@ -53,6 +54,7 @@ import {
 import { useFigmemoFavoritesStore } from '../stores/figmemo-favorites';
 import { useFigmemoTagsStore } from '../stores/figmemo-tags';
 import { useRouteStore } from '../stores/route';
+import { ROUTES } from '../constants/routes';
 import {
   DEFAULT_LIBRARY_FILTER,
   LibraryFilter,
@@ -62,7 +64,9 @@ import {
   computeTagCounts,
   folderManualTagIds,
   matchesFilter,
+  normalizeRel,
   scanDirectory,
+  tagCoveredSet,
 } from '../utils/library';
 import { openUrl } from '../utils/shell';
 import { handleImageMenuKey, imageMenuItems } from '../utils/image-menu';
@@ -70,6 +74,7 @@ import { useTextSelectionMenu } from '../hooks/useTextSelectionMenu';
 import { LocalThumb } from '../components/library/LocalThumb';
 import hpoiIcon from '../assets/platform-icons/hpoi.png';
 import { HpoiMatchPanel } from '../components/figmemo/HpoiMatchPanel';
+import { MakerOption, MakerPicker } from '../components/figmemo/MakerPicker';
 import { HpoiMatch, HPOI_MATCH_CATEGORY_IDS } from '../services/hpoi';
 
 interface PostDetail {
@@ -84,8 +89,6 @@ const TAG_GROUPS: { key: string; options: string[] }[] = [
   { key: '发型', options: ['长发', '短发', '特殊发型'] },
   { key: '体型', options: ['幼女', '成女', '熟女'] },
 ];
-
-const EMPTY_COUNTS: TagCounts = { all: 0, unclassified: 0, byId: {} };
 
 /**
  * 用 fig-memo 文章标题/正文拼出 Hpoi 搜索关键词。
@@ -128,6 +131,12 @@ type FigmemoSort = 'date-desc' | 'date-asc' | 'rating-desc' | 'rating-asc';
 /** 会话级列表 UI 状态：切页 / 切标签页回来时保持原样（筛选、页码、滚动位置） */
 interface FigmemoListUi {
   filter: LibraryFilter;
+  /** 顶部下拉：分类/厂商/年份 标签 id（null=全部） */
+  catId: string | null;
+  makerId: string | null;
+  yearId: string | null;
+  /** 标签面板是否展开（默认折叠） */
+  sidebarOpen: boolean;
   keyword: string;
   sort: FigmemoSort;
   page: number;
@@ -135,6 +144,10 @@ interface FigmemoListUi {
 }
 const listUiCache: FigmemoListUi = {
   filter: DEFAULT_LIBRARY_FILTER,
+  catId: null,
+  makerId: null,
+  yearId: null,
+  sidebarOpen: false,
   keyword: '',
   sort: 'date-desc',
   page: 1,
@@ -158,6 +171,8 @@ export const FigmemoPage: React.FC = () => {
   const index = useMemo(() => buildTagIndex(tags), [tags]);
   const favoriteIds = useFigmemoFavoritesStore((s) => s.ids);
   const favSet = useMemo(() => new Set(favoriteIds), [favoriteIds]);
+  // 导航历史栈长度（>0 = 当前文章由“跳转”进入，右下角显示圆形「返回列表」）
+  const historyLen = useRouteStore((s) => s.history.length);
 
   // 可标注的分类（大类）及其候选小类：取自标签树中「非自动根」的根标签 + 其子标签；
   // 预设组（姿势/发型/体型）始终展示，历史自定义值（如 跪姿）自动纳入。
@@ -197,6 +212,10 @@ export const FigmemoPage: React.FC = () => {
   }, [tags]);
 
   const [filter, setFilter] = useState<LibraryFilter>(listUiCache.filter);
+  const [catId, setCatId] = useState<string | null>(listUiCache.catId);
+  const [makerId, setMakerId] = useState<string | null>(listUiCache.makerId);
+  const [yearId, setYearId] = useState<string | null>(listUiCache.yearId);
+  const [sidebarOpen, setSidebarOpen] = useState(listUiCache.sidebarOpen);
   const [items, setItems] = useState<FigmemoListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [keyword, setKeyword] = useState(listUiCache.keyword);
@@ -208,10 +227,37 @@ export const FigmemoPage: React.FC = () => {
   // 持久化列表 UI 状态（切页/切标签页回来保持原样）
   useEffect(() => {
     listUiCache.filter = filter;
+    listUiCache.catId = catId;
+    listUiCache.makerId = makerId;
+    listUiCache.yearId = yearId;
+    listUiCache.sidebarOpen = sidebarOpen;
     listUiCache.keyword = keyword;
     listUiCache.sort = sort;
     listUiCache.page = page;
-  }, [filter, keyword, sort, page]);
+  }, [filter, catId, makerId, yearId, sidebarOpen, keyword, sort, page]);
+
+  // 新文章加载后：后台自动匹配 Hpoi（仅白名单分类、未关联的文章）
+  useEffect(() => {
+    if (items.length === 0) return;
+    let cancelled = false;
+    autoMatchHpoi(items, (postId, hpoi) => {
+      if (cancelled) return;
+      setItems((prev) =>
+        prev.map((it) => (it.postId === postId ? { ...it, hpoi } : it)),
+      );
+    })
+      .then((n) => {
+        if (!cancelled && n > 0) {
+          message.success(`已后台自动匹配 ${n} 篇 Hpoi`);
+        }
+      })
+      .catch(() => {
+        // 忽略
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [items.length]);
 
   // 筛选 / 搜索 / 排序变化 → 回到第 1 页（首次挂载不重置，保留缓存页码）
   useEffect(() => {
@@ -483,7 +529,9 @@ export const FigmemoPage: React.FC = () => {
       setNewGroup('');
       return;
     }
-    useFigmemoTagsStore.getState().addTagsBatch([{ name, parentId: null }]);
+    useFigmemoTagsStore
+      .getState()
+      .addTagsBatch([{ name, parentId: null }], 'user');
     setNewGroup('');
     setPanelOpen(true);
   };
@@ -510,8 +558,6 @@ export const FigmemoPage: React.FC = () => {
     }
   };
 
-  const hasSelected = selected != null;
-
   const tagTotal = selected
     ? Object.values(selected.articleTags || {}).reduce(
         (n, vs) => n + (vs?.length || 0),
@@ -520,20 +566,52 @@ export const FigmemoPage: React.FC = () => {
     : 0;
   const selectedIsFav = selected ? favSet.has(String(selected.postId)) : false;
 
-  // 详情页用不到列表统计/筛选，跳过重活（此前每次点标签都会全量重算 → 卡顿）
+  // 始终计算并缓存（不随“进入/退出详情”重算）——否则返回列表时会全量重算导致卡顿
   const counts = useMemo<TagCounts>(
-    () =>
-      hasSelected ? EMPTY_COUNTS : computeTagCounts(index, items.map(relOf)),
-    [hasSelected, index, items],
+    () => computeTagCounts(index, items.map(relOf)),
+    [index, items],
+  );
+
+  // 顶部下拉：分类/厂商/年份 候选
+  const categoryOptions = useMemo(() => {
+    const root = index.roots.find((r) => r.name === 'fig-memo');
+    if (!root) return [] as { label: string; value: string }[];
+    return root.children.map((c) => ({ label: c.name, value: c.id }));
+  }, [index]);
+  const makerOptions = useMemo(() => {
+    const root = index.roots.find((r) => r.name === '厂商');
+    if (!root) return [] as MakerOption[];
+    return root.children.map((c) => ({
+      name: c.name,
+      id: c.id,
+      count: counts.byId[c.id] ?? 0,
+    }));
+  }, [index, counts]);
+  const yearOptions = useMemo(() => {
+    const root = index.roots.find((r) => r.name === '年份');
+    if (!root) return [] as { label: string; value: string }[];
+    return root.children
+      .map((c) => ({ label: c.name, value: c.id }))
+      .sort((a, b) => b.label.localeCompare(a.label));
+  }, [index]);
+  const dropdownTagIds = useMemo(
+    () => [catId, makerId, yearId].filter((x): x is string => !!x),
+    [catId, makerId, yearId],
   );
 
   const filtered = useMemo(() => {
-    if (hasSelected) return [] as FigmemoListItem[];
     let list = items;
     if (filter.tagIds.length) {
       list = list.filter((it) =>
         matchesFilter(index, filter.tagIds, filter.rule, relOf(it)),
       );
+    }
+    if (dropdownTagIds.length) {
+      const sets = dropdownTagIds.map((id) => tagCoveredSet(index, id));
+      list = list.filter((it) => {
+        const np = normalizeRel(relOf(it));
+        return sets.every((s) => s.has(np));
+      });
     }
     if (filter.unclassifiedOnly) {
       list = list.filter(
@@ -563,7 +641,7 @@ export const FigmemoPage: React.FC = () => {
       return cmpDate(b, a);
     });
     return arr;
-  }, [hasSelected, items, filter, index, keyword, favSet, sort]);
+  }, [items, filter, index, keyword, favSet, sort, dropdownTagIds]);
 
   // 响应时间流「查看正文」跳转：从 pendingArticle 打开指定文章
   const pendingArticle = useRouteStore((s) => s.pendingArticle);
@@ -616,15 +694,6 @@ export const FigmemoPage: React.FC = () => {
     const el = listScrollRef.current;
     if (el) el.scrollTop = listUiCache.scrollTop;
   }, [selected, items.length, page]);
-
-  // 侧栏「收藏」计数：当前列表范围内已收藏的文章数
-  const favoriteCount = useMemo(
-    () =>
-      hasSelected
-        ? 0
-        : items.filter((it) => favSet.has(String(it.postId))).length,
-    [hasSelected, items, favSet],
-  );
 
   const postUrl = selected?.link;
 
@@ -728,28 +797,52 @@ export const FigmemoPage: React.FC = () => {
     },
   });
 
+  const backToList = () => {
+    openArticleCache = null;
+    setSelected(null);
+    setDetail(null);
+    setImages([]);
+    useRouteStore.getState().clearHistory();
+  };
+  // 「← 返回」：历史栈非空回上一处；空栈回列表
+  const goBack = () => {
+    const prev = useRouteStore.getState().popHistory();
+    if (prev) {
+      if (prev.postId) {
+        if (prev.page === 'figmemo') {
+          const it = items.find((x) => x.postId === prev.postId);
+          if (it) {
+            openPost(it, filtered);
+            return;
+          }
+        }
+        useRouteStore.getState().openArticle(prev.page, prev.postId, null);
+        return;
+      }
+      const r = ROUTES.find((x) => x.id === prev.page);
+      if (r) useRouteStore.getState().setRoute(r);
+      return;
+    }
+    backToList();
+  };
+
   // 详情视图
   if (selected) {
     return (
       <div className="flex flex-col h-screen">
         <PageHeader />
         <div className="flex items-center gap-2 pb-3">
-          <Button
-            icon={<ArrowLeftOutlined />}
-            onClick={() => {
-              openArticleCache = null;
-              setSelected(null);
-              setDetail(null);
-              setImages([]);
-            }}
-          >
-            返回列表
+          <Button icon={<ArrowLeftOutlined />} onClick={goBack}>
+            返回
           </Button>
           <Button
             icon={<LeftOutlined />}
             disabled={!navPrev}
             onClick={() => {
-              if (navPrev) openPost(navPrev);
+              if (navPrev) {
+                useRouteStore.getState().clearHistory();
+                openPost(navPrev);
+              }
             }}
           >
             上一篇
@@ -759,7 +852,10 @@ export const FigmemoPage: React.FC = () => {
             disabled={!navNext}
             title="下一篇（空格键）"
             onClick={() => {
-              if (navNext) openPost(navNext);
+              if (navNext) {
+                useRouteStore.getState().clearHistory();
+                openPost(navNext);
+              }
             }}
           >
             下一篇
@@ -1038,6 +1134,17 @@ export const FigmemoPage: React.FC = () => {
                 />
               )}
             </button>
+            {/* 返回列表（仅“跳转进来的文章”显示） */}
+            {historyLen > 0 && (
+              <button
+                type="button"
+                title="返回列表"
+                onClick={backToList}
+                className="group flex h-11 w-11 items-center justify-center rounded-full bg-white text-gray-500 shadow-lg ring-1 ring-black/5 transition-all duration-200 ease-out hover:scale-110 hover:text-ant-color-primary hover:shadow-xl active:scale-95"
+              >
+                <ArrowLeftOutlined className="text-lg" />
+              </button>
+            )}
             {/* 保存按钮（圆形，缩小） */}
             <button
               type="button"
@@ -1063,14 +1170,65 @@ export const FigmemoPage: React.FC = () => {
     <div className="flex flex-col h-screen">
       <PageHeader />
       <div className="flex-1 min-h-0 flex gap-4 pb-4">
-        <CategorySidebar
-          filter={filter}
-          counts={counts}
-          favoriteCount={favoriteCount}
-          onChange={setFilter}
-        />
+        <div className="shrink-0 flex">
+          <button
+            type="button"
+            title={sidebarOpen ? '收起标签' : '展开标签'}
+            onClick={() => setSidebarOpen((v) => !v)}
+            className="self-center flex h-20 w-4 items-center justify-center rounded-md border-[1px] border-gray-200 bg-white text-gray-500 shadow-sm transition-colors hover:bg-gray-50 hover:text-ant-color-primary"
+          >
+            {sidebarOpen ? <LeftOutlined /> : <RightOutlined />}
+          </button>
+          {sidebarOpen && (
+            <CategorySidebar
+              filter={filter}
+              counts={counts}
+              onChange={setFilter}
+              hideRoots={['fig-memo', '厂商', '年份']}
+            />
+          )}
+        </div>
         <section className="flex-1 min-w-0 flex flex-col" aria-label="文章列表">
           <div className="flex items-center flex-wrap gap-2 pb-3">
+            <Select
+              placeholder="分类：全部"
+              allowClear
+              style={{ width: 150 }}
+              value={catId ?? undefined}
+              onChange={(v) => {
+                setCatId((v as string) ?? null);
+                setPage(1);
+              }}
+              options={categoryOptions}
+            />
+            <MakerPicker
+              value={makerId}
+              options={makerOptions}
+              onChange={(id) => {
+                setMakerId(id);
+                setPage(1);
+              }}
+            />
+            <Select
+              placeholder="年份：全部"
+              allowClear
+              style={{ width: 120 }}
+              value={yearId ?? undefined}
+              onChange={(v) => {
+                setYearId((v as string) ?? null);
+                setPage(1);
+              }}
+              options={yearOptions}
+            />
+            <Button
+              type={filter.favoritesOnly ? 'primary' : 'default'}
+              icon={<HeartOutlined />}
+              title="只看收藏"
+              onClick={() => {
+                setFilter({ ...filter, favoritesOnly: !filter.favoritesOnly });
+                setPage(1);
+              }}
+            />
             <Input
               allowClear
               value={keyword}

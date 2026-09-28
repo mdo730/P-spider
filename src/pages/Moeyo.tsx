@@ -34,7 +34,6 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { CategorySidebar } from '../components/moeyo/CategorySidebar';
 import { PageHeader } from '../components/PageHeader';
 import { PlatformMedia } from '../platforms';
 import MediaType from '../enums/MediaType';
@@ -55,15 +54,13 @@ import { HpoiMatchPanel } from '../components/figmemo/HpoiMatchPanel';
 import { getHpoiPostIndex } from '../services/figmemo';
 import { HpoiMatch } from '../services/hpoi';
 import hpoiIcon from '../assets/platform-icons/hpoi.png';
+import moeyoIcon from '../assets/platform-icons/moeyo.png';
 import { useMoeyoFavoritesStore } from '../stores/moeyo-favorites';
 import { useMoeyoTagsStore } from '../stores/moeyo-tags';
 import { useRouteStore } from '../stores/route';
+import { ROUTES } from '../constants/routes';
 import {
-  DEFAULT_LIBRARY_FILTER,
-  LibraryFilter,
-  TagCounts,
   buildTagIndex,
-  computeTagCounts,
   normalizeRel,
   scanDirectory,
   tagCoveredSet,
@@ -79,8 +76,6 @@ interface PostDetail {
   link: string;
 }
 
-const EMPTY_COUNTS: TagCounts = { all: 0, unclassified: 0, byId: {} };
-
 // 会话级内存缓存：切走再切回 moeyo 时直接用内存列表，避免重复「读缓存→构建→同步标签→渲染」
 const ITEMS_TTL = 3 * 60 * 1000;
 const REFRESH_INTERVAL = 5 * 60 * 1000;
@@ -90,6 +85,21 @@ let lastRefreshAt = 0;
 
 /** 列表分页每页条数 */
 const PAGE_SIZE = 60;
+
+/**
+ * 给正文里**指回 moeyo 文章**的超链接：末尾加一个 moeyo 小图标，并打上 `data-moeyo-id`
+ * （供点击时跳转 app 内该文章，而不是开浏览器）。
+ */
+function decorateMoeyoLinks(html: string, iconUrl: string): string {
+  if (!html) return html;
+  const re =
+    /<a\b([^>]*?)href="(https?:\/\/(?:www\.)?moeyo\.com\/article\/(\d+)[^"]*)"([^>]*)>([\s\S]*?)<\/a>/gi;
+  return html.replace(
+    re,
+    (_m, pre, href, id, post, text) =>
+      `<a${pre}href="${href}"${post} data-moeyo-id="${id}">${text}<img src="${iconUrl}" alt="moeyo" style="height:0.9em;width:0.9em;display:inline-block;vertical-align:-0.12em;margin-left:3px" /></a>`,
+  );
+}
 
 /** 图片名归一：取 basename、去掉小图 `s` 后缀、小写（用于把本地文件匹配到远程图） */
 function normImgBase(name: string): string {
@@ -101,14 +111,21 @@ type MoeyoSort = 'date-desc' | 'date-asc';
 
 /** 会话级列表 UI 状态：切页 / 切标签页回来时保持原样（筛选、页码、滚动位置） */
 interface MoeyoListUi {
-  filter: LibraryFilter;
+  /** 选中的分类标签 id（null=全部） */
+  catId: string | null;
+  /** 选中的年份标签 id（null=全部） */
+  yearId: string | null;
+  /** 只看收藏 */
+  favOnly: boolean;
   keyword: string;
   sort: MoeyoSort;
   page: number;
   scrollTop: number;
 }
 const listUiCache: MoeyoListUi = {
-  filter: DEFAULT_LIBRARY_FILTER,
+  catId: null,
+  yearId: null,
+  favOnly: false,
   keyword: '',
   sort: 'date-desc',
   page: 1,
@@ -132,8 +149,12 @@ export const MoeyoPage: React.FC = () => {
   const index = useMemo(() => buildTagIndex(tags), [tags]);
   const favoriteIds = useMoeyoFavoritesStore((s) => s.ids);
   const favSet = useMemo(() => new Set(favoriteIds), [favoriteIds]);
+  // 导航历史栈长度（>0 = 当前文章由“跳转”进入，右下角显示圆形「返回列表」）
+  const historyLen = useRouteStore((s) => s.history.length);
 
-  const [filter, setFilter] = useState<LibraryFilter>(listUiCache.filter);
+  const [catId, setCatId] = useState<string | null>(listUiCache.catId);
+  const [yearId, setYearId] = useState<string | null>(listUiCache.yearId);
+  const [favOnly, setFavOnly] = useState(listUiCache.favOnly);
   const [items, setItems] = useState<MoeyoListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [keyword, setKeyword] = useState(listUiCache.keyword);
@@ -144,11 +165,13 @@ export const MoeyoPage: React.FC = () => {
 
   // 持久化列表 UI 状态（切页/切标签页回来保持原样）
   useEffect(() => {
-    listUiCache.filter = filter;
+    listUiCache.catId = catId;
+    listUiCache.yearId = yearId;
+    listUiCache.favOnly = favOnly;
     listUiCache.keyword = keyword;
     listUiCache.sort = sort;
     listUiCache.page = page;
-  }, [filter, keyword, sort, page]);
+  }, [catId, yearId, favOnly, keyword, sort, page]);
 
   // 筛选 / 搜索 / 排序变化 → 回到第 1 页（首次挂载不重置，保留缓存页码）
   useEffect(() => {
@@ -158,7 +181,7 @@ export const MoeyoPage: React.FC = () => {
     }
     setPage(1);
     listUiCache.scrollTop = 0;
-  }, [filter, keyword, sort]);
+  }, [catId, yearId, favOnly, keyword, sort]);
 
   // 列表变化时同步到会话缓存，供切回时秒开（仅在有内容时记录，避免把初始空列表当成缓存）
   useEffect(() => {
@@ -353,32 +376,46 @@ export const MoeyoPage: React.FC = () => {
     }
   };
 
-  const hasSelected = selected != null;
-
   const selectedIsFav = selected ? favSet.has(String(selected.postId)) : false;
 
-  // 详情页用不到列表统计/筛选，跳过重活（此前每次点标签都会全量重算 → 卡顿）
-  const counts = useMemo<TagCounts>(
-    () =>
-      hasSelected ? EMPTY_COUNTS : computeTagCounts(index, items.map(relOf)),
-    [hasSelected, index, items],
+  // 顶部下拉：分类（8 项同级）/ 年份；从标签树取候选
+  const categoryOptions = useMemo(() => {
+    const root = index.roots.find((r) => r.name === 'moeyo');
+    if (!root) return [] as { label: string; value: string }[];
+    const out: { label: string; value: string }[] = [];
+    const walk = (n: any) => {
+      for (const c of n.children || []) {
+        out.push({ label: c.name, value: c.id });
+        walk(c);
+      }
+    };
+    walk(root);
+    return out;
+  }, [index]);
+  const yearOptions = useMemo(() => {
+    const root = index.roots.find((r) => r.name === '年份');
+    if (!root) return [] as { label: string; value: string }[];
+    return root.children
+      .map((c) => ({ label: c.name, value: c.id }))
+      .sort((a, b) => b.label.localeCompare(a.label));
+  }, [index]);
+
+  const tagIds = useMemo(
+    () => [catId, yearId].filter((x): x is string => !!x),
+    [catId, yearId],
   );
 
   const filtered = useMemo(() => {
-    if (hasSelected) return [] as MoeyoListItem[];
     let list = items;
-    if (filter.tagIds.length) {
-      // 预计算每个选中标签的「覆盖路径集」（只算一次），避免对每个 item 重复构建 → 消除大卡顿
-      const coveredSets = filter.tagIds.map((id) => tagCoveredSet(index, id));
-      const isUnion = filter.rule === 'union';
+    if (tagIds.length) {
+      // 预计算每个选中标签的「覆盖路径集」（只算一次）
+      const coveredSets = tagIds.map((id) => tagCoveredSet(index, id));
       list = list.filter((it) => {
         const np = normalizeRel(relOf(it));
-        return isUnion
-          ? coveredSets.some((s) => s.has(np))
-          : coveredSets.every((s) => s.has(np));
+        return coveredSets.every((s) => s.has(np));
       });
     }
-    if (filter.favoritesOnly) {
+    if (favOnly) {
       list = list.filter((it) => favSet.has(String(it.postId)));
     }
     const kw = keyword.trim().toLowerCase();
@@ -389,7 +426,7 @@ export const MoeyoPage: React.FC = () => {
     const arr = [...list];
     arr.sort((a, b) => (sort === 'date-asc' ? cmpDate(a, b) : cmpDate(b, a)));
     return arr;
-  }, [hasSelected, items, filter, index, keyword, favSet, sort]);
+  }, [items, tagIds, index, keyword, favSet, sort, favOnly]);
 
   // 响应时间流「查看正文」跳转：从 pendingArticle 打开指定文章
   const pendingArticle = useRouteStore((s) => s.pendingArticle);
@@ -465,15 +502,6 @@ export const MoeyoPage: React.FC = () => {
     if (el) el.scrollTop = listUiCache.scrollTop;
   }, [selected, items.length, page]);
 
-  // 侧栏「收藏」计数：当前列表范围内已收藏的文章数
-  const favoriteCount = useMemo(
-    () =>
-      hasSelected
-        ? 0
-        : items.filter((it) => favSet.has(String(it.postId))).length,
-    [hasSelected, items, favSet],
-  );
-
   const postUrl = selected?.link;
 
   // Hpoi 手办维基搜索：商品名 + 厂商（来自正文结构化字段）
@@ -486,6 +514,12 @@ export const MoeyoPage: React.FC = () => {
   const hpoiUrl = `https://www.hpoi.net/search?keyword=${encodeURIComponent(
     hpoiKeyword,
   )}&category=100`;
+
+  // 正文里指回 moeyo 的链接：加图标 + 标注（供点击跳 app 内文章）
+  const articleHtml = useMemo(
+    () => decorateMoeyoLinks(detail?.contentHtml || '', moeyoIcon as string),
+    [detail],
+  );
 
   // 本地已存图片：按归一化文件名建索引，供「远程列表 + 本地覆盖」用
   const localByBase = useMemo(() => {
@@ -614,28 +648,53 @@ export const MoeyoPage: React.FC = () => {
     },
   });
 
+  const backToList = () => {
+    openArticleCache = null;
+    setSelected(null);
+    setDetail(null);
+    setImages([]);
+    useRouteStore.getState().clearHistory();
+  };
+  // 「← 返回」：历史栈非空回上一处；空栈回列表
+  const goBack = () => {
+    const prev = useRouteStore.getState().popHistory();
+    if (prev) {
+      if (prev.postId) {
+        if (prev.page === 'moeyo') {
+          const it = items.find((x) => x.postId === prev.postId);
+          if (it) {
+            openPost(it, filtered);
+            return;
+          }
+        }
+        // 跨页（如时间流 / fig-memo）：切回并打开该文章（不入栈）
+        useRouteStore.getState().openArticle(prev.page, prev.postId, null);
+        return;
+      }
+      const r = ROUTES.find((x) => x.id === prev.page);
+      if (r) useRouteStore.getState().setRoute(r);
+      return;
+    }
+    backToList();
+  };
+
   // 详情视图
   if (selected) {
     return (
       <div className="flex flex-col h-screen">
         <PageHeader />
         <div className="flex items-center gap-2 pb-3">
-          <Button
-            icon={<ArrowLeftOutlined />}
-            onClick={() => {
-              openArticleCache = null;
-              setSelected(null);
-              setDetail(null);
-              setImages([]);
-            }}
-          >
-            返回列表
+          <Button icon={<ArrowLeftOutlined />} onClick={goBack}>
+            返回
           </Button>
           <Button
             icon={<LeftOutlined />}
             disabled={!navPrev}
             onClick={() => {
-              if (navPrev) openPost(navPrev);
+              if (navPrev) {
+                useRouteStore.getState().clearHistory();
+                openPost(navPrev);
+              }
             }}
           >
             上一篇
@@ -645,7 +704,10 @@ export const MoeyoPage: React.FC = () => {
             disabled={!navNext}
             title="下一篇（空格键）"
             onClick={() => {
-              if (navNext) openPost(navNext);
+              if (navNext) {
+                useRouteStore.getState().clearHistory();
+                openPost(navNext);
+              }
             }}
           >
             下一篇
@@ -674,7 +736,10 @@ export const MoeyoPage: React.FC = () => {
               onClick={() =>
                 useRouteStore
                   .getState()
-                  .openArticle('figmemo', figmemoJump.postId)
+                  .openArticle('figmemo', figmemoJump.postId, {
+                    page: 'moeyo',
+                    postId: selected.postId,
+                  })
               }
             >
               在 fig-memo 查看
@@ -770,6 +835,18 @@ export const MoeyoPage: React.FC = () => {
                     // 正文来自 moeyo 原站（可信）；保留原格式（含图与超链接）
                     onClick={(e) => {
                       const a = (e.target as HTMLElement).closest('a');
+                      // 指回 moeyo 的链接 → 跳 app 内该文章
+                      const internalId = a?.getAttribute('data-moeyo-id');
+                      if (internalId) {
+                        e.preventDefault();
+                        useRouteStore
+                          .getState()
+                          .openArticle('moeyo', internalId, {
+                            page: 'moeyo',
+                            postId: selected.postId,
+                          });
+                        return;
+                      }
                       const href = a?.getAttribute('href');
                       if (href) {
                         e.preventDefault();
@@ -790,7 +867,7 @@ export const MoeyoPage: React.FC = () => {
                       }
                       openTextMenu(e);
                     }}
-                    dangerouslySetInnerHTML={{ __html: detail.contentHtml }}
+                    dangerouslySetInnerHTML={{ __html: articleHtml }}
                   />
                 )}
                 {!detail && images.length === 0 && (
@@ -880,6 +957,17 @@ export const MoeyoPage: React.FC = () => {
                 />
               )}
             </button>
+            {/* 返回列表（仅“跳转进来的文章”显示，作为保险） */}
+            {historyLen > 0 && (
+              <button
+                type="button"
+                title="返回列表"
+                onClick={backToList}
+                className="group flex h-11 w-11 items-center justify-center rounded-full bg-white text-gray-500 shadow-lg ring-1 ring-black/5 transition-all duration-200 ease-out hover:scale-110 hover:text-ant-color-primary hover:shadow-xl active:scale-95"
+              >
+                <ArrowLeftOutlined className="text-lg" />
+              </button>
+            )}
             {/* 保存按钮（圆形，缩小） */}
             <button
               type="button"
@@ -904,15 +992,46 @@ export const MoeyoPage: React.FC = () => {
   return (
     <div className="flex flex-col h-screen">
       <PageHeader />
-      <div className="flex-1 min-h-0 flex gap-4 pb-4">
-        <CategorySidebar
-          filter={filter}
-          counts={counts}
-          favoriteCount={favoriteCount}
-          onChange={setFilter}
-        />
+      <div className="flex-1 min-h-0 flex pb-4">
         <section className="flex-1 min-w-0 flex flex-col" aria-label="文章列表">
           <div className="flex items-center flex-wrap gap-2 pb-3">
+            <Select
+              placeholder="分类：全部"
+              allowClear
+              style={{ width: 160 }}
+              value={catId ?? undefined}
+              onChange={(v) => {
+                const val = (v as string) ?? null;
+                setCatId(val);
+                listUiCache.catId = val;
+                setPage(1);
+              }}
+              options={categoryOptions}
+            />
+            <Select
+              placeholder="年份：全部"
+              allowClear
+              style={{ width: 120 }}
+              value={yearId ?? undefined}
+              onChange={(v) => {
+                const val = (v as string) ?? null;
+                setYearId(val);
+                listUiCache.yearId = val;
+                setPage(1);
+              }}
+              options={yearOptions}
+            />
+            <Button
+              type={favOnly ? 'primary' : 'default'}
+              icon={<HeartOutlined />}
+              title="只看收藏"
+              onClick={() => {
+                const val = !favOnly;
+                setFavOnly(val);
+                listUiCache.favOnly = val;
+                setPage(1);
+              }}
+            />
             <Input
               allowClear
               value={keyword}

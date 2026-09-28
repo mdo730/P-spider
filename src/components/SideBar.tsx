@@ -29,6 +29,8 @@ const Item: React.FC<SideBarItemProps> = ({ route, active, dot }) => {
             : 'bg-transparent hover:bg-[rgba(255,255,255,0.2)] ',
         )}
         onClick={() => {
+          // 侧栏切页视为新起点：清空详情「返回」的历史栈（页面状态由各页缓存保持）
+          useRouteStore.getState().clearHistory();
           setRoute(route);
         }}
       >

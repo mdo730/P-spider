@@ -201,3 +201,9 @@ pub fn get_auto_start() -> bool {
 pub fn quit_app(app: tauri::AppHandle) {
   app.exit(0);
 }
+
+/// 重启应用（导入用户数据后需要重载内存中的 store 才生效）
+#[tauri::command]
+pub fn relaunch_app(app: tauri::AppHandle) {
+  app.restart();
+}
