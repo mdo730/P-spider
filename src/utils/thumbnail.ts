@@ -1,5 +1,7 @@
 import { fs, invoke, path } from '@tauri-apps/api';
+import { request } from '../ipc/network';
 import { toAssetUrl } from './asset';
+import { localMediaUrl } from './media-proxy';
 import { LibraryFolderStats, fetchFolderStats } from './library';
 
 let _log: ICategoriedLogger;
@@ -171,7 +173,8 @@ async function generateVideoFrame(
   video.muted = true;
   video.preload = 'auto';
   video.playsInline = true;
-  video.src = toAssetUrl(filePath);
+  // 优先走本地代理（支持 Range，能解码/取帧）；asset 协议不支持 Range 会失败
+  video.src = localMediaUrl(filePath) || toAssetUrl(filePath);
 
   await new Promise<void>((resolve, reject) => {
     function cleanup() {
@@ -280,6 +283,39 @@ export async function generateVideoThumbUrl(
     return await task;
   } finally {
     pending.delete(filePath);
+  }
+}
+
+/**
+ * 用**在线封面**直接填充某本地文件的缩略图缓存（视频/动图用）。
+ * 免去本地解码视频取帧（很慢），浏览时直接命中缓存秒开。已有缓存则跳过。
+ */
+export async function cacheThumbFromUrl(
+  filePath: string,
+  url?: string,
+): Promise<boolean> {
+  if (!filePath || !url || !/^https?:/i.test(url)) return false;
+  if (await getCachedThumbUrl(filePath)) return true;
+  try {
+    const dir = await getCacheDir();
+    if (!(await fs.exists(dir))) {
+      await fs.createDir(dir, { recursive: true });
+    }
+    const out = await thumbFilePath(filePath);
+    const res = await request({
+      method: 'GET',
+      url,
+      responseType: 'binary',
+      maxRetry: 2,
+      headers: { Referer: 'https://x.com/' },
+    });
+    const bytes = res.body as number[];
+    if (!bytes?.length) return false;
+    await fs.writeBinaryFile(out, new Uint8Array(bytes));
+    return true;
+  } catch (err) {
+    log().warn('cacheThumbFromUrl failed', url, err);
+    return false;
   }
 }
 

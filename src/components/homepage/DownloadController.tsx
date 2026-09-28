@@ -18,8 +18,6 @@ import { useDownloadStore } from '../../stores/download';
 import { useHomepageStore } from '../../stores/homepage';
 import { useSubscriptionStore } from '../../stores/subscription';
 import { toPlatformCreator } from '../../platforms/twitter';
-import { RetweetMode } from '../../interfaces/Subscription';
-import { RETWEET_MODE_OPTIONS } from '../../constants/subscription';
 
 const INTERVAL_OPTIONS = [
   { value: 15, label: '15 分钟' },
@@ -44,7 +42,8 @@ export const DownloadController: React.FC = () => {
   const { addSubscription, subscriptions } = useSubscriptionStore();
   const [subscribing, setSubscribing] = useState(false);
   const [intervalMin, setIntervalMin] = useState(720);
-  const [retweetMode, setRetweetMode] = useState<RetweetMode>('off');
+  /** 订阅时是否包含转推（转贴只进时间流，不下载；默认关） */
+  const [includeRetweets, setIncludeRetweets] = useState(false);
 
   // 是否已订阅当前检索的账号（主页为 X 平台场景，只匹配 twitter 订阅）
   const alreadySubscribed = subscriptions.some(
@@ -89,14 +88,10 @@ export const DownloadController: React.FC = () => {
         username: user.screenName,
         intervalMin,
         mediaTypes: filter.mediaTypes,
-        retweetMode,
+        retweetMode: includeRetweets ? 'include' : 'off',
       });
       if (result === 'updated') {
         message.success(`已更新 @${user.screenName} 的订阅选项`);
-      } else if (retweetMode === 'only') {
-        message.success(
-          `已订阅 @${user.screenName}（仅转推：只进时间流，不下载）`,
-        );
       } else {
         message.success(
           `已订阅 @${user.screenName}，将每 ${intervalMin} 分钟检查一次新内容并自动下载`,
@@ -169,6 +164,14 @@ export const DownloadController: React.FC = () => {
             ]}
           />
         </Form.Item>
+        <Form.Item tooltip="订阅时抓取该用户的转贴；转贴只进时间流，不下载（默认关闭）">
+          <Checkbox
+            checked={includeRetweets}
+            onChange={(e) => setIncludeRetweets(e.target.checked)}
+          >
+            转推
+          </Checkbox>
+        </Form.Item>
         <Form.Item
           name="source"
           label="下载源"
@@ -201,13 +204,6 @@ export const DownloadController: React.FC = () => {
           options={INTERVAL_OPTIONS}
           style={{ width: 110 }}
           title="订阅刷新间隔"
-        />
-        <Select
-          value={retweetMode}
-          onChange={setRetweetMode}
-          options={RETWEET_MODE_OPTIONS}
-          style={{ width: 190 }}
-          title="转贴（转贴从不下载，只进时间流）"
         />
         <Button
           onClick={onSubscribe}

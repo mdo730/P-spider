@@ -33,3 +33,12 @@ export function mediaProxyUrl(url: string): string {
     url,
   )}&p=${encodeURIComponent(currentProxy())}`;
 }
+
+/**
+ * 本地文件的 http 代理地址（支持 Range，WebView 的 <video> 才能解码出帧）。
+ * Tauri asset 协议不支持 Range，本地视频取首帧会失败，故走这里；未就绪返回空串。
+ */
+export function localMediaUrl(filePath: string): string {
+  if (!port) return '';
+  return `http://127.0.0.1:${port}/local?f=${encodeURIComponent(filePath)}`;
+}

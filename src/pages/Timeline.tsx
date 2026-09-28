@@ -3,17 +3,22 @@ import {
   App,
   Avatar,
   Button,
+  Checkbox,
   Dropdown,
   Empty,
   Image,
   MenuProps,
   Modal,
+  Popover,
+  Select,
+  Space,
   Spin,
   Tag,
 } from 'antd';
 import {
   ArrowUpOutlined,
   CalendarOutlined,
+  CopyOutlined,
   DownOutlined,
   DownloadOutlined,
   FileOutlined,
@@ -23,7 +28,6 @@ import {
   ReloadOutlined,
 } from '@ant-design/icons';
 import { RetweetMode } from '../interfaces/Subscription';
-import { RETWEET_MODE_OPTIONS } from '../constants/subscription';
 import dayjs from 'dayjs';
 import React, {
   useCallback,
@@ -36,6 +40,7 @@ import { PageHeader } from '../components/PageHeader';
 import { LocalThumb } from '../components/library/LocalThumb';
 import { useRemoteVideo } from '../hooks/useRemoteVideo';
 import { ensureMediaProxy, mediaProxyUrl } from '../utils/media-proxy';
+import { copyTextToClipboard } from '../utils/clipboard';
 import { resolveTweetMediaUrl } from '../services/tweet-media';
 import {
   DownloadHistoryRecord,
@@ -87,6 +92,17 @@ const RANGE_DAYS = 7;
 const AUTO_REFRESH_MS = 20 * 60 * 1000;
 /** 日期刻度条展开高度（px） */
 const OPEN_HEIGHT = 360;
+
+/** 「订阅原作者」下拉里的刷新间隔选项 */
+const INTERVAL_OPTIONS = [
+  { value: 15, label: '15 分钟' },
+  { value: 30, label: '30 分钟' },
+  { value: 60, label: '1 小时' },
+  { value: 180, label: '3 小时' },
+  { value: 360, label: '6 小时' },
+  { value: 720, label: '12 小时' },
+  { value: 1440, label: '1 天' },
+];
 
 const MEDIA_TYPE_LABEL: Record<string, string> = {
   photo: '图片',
@@ -749,6 +765,13 @@ const TimelineItem: React.FC<{
   } | null>(null);
   const remoteVideo = useRemoteVideo(video?.remote);
   const [videoError, setVideoError] = useState(false);
+  // 「订阅原作者」下拉里可调整的项（默认：12 小时 / 照片+视频+GIF / 不含转推）
+  const [subInterval, setSubInterval] = useState(720);
+  const [subMedia, setSubMedia] = useState<Set<string>>(
+    () => new Set(['photo', 'video', 'gif']),
+  );
+  const [subRetweet, setSubRetweet] = useState(false);
+  const [subOpen, setSubOpen] = useState(false);
   const isRetweet = group.kind === 'retweet';
   const subscribed = group.username
     ? subscriptions.some(
@@ -772,15 +795,21 @@ const TimelineItem: React.FC<{
     });
   };
 
-  const subscribeAuthor = async (retweetMode: RetweetMode = 'off') => {
+  const subscribeAuthor = async (
+    retweetMode: RetweetMode = 'off',
+    intervalMin = 720,
+    mediaTypes: MediaType[] = [MediaType.Photo, MediaType.Video, MediaType.Gif],
+  ) => {
     if (!group.username) return;
     setSubscribing(true);
     try {
       const result = await useSubscriptionStore.getState().addSubscription({
         source: 'twitter',
         username: group.username,
-        intervalMin: 720,
-        mediaTypes: [MediaType.Photo, MediaType.Video, MediaType.Gif],
+        intervalMin,
+        mediaTypes: mediaTypes.length
+          ? mediaTypes
+          : [MediaType.Photo, MediaType.Video, MediaType.Gif],
         retweetMode,
       });
       if (result === 'updated') {
@@ -1121,6 +1150,11 @@ const TimelineItem: React.FC<{
                         label: '打开原网页',
                         icon: <LinkOutlined />,
                       },
+                      {
+                        key: 'copyPost',
+                        label: '复制原网页',
+                        icon: <CopyOutlined />,
+                      },
                     ]
                   : []),
               ],
@@ -1142,6 +1176,9 @@ const TimelineItem: React.FC<{
                   await saveMedia(record);
                 } else if (k === 'openPost' && record.postUrl) {
                   openUrl(record.postUrl);
+                } else if (k === 'copyPost' && record.postUrl) {
+                  await copyTextToClipboard(record.postUrl);
+                  message.success('原网页链接已复制');
                 }
               },
             };
@@ -1182,22 +1219,17 @@ const TimelineItem: React.FC<{
                     if (record.postUrl) openUrl(record.postUrl);
                   }}
                 >
-                  {localPath ? (
-                    <LocalThumb
-                      kind="video"
-                      filePath={localPath}
-                      alt={record.fileName}
-                      wrapperClassName="w-full h-full"
-                      className="w-full h-full object-cover"
-                    />
-                  ) : thumbUrl ? (
+                  {/* 时间流视频一律用**在线封面**（不本地取帧，避免卡顿） */}
+                  {thumbUrl ? (
                     <img
                       src={thumbUrl}
                       alt={record.fileName}
                       loading="lazy"
                       className="w-full h-full object-cover"
                     />
-                  ) : null}
+                  ) : (
+                    <div className="w-full h-full bg-gray-100" />
+                  )}
                   <PlayCircleFilled className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-4xl text-white/90 group-hover:scale-110 transition-transform" />
                   <span className="absolute right-1 bottom-1 text-xs text-white bg-black/60 rounded px-1">
                     {MEDIA_TYPE_LABEL[record.mediaType] || '视频'}
@@ -1297,19 +1329,72 @@ const TimelineItem: React.FC<{
             </Button>
           )}
           {isRetweet && group.username && (
-            <Dropdown
-              menu={{
-                items: RETWEET_MODE_OPTIONS.map((o) => ({
-                  key: o.value,
-                  label: o.label,
-                })),
-                onClick: ({ key }) => subscribeAuthor(key as RetweetMode),
-              }}
-            >
-              <Button size="small" type="primary" ghost loading={subscribing}>
-                {subscribed ? '更新订阅' : '订阅原作者'} <DownOutlined />
+            <Space.Compact>
+              <Button
+                size="small"
+                type="primary"
+                loading={subscribing}
+                onClick={() => subscribeAuthor()}
+              >
+                {subscribed ? '更新订阅' : '订阅原作者'}
               </Button>
-            </Dropdown>
+              <Popover
+                trigger="click"
+                open={subOpen}
+                onOpenChange={setSubOpen}
+                placement="bottomRight"
+                content={
+                  <div className="w-60 space-y-3">
+                    <div>
+                      <div className="mb-1 text-sm font-medium">刷新时间</div>
+                      <Select
+                        size="small"
+                        className="w-full"
+                        value={subInterval}
+                        onChange={setSubInterval}
+                        options={INTERVAL_OPTIONS}
+                      />
+                    </div>
+                    <div>
+                      <div className="mb-1 text-sm font-medium">媒体类型</div>
+                      <Checkbox.Group
+                        value={[...subMedia]}
+                        onChange={(v) => setSubMedia(new Set(v as string[]))}
+                        options={[
+                          { label: '照片', value: 'photo' },
+                          { label: '视频', value: 'video' },
+                          { label: 'GIF', value: 'gif' },
+                        ]}
+                      />
+                      <Checkbox
+                        className="mt-1 block"
+                        checked={subRetweet}
+                        onChange={(e) => setSubRetweet(e.target.checked)}
+                      >
+                        转推（只进时间流）
+                      </Checkbox>
+                    </div>
+                    <Button
+                      type="primary"
+                      block
+                      loading={subscribing}
+                      onClick={() => {
+                        setSubOpen(false);
+                        void subscribeAuthor(
+                          subRetweet ? 'include' : 'off',
+                          subInterval,
+                          [...subMedia] as MediaType[],
+                        );
+                      }}
+                    >
+                      按以上条件订阅
+                    </Button>
+                  </div>
+                }
+              >
+                <Button size="small" type="primary" icon={<DownOutlined />} />
+              </Popover>
+            </Space.Compact>
           )}
         </div>
       )}

@@ -9,6 +9,7 @@ import { useSettingsStore } from '../stores/settings';
 import {
   copyImageUrlToClipboard,
   copyLocalImageToClipboard,
+  copyTextToClipboard,
 } from './clipboard';
 import { openUrl, showInFolder } from './shell';
 import { copySplitImageToClipboard } from './split-image';
@@ -36,6 +37,7 @@ export const IMAGE_MENU = {
   split: 'img:split',
   reveal: 'img:reveal',
   post: 'img:post',
+  copyPost: 'img:copy-post',
 } as const;
 
 /**
@@ -77,6 +79,11 @@ export function imageMenuItems(
             key: IMAGE_MENU.post,
             label: '打开原网页',
             icon: <LinkOutlined />,
+          },
+          {
+            key: IMAGE_MENU.copyPost,
+            label: '复制原网页',
+            icon: <CopyOutlined />,
           },
         ]
       : []),
@@ -125,6 +132,13 @@ export async function handleImageMenuKey(
     }
     if (key === IMAGE_MENU.post) {
       if (ctx.postUrl) openUrl(ctx.postUrl);
+      return true;
+    }
+    if (key === IMAGE_MENU.copyPost) {
+      if (ctx.postUrl) {
+        await copyTextToClipboard(ctx.postUrl);
+        message.success('原网页链接已复制');
+      }
       return true;
     }
     return false;

@@ -5,7 +5,6 @@ import React, { useEffect, useRef, useState } from 'react';
 import { toAssetUrl } from '../../utils/asset';
 import {
   generateImageThumbUrl,
-  generateVideoThumbUrl,
   getCachedThumbUrl,
 } from '../../utils/thumbnail';
 
@@ -96,15 +95,14 @@ export const LocalThumb: React.FC<Props> = ({
         setSrc(cached);
         return;
       }
-      const generated =
-        kind === 'video'
-          ? await generateVideoThumbUrl(filePath)
-          : await generateImageThumbUrl(filePath);
+      if (kind === 'video') {
+        // 视频不再现场解码取帧（慢且费资源）：只认缓存里的封面
+        // （下载时/「溯源本地库封面图」会把在线封面写进缓存）
+        return;
+      }
+      const generated = await generateImageThumbUrl(filePath);
       if (cancelled) return;
-      // 视频无缩略图时不回退原文件（<img> 放不了视频），交给外层占位/播放按钮
-      setSrc(
-        generated || (kind === 'video' ? undefined : toAssetUrl(filePath)),
-      );
+      setSrc(generated || toAssetUrl(filePath));
     })();
     return () => {
       cancelled = true;

@@ -4,6 +4,7 @@ import MediaType from '../enums/MediaType';
 import { PlatformSource } from '../platforms';
 import { buildPostUrl } from '../twitter/url';
 import { onTaskCompleted } from './download';
+import { cacheThumbFromUrl } from '../utils/thumbnail';
 
 let _log: ICategoriedLogger;
 
@@ -260,6 +261,18 @@ onTaskCompleted.listen((task) => {
   void (async () => {
     try {
       const filePath = await path.join(task.dir, task.fileName);
+      // 视频/动图：顺手把**在线封面**写进缩略图缓存
+      // （本地库浏览就秒开，不必现场解码视频取帧——那个很慢）
+      const type = task.media?.type;
+      if (
+        (type === MediaType.Video || type === MediaType.Gif) &&
+        task.media?.url
+      ) {
+        void cacheThumbFromUrl(
+          filePath,
+          `${task.media.url}?format=jpg&name=thumb`,
+        );
+      }
       await appendDownloadHistory({
         postId: task.post?.id || '',
         tweetTime:

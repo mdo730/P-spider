@@ -33,6 +33,7 @@ import { useSubscriptionStore } from '../stores/subscription';
 import { clearThumbCache, getThumbCacheStats } from '../utils/thumbnail';
 import { LibraryFolderStats, formatBytes } from '../utils/library';
 import { useLibraryTraceStore } from '../stores/library-trace';
+import { useVideoCoverCacheStore } from '../stores/library-video-cover-cache';
 import { useThumbCacheStore } from '../stores/library-thumb-cache';
 import { useFigmemoStore } from '../stores/figmemo';
 import {
@@ -55,6 +56,7 @@ export const Settings: React.FC = () => {
   const [rebuildingTags, setRebuildingTags] = useState(false);
   const [cacheStats, setCacheStats] = useState<LibraryFolderStats | null>(null);
   const trace = useLibraryTraceStore();
+  const videoCover = useVideoCoverCacheStore();
   const thumbCache = useThumbCacheStore();
   const figmemo = useFigmemoStore();
   const [figmemoCategories, setFigmemoCategories] = useState<FigmemoCategory[]>(
@@ -183,6 +185,22 @@ export const Settings: React.FC = () => {
       }`;
     }
     return '将已下载的老文件按文件名回溯推文信息（仅 X，需登录；已删除的推文无法找回）';
+  })();
+
+  const videoCoverStatusText = (() => {
+    if (videoCover.error) return `失败：${videoCover.error}`;
+    if (videoCover.phase !== 'idle' && videoCover.progress) {
+      const p = videoCover.progress;
+      const label = p.phase === 'scanning' ? '扫描中' : '填充封面';
+      return `${label} ${p.processedFiles}/${p.totalFiles}（已写 ${p.generated}，跳过 ${p.skipped}）…`;
+    }
+    if (videoCover.result) {
+      const r = videoCover.result;
+      return `${r.aborted ? '已中止，' : '完成：'}写入 ${r.generated} 个封面 / 共 ${r.total} 个视频${
+        r.failed ? `，失败 ${r.failed} 个（多无在线封面）` : ''
+      }`;
+    }
+    return '用在线封面给本地视频填缩略图缓存（需联网；没有历史记录/在线封面的会跳过）';
   })();
 
   const refreshCacheStats = async () => {
@@ -415,6 +433,23 @@ export const Settings: React.FC = () => {
             </Button>
             <span className="text-sm text-gray-500">{traceStatusText}</span>
           </div>
+          <div className="mt-3 flex items-center gap-3">
+            <Button
+              loading={videoCover.running}
+              onClick={() =>
+                videoCover.running ? videoCover.cancel() : videoCover.start()
+              }
+            >
+              {videoCover.running ? '取消溯源' : '溯源本地库封面图（联网）'}
+            </Button>
+            <span className="text-sm text-gray-500">
+              {videoCoverStatusText}
+            </span>
+          </div>
+          <p className="text-sm text-gray-400 mt-2">
+            视频封面不再现场截取（慢且费资源），改为用「在线封面」：下载时自动写入缓存，
+            旧文件用上面的按钮批量补齐（需要联网，没有在线封面的会跳过）。
+          </p>
         </div>
       </Section>
       <Section title="图片切割" name="split" titleIcon={<ScissorOutlined />}>

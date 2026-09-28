@@ -1,6 +1,9 @@
 // 本地流式媒体代理：把远程媒体（如 video.twimg.com）经「应用代理」转发给 WebView。
 // WebView 的 <video> 不走应用代理，直连常被墙；这里起一个仅监听 127.0.0.1 的小 HTTP 服务，
 // 透传 Range 请求头 → 支持边下边播 / 拖动进度。
+use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
+use std::path::Path;
 use std::sync::{Arc, OnceLock};
 use std::thread;
 use std::time::Duration;
@@ -46,6 +49,7 @@ fn handle(req: tiny_http::Request) -> Result<(), String> {
     let query = url.splitn(2, '?').nth(1).unwrap_or("");
     let mut target = String::new();
     let mut proxy = String::new();
+    let mut local = String::new();
     for pair in query.split('&') {
         let mut it = pair.splitn(2, '=');
         let k = it.next().unwrap_or("");
@@ -54,9 +58,17 @@ fn handle(req: tiny_http::Request) -> Result<(), String> {
         match k {
             "u" => target = dv,
             "p" => proxy = dv,
+            "f" => local = dv,
             _ => {}
         }
     }
+
+    // 本地文件：给 WebView 的 <video> 一个支持 Range 的 http 源
+    // （Tauri asset 协议不支持 Range，导致本地视频无法解码出首帧）
+    if !local.is_empty() {
+        return serve_local(req, &local);
+    }
+
     if target.is_empty() {
         let _ = req.respond(Response::from_string("missing url").with_status_code(400));
         return Ok(());
@@ -105,5 +117,114 @@ fn handle(req: tiny_http::Request) -> Result<(), String> {
         }
     }
     let _ = req.respond(out.with_data(resp, None));
+    Ok(())
+}
+
+/// 按扩展名猜 Content-Type（本地文件用，WebView 需要正确 mime 才肯解码）
+fn mime_of(path: &str) -> &'static str {
+    let ext = Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match ext.as_str() {
+        "mp4" | "m4v" => "video/mp4",
+        "webm" => "video/webm",
+        "mov" => "video/quicktime",
+        "mkv" => "video/x-matroska",
+        "avi" => "video/x-msvideo",
+        "gif" => "image/gif",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "webp" => "image/webp",
+        "mp3" => "audio/mpeg",
+        "m4a" => "audio/mp4",
+        "wav" => "audio/wav",
+        _ => "application/octet-stream",
+    }
+}
+
+/// 流式返回本地文件，支持单段 Range（206）
+fn serve_local(req: tiny_http::Request, path: &str) -> Result<(), String> {
+    let mut file = match File::open(path) {
+        Ok(f) => f,
+        Err(e) => {
+            let _ = req.respond(Response::from_string("open failed").with_status_code(404));
+            let _ = e;
+            return Ok(());
+        }
+    };
+    let total = file.metadata().map(|m| m.len()).unwrap_or(0);
+    let mime = mime_of(path);
+
+    let range = req
+        .headers()
+        .iter()
+        .find(|h| h.field.equiv("Range"))
+        .map(|h| h.value.as_str().to_string());
+
+    // 解析 "bytes=start-end"
+    let mut start = 0u64;
+    let mut end = total.saturating_sub(1);
+    let mut ranged = false;
+    if let Some(r) = range {
+        if let Some(spec) = r.strip_prefix("bytes=") {
+            let spec = spec.split(',').next().unwrap_or("").trim();
+            let mut it = spec.splitn(2, '-');
+            let a = it.next().unwrap_or("").trim().to_string();
+            let b = it.next().unwrap_or("").trim().to_string();
+            if !a.is_empty() {
+                if let Ok(v) = a.parse::<u64>() {
+                    start = v;
+                }
+            }
+            if !b.is_empty() {
+                if let Ok(v) = b.parse::<u64>() {
+                    end = v;
+                }
+            }
+            if total > 0 && start > end {
+                end = total.saturating_sub(1);
+            }
+            ranged = true;
+        }
+    }
+    if total > 0 && end >= total {
+        end = total.saturating_sub(1);
+    }
+    let len = if total == 0 || end < start {
+        0
+    } else {
+        end - start + 1
+    };
+
+    if let Err(e) = file.seek(SeekFrom::Start(start)) {
+        let _ = req.respond(Response::from_string(format!("seek failed: {e}")).with_status_code(500));
+        return Ok(());
+    }
+    let reader = file.take(len);
+
+    let mut headers = Vec::new();
+    if let Ok(h) = Header::from_bytes(&b"Content-Type"[..], mime.as_bytes()) {
+        headers.push(h);
+    }
+    if let Ok(h) = Header::from_bytes(&b"Accept-Ranges"[..], &b"bytes"[..]) {
+        headers.push(h);
+    }
+    if let Ok(h) = Header::from_bytes(&b"Cache-Control"[..], &b"no-store"[..]) {
+        headers.push(h);
+    }
+    if ranged {
+        if let Ok(h) = Header::from_bytes(
+            &b"Content-Range"[..],
+            format!("bytes {}-{}/{}", start, end, total).as_bytes(),
+        ) {
+            headers.push(h);
+        }
+    }
+
+    let status = StatusCode(if ranged { 206 } else { 200 });
+    let resp = Response::new(status, headers, reader, Some(len as usize), None);
+    let _ = req.respond(resp);
     Ok(())
 }

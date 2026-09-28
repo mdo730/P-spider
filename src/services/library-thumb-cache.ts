@@ -1,6 +1,15 @@
 import { useSettingsStore } from '../stores/settings';
 import { listRootFolders, scanDirectory } from '../utils/library';
-import { generateImageThumbUrl, getCachedThumbUrl } from '../utils/thumbnail';
+import {
+  cacheThumbFromUrl,
+  generateImageThumbUrl,
+  getCachedThumbUrl,
+} from '../utils/thumbnail';
+import {
+  getDownloadHistoryMap,
+  getMediaThumbUrl,
+  normalizePath,
+} from '../stores/download-history';
 
 let _log: ICategoriedLogger;
 
@@ -100,6 +109,88 @@ export async function runThumbCache(
 
   return {
     total: images.length,
+    generated,
+    skipped,
+    failed,
+    aborted: signal.aborted,
+  };
+}
+
+/**
+ * 一键为本地库的**视频/动图**填充封面缓存：用下载历史里的**在线封面**写入缩略图缓存。
+ * 不现场解码视频（那个又慢又费资源），只在有在线封面时写入。
+ */
+export async function runVideoCoverCache(
+  onProgress: (progress: ThumbCacheProgress) => void,
+  signal: AbortSignal,
+): Promise<ThumbCacheResult> {
+  const settings = useSettingsStore.getState();
+  const saveDirBase = settings.download.saveDirBase;
+  if (!saveDirBase) throw new Error('未设置保存目录');
+
+  const progress: ThumbCacheProgress = {
+    phase: 'scanning',
+    totalFiles: 0,
+    processedFiles: 0,
+    generated: 0,
+    skipped: 0,
+    failed: 0,
+  };
+  onProgress({ ...progress });
+
+  const historyMap = await getDownloadHistoryMap();
+
+  // 阶段一：扫描所有视频
+  const videos: string[] = [];
+  const rootFolders = await listRootFolders(saveDirBase);
+  for (const folder of rootFolders) {
+    if (signal.aborted) break;
+    try {
+      const content = await scanDirectory(folder.path);
+      for (const file of content.files) {
+        if (file.kind === 'video') videos.push(file.path);
+      }
+    } catch (err) {
+      log().warn('扫描失败', folder.path, err);
+    }
+    onProgress({ ...progress });
+  }
+
+  // 阶段二：逐个用在线封面填充（已缓存的跳过）
+  progress.phase = 'generating';
+  progress.totalFiles = videos.length;
+  progress.processedFiles = 0;
+  onProgress({ ...progress });
+
+  let generated = 0;
+  let skipped = 0;
+  let failed = 0;
+  for (const p of videos) {
+    if (signal.aborted) break;
+    const cached = await getCachedThumbUrl(p);
+    if (cached) {
+      skipped += 1;
+    } else {
+      const rec = historyMap.get(normalizePath(p));
+      const url = rec ? getMediaThumbUrl(rec) : undefined;
+      if (await cacheThumbFromUrl(p, url)) generated += 1;
+      else failed += 1;
+    }
+    progress.processedFiles += 1;
+    if (progress.processedFiles % 5 === 0) {
+      progress.generated = generated;
+      progress.skipped = skipped;
+      progress.failed = failed;
+      onProgress({ ...progress });
+    }
+  }
+  progress.generated = generated;
+  progress.skipped = skipped;
+  progress.failed = failed;
+  onProgress({ ...progress });
+
+  return {
+    total: videos.length,
     generated,
     skipped,
     failed,

@@ -34,6 +34,20 @@ async function writeImageBytesToClipboard(bytes: Uint8Array): Promise<void> {
  * 把远程图片复制到系统剪贴板（以 PNG 写入，兼容性最好）。
  * 经 Rust 后端取字节（走代理），再经 createImageBitmap + canvas 转 PNG，避开 <img> 跨源 canvas 污染。
  */
+/** 复制纯文本（优先 WebView clipboard，失败回退 Tauri 剪贴板插件） */
+export async function copyTextToClipboard(text: string): Promise<void> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+  } catch {
+    // 回退 Tauri
+  }
+  const { writeText } = await import('@tauri-apps/api/clipboard');
+  await writeText(text);
+}
+
 export async function copyImageUrlToClipboard(url: string): Promise<void> {
   const res = await request({
     method: 'GET',

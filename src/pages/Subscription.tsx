@@ -6,7 +6,6 @@ import {
   Checkbox,
   Dropdown,
   Form,
-  Input,
   Modal,
   Popconfirm,
   Segmented,
@@ -26,14 +25,11 @@ import {
 import { fs, path } from '@tauri-apps/api';
 import { PageHeader } from '../components/PageHeader';
 import MediaType from '../enums/MediaType';
-import { RetweetMode, Subscription } from '../interfaces/Subscription';
-import { PlatformSource } from '../platforms';
+import { Subscription } from '../interfaces/Subscription';
 import { retweetModeOf } from '../stores/subscription';
-import { RETWEET_MODE_OPTIONS } from '../constants/subscription';
 import xIcon from '../assets/platform-icons/x.png';
 import pawchiveIcon from '../assets/platform-icons/pawchive.png';
 import { LoadingOutlined, RetweetOutlined } from '@ant-design/icons';
-import { useAppStateStore } from '../stores/app-state';
 import { useSettingsStore } from '../stores/settings';
 import { useSubscriptionStore } from '../stores/subscription';
 import { buildUserUrl } from '../twitter/url';
@@ -65,11 +61,6 @@ const PLATFORM_LABEL: Record<string, string> = {
   pawchive: 'Pawchive',
 };
 
-const PLATFORM_OPTIONS = [
-  { value: 'twitter', label: 'X (Twitter)' },
-  { value: 'pawchive', label: 'Pawchive' },
-];
-
 const PLATFORM_ICON: Record<string, string> = {
   twitter: xIcon,
   pawchive: pawchiveIcon,
@@ -99,64 +90,17 @@ function formatRelativeTime(ts: number): string {
 
 export const SubscriptionPage: React.FC = () => {
   const { message } = App.useApp();
-  const [adding, setAdding] = useState(false);
   const [checkingAll, setCheckingAll] = useState(false);
-  const [addForm] = Form.useForm();
-  const addSource: PlatformSource =
-    Form.useWatch('source', addForm) || 'twitter';
   const {
     subscriptions,
-    addSubscription,
     removeSubscription,
     updateSubscription,
     setEnabled,
     checkNow,
     checkAll,
   } = useSubscriptionStore();
-  const cookieString = useAppStateStore((s) => s.cookieString);
   const viewMode =
     useSettingsStore((s) => s.subscription?.viewMode) || 'detail';
-
-  const onAdd = async (values: {
-    username: string;
-    intervalMin: number;
-    mediaTypes: MediaType[];
-    retweetMode?: RetweetMode;
-    source: PlatformSource;
-  }) => {
-    const username = values.username?.trim();
-    if (!username) {
-      message.error('请输入用户 ID');
-      return;
-    }
-    if (!values.mediaTypes || values.mediaTypes.length === 0) {
-      message.error('请至少选择一个媒体类型');
-      return;
-    }
-    setAdding(true);
-    try {
-      const result = await addSubscription({
-        source: values.source || 'twitter',
-        username,
-        intervalMin: values.intervalMin,
-        mediaTypes: values.mediaTypes,
-        retweetMode: values.retweetMode ?? 'off',
-      });
-      if (result === 'updated') {
-        message.success(`已更新 ${username} 的订阅选项（未重复添加）`);
-      } else if ((values.retweetMode ?? 'off') === 'only') {
-        message.success(`已订阅 ${username}（仅转推：只进时间流，不下载）`);
-      } else {
-        message.success(
-          `已订阅 ${username}，首次检查将建立基线，后续新内容将自动下载`,
-        );
-      }
-    } catch (err: any) {
-      message.error(`订阅失败：${err?.message || '未知原因'}`);
-    } finally {
-      setAdding(false);
-    }
-  };
 
   const onCheckAll = async () => {
     if (subscriptions.length === 0) {
@@ -178,63 +122,10 @@ export const SubscriptionPage: React.FC = () => {
     <>
       <PageHeader />
 
-      <section className="bg-white rounded-md p-4 border-[1px] mb-4">
-        <h2 className="font-bold mb-4">添加订阅</h2>
-        <Form
-          form={addForm}
-          layout="inline"
-          onFinish={onAdd}
-          initialValues={{
-            source: 'twitter',
-            intervalMin: 720,
-            mediaTypes: [MediaType.Photo, MediaType.Video, MediaType.Gif],
-            retweetMode: 'off',
-          }}
-          disabled={addSource === 'twitter' && !cookieString}
-        >
-          <Form.Item name="source" label="平台">
-            <Select options={PLATFORM_OPTIONS} style={{ width: 150 }} />
-          </Form.Item>
-          <Form.Item
-            name="username"
-            rules={[{ required: true, message: '请输入用户 ID' }]}
-          >
-            <Input
-              placeholder={
-                addSource === 'twitter'
-                  ? cookieString
-                    ? '用户 ID，如：shiratamacaron'
-                    : '请先登录后再添加订阅'
-                  : 'service/数字ID，如 patreon/3295915'
-              }
-              style={{ width: 220 }}
-            />
-          </Form.Item>
-          <Form.Item name="intervalMin" label="刷新间隔">
-            <Select options={INTERVAL_OPTIONS} style={{ width: 120 }} />
-          </Form.Item>
-          <Form.Item name="mediaTypes" label="媒体类型">
-            <Checkbox.Group
-              options={[
-                { label: '照片', value: MediaType.Photo },
-                { label: '视频', value: MediaType.Video },
-                { label: 'GIF', value: MediaType.Gif },
-              ]}
-            />
-          </Form.Item>
-          <Form.Item
-            name="retweetMode"
-            tooltip="转贴从头到尾都不下载，只会进入时间流；「仅转推」= 不下载原创，只收转贴"
-          >
-            <Select options={RETWEET_MODE_OPTIONS} style={{ width: 190 }} />
-          </Form.Item>
-          <Form.Item>
-            <Button type="primary" htmlType="submit" loading={adding}>
-              订阅
-            </Button>
-          </Form.Item>
-        </Form>
-      </section>
+      <p className="mb-4 text-sm text-gray-400">
+        本页只管理已有订阅（开关 / 编辑 /
+        删除）。添加订阅请到「X主页」或「Pawchive」里搜索用户后点「订阅」。
+      </p>
 
       <section className="bg-white rounded-md p-4 border-[1px]">
         <div className="flex items-center justify-between mb-4">
@@ -317,7 +208,7 @@ const SubscriptionItem: React.FC<SubscriptionItemProps> = ({
   const [form] = Form.useForm<{
     intervalMin: number;
     mediaTypes: MediaType[];
-    retweetMode?: RetweetMode;
+    includeRetweets?: boolean;
   }>();
   const status = STATUS_MAP[sub.status];
   const intervalLabel =
@@ -328,7 +219,7 @@ const SubscriptionItem: React.FC<SubscriptionItemProps> = ({
     form.setFieldsValue({
       intervalMin: sub.intervalMin,
       mediaTypes: sub.mediaTypes,
-      retweetMode: retweetModeOf(sub),
+      includeRetweets: retweetModeOf(sub) !== 'off',
     });
     setEditing(true);
   };
@@ -371,7 +262,7 @@ const SubscriptionItem: React.FC<SubscriptionItemProps> = ({
     onUpdate(sub.id, {
       intervalMin: values.intervalMin,
       mediaTypes: values.mediaTypes,
-      retweetMode: values.retweetMode ?? 'off',
+      retweetMode: values.includeRetweets ? 'include' : 'off',
     });
     message.success(`已更新 ${sub.username} 的订阅设置`);
     setEditing(false);
@@ -489,11 +380,11 @@ const SubscriptionItem: React.FC<SubscriptionItemProps> = ({
             />
           </Form.Item>
           <Form.Item
-            name="retweetMode"
-            label="转贴"
-            tooltip="转贴从头到尾都不下载，只会进入时间流；「仅转推」= 不下载原创，只收转贴"
+            name="includeRetweets"
+            valuePropName="checked"
+            tooltip="转贴只进时间流，不下载（默认关闭）"
           >
-            <Select options={RETWEET_MODE_OPTIONS} />
+            <Checkbox>转推</Checkbox>
           </Form.Item>
         </Form>
       </Modal>
