@@ -4,7 +4,7 @@ import dayjs from 'dayjs';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import MediaType from '../enums/MediaType';
-import { Subscription } from '../interfaces/Subscription';
+import { RetweetMode, Subscription } from '../interfaces/Subscription';
 import { TwitterPost } from '../interfaces/TwitterPost';
 import { TwitterUser } from '../interfaces/TwitterUser';
 import {
@@ -78,15 +78,27 @@ export interface CreateSubscriptionParams {
   username: string;
   intervalMin: number;
   mediaTypes: MediaType[];
-  /** 是否额外抓取转贴媒体（仅进时间流，不下载；默认 false） */
+  /** 转贴模式（off / include / only；默认 off） */
+  retweetMode?: RetweetMode;
+  /** @deprecated 用 retweetMode 代替（兼容旧调用） */
   includeRetweets?: boolean;
   /** 平台源，默认 twitter（阶段3 UI 支持多平台后由表单选择） */
   source?: PlatformSource;
 }
 
+/** 取订阅的转贴模式（兼容旧字段 includeRetweets） */
+export function retweetModeOf(
+  s: Pick<Subscription, 'retweetMode' | 'includeRetweets'>,
+): RetweetMode {
+  return s.retweetMode ?? (s.includeRetweets === true ? 'include' : 'off');
+}
+
 export interface SubscriptionStore {
   subscriptions: Subscription[];
-  addSubscription: (params: CreateSubscriptionParams) => Promise<void>;
+  /** 新增订阅；若同平台+同用户名已存在则改为**更新**其选项（返回 updated） */
+  addSubscription: (
+    params: CreateSubscriptionParams,
+  ) => Promise<'created' | 'updated'>;
   removeSubscription: (id: string) => void;
   updateSubscription: (id: string, patch: Partial<Subscription>) => void;
   setEnabled: (id: string, enabled: boolean) => void;
@@ -104,17 +116,41 @@ export const useSubscriptionStore = create(
         username,
         intervalMin,
         mediaTypes,
+        retweetMode,
         includeRetweets,
         source,
       }) => {
+        const src = source || 'twitter';
+        const mode: RetweetMode =
+          retweetMode ?? (includeRetweets === true ? 'include' : 'off');
+
+        // 去重：同平台 + 同用户名已存在 → 更新其选项，不再新增一条
+        const existing = get().subscriptions.find(
+          (s) =>
+            (s.source || 'twitter') === src &&
+            s.username.toLowerCase() === username.trim().toLowerCase(),
+        );
+        if (existing) {
+          get().updateSubscription(existing.id, {
+            intervalMin,
+            mediaTypes,
+            retweetMode: mode,
+          });
+          log().info('Subscription updated (dedup)', {
+            id: existing.id,
+            username,
+          });
+          return 'updated';
+        }
+
         const id = nanoid();
         const sub: Subscription = {
           id,
-          source: source || 'twitter',
+          source: src,
           username,
           intervalMin,
           mediaTypes,
-          includeRetweets: includeRetweets === true,
+          retweetMode: mode,
           enabled: true,
           downloadedCount: 0,
           dailyStats: {},
@@ -130,6 +166,7 @@ export const useSubscriptionStore = create(
             log().error('Initial subscription check failed', { id, err });
           });
         }, 0);
+        return 'created';
       },
       removeSubscription: (id) => {
         set({
@@ -170,7 +207,9 @@ export const useSubscriptionStore = create(
             username: s.username,
             intervalMin: s.intervalMin,
             mediaTypes: s.mediaTypes,
-            includeRetweets: s.includeRetweets === true,
+            retweetMode: retweetModeOf(s),
+            // 兼容旧版导入器
+            includeRetweets: retweetModeOf(s) === 'include',
             enabled: s.enabled,
           })),
         };
@@ -185,6 +224,7 @@ export const useSubscriptionStore = create(
             username: string;
             intervalMin?: number;
             mediaTypes?: MediaType[];
+            retweetMode?: RetweetMode;
             includeRetweets?: boolean;
             enabled?: boolean;
           }[];
@@ -235,7 +275,9 @@ export const useSubscriptionStore = create(
               Array.isArray(item.mediaTypes) && item.mediaTypes.length > 0
                 ? item.mediaTypes
                 : [MediaType.Photo, MediaType.Video, MediaType.Gif],
-            includeRetweets: item.includeRetweets === true,
+            retweetMode:
+              item.retweetMode ??
+              (item.includeRetweets === true ? 'include' : 'off'),
             enabled: item.enabled !== false,
             downloadedCount: 0,
             dailyStats: {},
@@ -268,7 +310,7 @@ export const useSubscriptionStore = create(
     }),
     {
       name: 'subscriptions',
-      version: 6,
+      version: 7,
       storage: createTauriFileStorage(),
       migrate(state: any) {
         state.subscriptions = (state.subscriptions || []).map((s: any) => {
@@ -289,8 +331,10 @@ export const useSubscriptionStore = create(
             ...s,
             // v4：旧订阅平台源统一补为 twitter；v5：kemono 订阅迁移为 pawchive（同 service/id 通用）
             // v6：includeRetweets 默认 false（转贴仅进时间流，不下载）
+            // v7：includeRetweets 布尔 → retweetMode（true→include / false→off）
             source: s.source === 'kemono' ? 'pawchive' : s.source || 'twitter',
-            includeRetweets: s.includeRetweets === true,
+            retweetMode:
+              s.retweetMode ?? (s.includeRetweets === true ? 'include' : 'off'),
             dailyStats,
             downloadedCount: s.downloadedCount || 0,
           };
@@ -360,8 +404,10 @@ async function checkTwitterSubscription(
     const isNew = newestId !== sub.lastTweetId;
 
     let downloaded = 0;
+    const mode = retweetModeOf(sub);
 
-    if (isNew && sub.lastTweetId) {
+    // 「仅转推」模式：不下载任何内容，只把转贴收进时间流
+    if (isNew && sub.lastTweetId && mode !== 'only') {
       // 有基线，且最新推文不在本次列表里（即出现了新推文）
       const newPosts = R.takeWhile(
         (p: TwitterPost) => p.id !== sub.lastTweetId,
@@ -399,8 +445,8 @@ async function checkTwitterSubscription(
       }
     }
 
-    // 转贴：勾选了 includeRetweets 时，额外抓该用户的转贴媒体（仅进时间流，不下载）
-    if (sub.includeRetweets) {
+    // 转贴：off 不抓；include / only 都抓该用户的转贴进时间流（转贴从不下载）
+    if (mode !== 'off') {
       try {
         await syncSubscriptionRetweets(sub, user);
       } catch (err) {

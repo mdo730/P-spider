@@ -17,7 +17,7 @@ import './stores/moeyo';
 import { invoke } from '@tauri-apps/api';
 import { reverseSearch, bestOpenUrl } from './services/image-search';
 import { useSettingsStore } from './stores/settings';
-import { openUrl } from './utils/shell';
+import { openUrlForeground } from './utils/shell';
 
 dayjs.extend(duration);
 dayjs.locale('zh-cn');
@@ -85,7 +85,8 @@ async function handleImageSearchArg(): Promise<boolean> {
       useSettingsStore.getState().imageSearch?.engine || 'google_lens';
     const r = await reverseSearch(path, engine);
     const url = bestOpenUrl(r);
-    if (url) await openUrl(url);
+    // 用能把浏览器提到最前的打开方式（本实例是资源管理器拉起的，无前台窗口）
+    if (url) await openUrlForeground(url);
   } catch (err) {
     log.error('以图搜图（右键）失败', err);
   }

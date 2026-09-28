@@ -8,6 +8,7 @@ import { invoke } from '@tauri-apps/api';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrent } from '@tauri-apps/api/window';
 import { SideBar } from './components/SideBar';
+import { UserGuide } from './components/UserGuide';
 import { ANTD_THEME } from './constants/antd-theme';
 import { useBootstrap } from './hooks/useBootstrap';
 import { useRunBackgroundTasks } from './hooks/useRunBackgroundTasks';
@@ -32,17 +33,18 @@ const AppInternal: React.FC = () => {
   // 监听窗口关闭请求（Rust 侧拦截 CloseRequested 后发来）
   useEffect(() => {
     const unlistenPromise = listen('close-requested', async () => {
-      const settings = useSettingsStore.getState();
-      if (settings.app.closeAction === 'minimize') {
+      const { closeAction, rememberCloseChoice } =
+        useSettingsStore.getState().app;
+      // 「每次询问」或没勾「记住关闭选择」→ 一律弹询问框（可在设置里随时改回）
+      if (closeAction === 'ask' || rememberCloseChoice !== true) {
+        setCloseModalVisible(true);
+        return;
+      }
+      if (closeAction === 'minimize') {
         await getCurrent().hide();
         return;
       }
-      if (settings.app.closeAction === 'exit') {
-        await invoke('quit_app');
-        return;
-      }
-      // ask：弹窗让用户选择
-      setCloseModalVisible(true);
+      await invoke('quit_app');
     });
     return () => {
       unlistenPromise.then((unlisten) => unlisten());
@@ -82,6 +84,8 @@ const AppInternal: React.FC = () => {
       >
         <div className="px-10">{currentRoute?.element}</div>
       </main>
+
+      <UserGuide />
 
       <Modal
         title="关闭 P-Spider？"

@@ -65,6 +65,16 @@ export interface Settings_V3 extends Settings_V2 {
     /** 是否在资源管理器右键显示「以图搜图」 */
     explorerMenu?: boolean;
   };
+  /** 使用指南 */
+  guide?: {
+    /** 启动时自动打开使用指南（默认 true；用户勾「不再显示」后置 false） */
+    showOnStart?: boolean;
+  };
+  /** 订阅页展示 */
+  subscription?: {
+    /** 订阅列表视图：detail 详细（默认）/ compact 精简 */
+    viewMode?: 'detail' | 'compact';
+  };
 }
 
 export type Settings = Settings_V3;

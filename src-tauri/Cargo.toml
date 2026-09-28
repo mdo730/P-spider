@@ -36,3 +36,10 @@ custom-protocol = ["tauri/custom-protocol"]
 [target.'cfg(windows)'.dependencies]
 # 把切割图以「文件列表」写入剪贴板（粘贴得 N 张图）
 clipboard-win = "5"
+# 打开外部链接并把浏览器窗口提到最前（以图搜图：app 不在前台时也要能看见结果）
+windows-sys = { version = "0.52", features = [
+  "Win32_Foundation",
+  "Win32_System_Threading",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_UI_Input_KeyboardAndMouse",
+] }

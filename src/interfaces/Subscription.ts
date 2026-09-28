@@ -3,6 +3,14 @@ import { PlatformSource } from '../platforms/types';
 
 export type SubscriptionStatus = 'idle' | 'running' | 'error' | 'paused';
 
+/**
+ * 转贴模式（转贴从头到尾都不下载，只进时间流）：
+ * - off：不抓转贴
+ * - include：抓转贴进时间流（原创照常下载）
+ * - only：只抓转贴进时间流，**不下载任何内容**
+ */
+export type RetweetMode = 'off' | 'include' | 'only';
+
 export interface Subscription {
   id: string;
   /** 平台源：twitter / pawchive（旧数据 migrate 时补为 twitter，kemono 迁移为 pawchive） */
@@ -19,7 +27,9 @@ export interface Subscription {
   enabled: boolean;
   /** 媒体类型过滤 */
   mediaTypes: MediaType[];
-  /** 是否额外抓取该用户转贴的媒体（仅进时间流，不下载；默认 false） */
+  /** 转贴模式（见 RetweetMode；默认 off）。读取请用 retweetModeOf() 兼容旧数据 */
+  retweetMode?: RetweetMode;
+  /** @deprecated 旧字段（v6 及以前），由 retweetMode 取代；仅用于数据迁移 */
   includeRetweets?: boolean;
   /** 上次检查到的最后一条推文 id，用于增量去重 */
   lastTweetId?: string;

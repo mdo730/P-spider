@@ -547,7 +547,7 @@ export const Settings: React.FC = () => {
         </Item>
         <Item
           label="关闭窗口时"
-          description="点击窗口右上角 X 时的行为；若记住选择则下次直接执行不再询问"
+          description="点击窗口右上角 X 时的行为"
           settingKey="closeAction"
         >
           <Radio.Group
@@ -557,6 +557,14 @@ export const Settings: React.FC = () => {
               { label: '每次询问', value: 'ask' },
             ]}
           />
+        </Item>
+        <Item
+          label="记住关闭选择"
+          description="开启：按上面的「关闭窗口时」直接执行，不再询问；关闭：每次点 X 都弹询问框（想反悔时把它关掉即可）"
+          settingKey="rememberCloseChoice"
+          valuePropName="checked"
+        >
+          <Switch />
         </Item>
         <Item
           label="记录日志文件"

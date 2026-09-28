@@ -18,6 +18,8 @@ import { useDownloadStore } from '../../stores/download';
 import { useHomepageStore } from '../../stores/homepage';
 import { useSubscriptionStore } from '../../stores/subscription';
 import { toPlatformCreator } from '../../platforms/twitter';
+import { RetweetMode } from '../../interfaces/Subscription';
+import { RETWEET_MODE_OPTIONS } from '../../constants/subscription';
 
 const INTERVAL_OPTIONS = [
   { value: 15, label: '15 分钟' },
@@ -42,6 +44,7 @@ export const DownloadController: React.FC = () => {
   const { addSubscription, subscriptions } = useSubscriptionStore();
   const [subscribing, setSubscribing] = useState(false);
   const [intervalMin, setIntervalMin] = useState(720);
+  const [retweetMode, setRetweetMode] = useState<RetweetMode>('off');
 
   // 是否已订阅当前检索的账号（主页为 X 平台场景，只匹配 twitter 订阅）
   const alreadySubscribed = subscriptions.some(
@@ -75,24 +78,30 @@ export const DownloadController: React.FC = () => {
       message.error('请先加载用户');
       return;
     }
-    if (alreadySubscribed) {
-      message.info(`@${user.screenName} 已订阅过，无需重复订阅`);
-      return;
-    }
     if (!filter.mediaTypes || filter.mediaTypes.length === 0) {
       message.error('请至少选择一个媒体类型');
       return;
     }
     setSubscribing(true);
     try {
-      await addSubscription({
+      // 已存在则更新选项（不会重复添加）
+      const result = await addSubscription({
         username: user.screenName,
         intervalMin,
         mediaTypes: filter.mediaTypes,
+        retweetMode,
       });
-      message.success(
-        `已订阅 @${user.screenName}，将每 ${intervalMin} 分钟检查一次新内容并自动下载`,
-      );
+      if (result === 'updated') {
+        message.success(`已更新 @${user.screenName} 的订阅选项`);
+      } else if (retweetMode === 'only') {
+        message.success(
+          `已订阅 @${user.screenName}（仅转推：只进时间流，不下载）`,
+        );
+      } else {
+        message.success(
+          `已订阅 @${user.screenName}，将每 ${intervalMin} 分钟检查一次新内容并自动下载`,
+        );
+      }
     } catch (err: any) {
       log.error(err);
       message.error(`订阅失败：${err?.message || '未知原因'}`);
@@ -193,14 +202,21 @@ export const DownloadController: React.FC = () => {
           style={{ width: 110 }}
           title="订阅刷新间隔"
         />
+        <Select
+          value={retweetMode}
+          onChange={setRetweetMode}
+          options={RETWEET_MODE_OPTIONS}
+          style={{ width: 190 }}
+          title="转贴（转贴从不下载，只进时间流）"
+        />
         <Button
           onClick={onSubscribe}
           loading={subscribing}
-          disabled={!user || !filter.mediaTypes?.length || alreadySubscribed}
-          type={alreadySubscribed ? 'default' : 'default'}
+          disabled={!user || !filter.mediaTypes?.length}
+          type="default"
           icon={alreadySubscribed ? <CheckOutlined /> : undefined}
         >
-          {alreadySubscribed ? '已订阅' : '订阅'}
+          {alreadySubscribed ? '更新订阅' : '订阅'}
         </Button>
       </section>
     </section>

@@ -3,11 +3,22 @@
 
 mod backup;
 mod fsutil;
+mod open_url;
 mod image_search;
 mod media_proxy;
 mod network;
 
-use tauri::{CustomMenuItem, Manager, SystemTray, SystemTrayEvent, SystemTrayMenu, WindowEvent};
+use tauri::{
+    AppHandle, CustomMenuItem, Manager, SystemTray, SystemTrayEvent, SystemTrayMenu, WindowEvent,
+};
+
+/// 显示并聚焦主窗口（托盘左键/双击、菜单「显示窗口」共用）
+fn show_main_window(app: &AppHandle) {
+    if let Some(window) = app.get_window("main") {
+        window.show().ok();
+        window.set_focus().ok();
+    }
+}
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -31,19 +42,17 @@ fn main() {
     tauri::Builder::default()
         .system_tray(tray)
         .on_system_tray_event(|app, event| {
-            if let SystemTrayEvent::MenuItemClick { id, .. } = event {
-                match id.as_str() {
-                    "show" => {
-                        if let Some(window) = app.get_window("main") {
-                            window.show().ok();
-                            window.set_focus().ok();
-                        }
-                    }
-                    "quit" => {
-                        app.exit(0);
-                    }
+            match event {
+                SystemTrayEvent::MenuItemClick { id, .. } => match id.as_str() {
+                    "show" => show_main_window(app),
+                    "quit" => app.exit(0),
                     _ => {}
+                },
+                // 左键单击 / 双击托盘图标 → 直接显示主窗口
+                SystemTrayEvent::LeftClick { .. } | SystemTrayEvent::DoubleClick { .. } => {
+                    show_main_window(app);
                 }
+                _ => {}
             }
         })
         .on_window_event(|event| {
@@ -70,6 +79,7 @@ fn main() {
           image_search::set_image_search_explorer_menu,
           backup::export_user_backup,
           backup::import_user_backup,
+          open_url::open_url_foreground,
           fsutil::get_path_mtimes,
           fsutil::get_folder_stats,
           fsutil::generate_thumbnail,

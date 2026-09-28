@@ -8,6 +8,8 @@ import { DownloadFilter } from '../../interfaces/DownloadFilter';
 import { useArchiverBrowseStore } from '../../stores/archiver-browse';
 import { useDownloadStore } from '../../stores/download';
 import { useSubscriptionStore } from '../../stores/subscription';
+import { RetweetMode } from '../../interfaces/Subscription';
+import { RETWEET_MODE_OPTIONS } from '../../constants/subscription';
 
 const INTERVAL_OPTIONS = [
   { value: 15, label: '15 分钟' },
@@ -34,6 +36,7 @@ export const ArchiverDownloadController: React.FC = () => {
     source: 'medias',
   });
   const [intervalMin, setIntervalMin] = useState(720);
+  const [retweetMode, setRetweetMode] = useState<RetweetMode>('off');
   const [subscribing, setSubscribing] = useState(false);
 
   // 是否已订阅当前创作者（Pawchive 订阅按 service/id 匹配）
@@ -70,25 +73,29 @@ export const ArchiverDownloadController: React.FC = () => {
 
   const onSubscribe = async () => {
     if (!creator) return;
-    if (alreadySubscribed) {
-      message.info(`已订阅过 ${creator.name || creator.username}，无需重复`);
-      return;
-    }
     if (!filter.mediaTypes || filter.mediaTypes.length === 0) {
       message.error('请至少选择一个媒体类型');
       return;
     }
     setSubscribing(true);
     try {
-      await addSubscription({
+      // 已存在则更新选项（不会重复添加）
+      const result = await addSubscription({
         source: 'pawchive',
         username: creator.username,
         intervalMin,
         mediaTypes: filter.mediaTypes,
+        retweetMode,
       });
-      message.success(
-        `已订阅 ${creator.name || creator.username}，将每 ${intervalMin} 分钟检查一次新帖并自动下载`,
-      );
+      if (result === 'updated') {
+        message.success(
+          `已更新 ${creator.name || creator.username} 的订阅选项`,
+        );
+      } else {
+        message.success(
+          `已订阅 ${creator.name || creator.username}，将每 ${intervalMin} 分钟检查一次新帖并自动下载`,
+        );
+      }
     } catch (err: any) {
       log.error(err);
       message.error(`订阅失败：${err?.message || '未知原因'}`);
@@ -151,13 +158,20 @@ export const ArchiverDownloadController: React.FC = () => {
           style={{ width: 110 }}
           title="订阅刷新间隔"
         />
+        <Select
+          value={retweetMode}
+          onChange={setRetweetMode}
+          options={RETWEET_MODE_OPTIONS}
+          style={{ width: 190 }}
+          title="转贴（转贴从不下载，只进时间流）"
+        />
         <Button
           onClick={onSubscribe}
           loading={subscribing}
-          disabled={!creator || !filter.mediaTypes?.length || alreadySubscribed}
+          disabled={!creator || !filter.mediaTypes?.length}
           icon={alreadySubscribed ? <CheckOutlined /> : undefined}
         >
-          {alreadySubscribed ? '已订阅' : '订阅'}
+          {alreadySubscribed ? '更新订阅' : '订阅'}
         </Button>
         <span className="text-sm text-gray-400">
           下载到 保存目录/创作者名/帖子标题

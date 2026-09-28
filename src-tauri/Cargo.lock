@@ -2426,6 +2426,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tiny_http",
+ "windows-sys 0.52.0",
  "winreg 0.52.0",
  "zip",
 ]

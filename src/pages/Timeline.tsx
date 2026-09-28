@@ -14,6 +14,7 @@ import {
 import {
   ArrowUpOutlined,
   CalendarOutlined,
+  DownOutlined,
   DownloadOutlined,
   FileOutlined,
   FolderOpenOutlined,
@@ -21,6 +22,8 @@ import {
   PlayCircleFilled,
   ReloadOutlined,
 } from '@ant-design/icons';
+import { RetweetMode } from '../interfaces/Subscription';
+import { RETWEET_MODE_OPTIONS } from '../constants/subscription';
 import dayjs from 'dayjs';
 import React, {
   useCallback,
@@ -769,17 +772,26 @@ const TimelineItem: React.FC<{
     });
   };
 
-  const subscribeAuthor = async () => {
-    if (!group.username || subscribed) return;
+  const subscribeAuthor = async (retweetMode: RetweetMode = 'off') => {
+    if (!group.username) return;
     setSubscribing(true);
     try {
-      await useSubscriptionStore.getState().addSubscription({
+      const result = await useSubscriptionStore.getState().addSubscription({
         source: 'twitter',
         username: group.username,
         intervalMin: 720,
         mediaTypes: [MediaType.Photo, MediaType.Video, MediaType.Gif],
+        retweetMode,
       });
-      message.success(`已订阅 @${group.username}，之后其原创媒体会自动下载`);
+      if (result === 'updated') {
+        message.success(`已更新 @${group.username} 的订阅选项`);
+      } else if (retweetMode === 'only') {
+        message.success(
+          `已订阅 @${group.username}（仅转推：只进时间流，不下载）`,
+        );
+      } else {
+        message.success(`已订阅 @${group.username}，之后其原创媒体会自动下载`);
+      }
     } catch (err: any) {
       message.error(`订阅失败：${err?.message || '未知原因'}`);
     } finally {
@@ -1285,16 +1297,19 @@ const TimelineItem: React.FC<{
             </Button>
           )}
           {isRetweet && group.username && (
-            <Button
-              size="small"
-              type="primary"
-              ghost
-              disabled={subscribed}
-              loading={subscribing}
-              onClick={subscribeAuthor}
+            <Dropdown
+              menu={{
+                items: RETWEET_MODE_OPTIONS.map((o) => ({
+                  key: o.value,
+                  label: o.label,
+                })),
+                onClick: ({ key }) => subscribeAuthor(key as RetweetMode),
+              }}
             >
-              {subscribed ? '已订阅原作者' : '订阅原作者'}
-            </Button>
+              <Button size="small" type="primary" ghost loading={subscribing}>
+                {subscribed ? '更新订阅' : '订阅原作者'} <DownOutlined />
+              </Button>
+            </Dropdown>
           )}
         </div>
       )}

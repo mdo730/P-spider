@@ -2,7 +2,7 @@ import { invoke } from '@tauri-apps/api';
 import { useEffect } from 'react';
 import { bestOpenUrl, reverseSearch } from '../../services/image-search';
 import { useSettingsStore } from '../../stores/settings';
-import { openUrl } from '../../utils/shell';
+import { openUrlForeground } from '../../utils/shell';
 
 /**
  * 处理来自资源管理器右键的「以图搜图」请求：
@@ -20,7 +20,7 @@ export function useImageSearchRequests() {
           useSettingsStore.getState().imageSearch?.engine || 'google_lens';
         const r = await reverseSearch(path, engine);
         const url = bestOpenUrl(r);
-        if (url) await openUrl(url);
+        if (url) await openUrlForeground(url);
       } catch (err) {
         log.warn('处理以图搜图请求失败', err);
       }
