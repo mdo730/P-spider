@@ -30,6 +30,12 @@ export const DEFAULT_SETTINGS: Settings = {
     maxImages: 6,
     rangeDays: 7,
   },
+  imageSearch: {
+    engine: 'google_lens',
+    saucenaoKey: '',
+    // 资源管理器右键「以图搜图」默认开启（启动时自动注册）
+    explorerMenu: true,
+  },
 };
 
 export const CURRENT_SETTINGS_VERSION = 4;

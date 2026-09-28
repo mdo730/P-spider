@@ -14,6 +14,10 @@ import './stores/download-history';
 import './stores/figmemo';
 // 副作用 import：moeyo 的后台调度（24h 追新）+ 统计监听
 import './stores/moeyo';
+import { invoke } from '@tauri-apps/api';
+import { reverseSearch, bestOpenUrl } from './services/image-search';
+import { useSettingsStore } from './stores/settings';
+import { openUrl } from './utils/shell';
 
 dayjs.extend(duration);
 dayjs.locale('zh-cn');
@@ -63,10 +67,54 @@ function bootstrapView() {
   );
 }
 
+/**
+ * 资源管理器右键：`P-Spider.exe --image-search "<图片路径>"`
+ * 若有该参数 → 直接以图搜图并打开结果，然后退出（不在前台留窗口）。
+ */
+async function handleImageSearchArg(): Promise<boolean> {
+  if (!('__TAURI__' in window || '__TAURI_INTERNALS__' in window)) return false;
+  let path: string | null = null;
+  try {
+    path = await invoke<string | null>('take_image_search_arg');
+  } catch {
+    return false;
+  }
+  if (!path) return false;
+  try {
+    const engine =
+      useSettingsStore.getState().imageSearch?.engine || 'google_lens';
+    const r = await reverseSearch(path, engine);
+    const url = bestOpenUrl(r);
+    if (url) await openUrl(url);
+  } catch (err) {
+    log.error('以图搜图（右键）失败', err);
+  }
+  try {
+    await invoke('quit_app');
+  } catch {
+    // ignore
+  }
+  return true;
+}
+
+/** 启动时按设置同步资源管理器右键注册（默认开启；除非用户显式关闭） */
+async function ensureExplorerMenu(): Promise<void> {
+  if (!('__TAURI__' in window || '__TAURI_INTERNALS__' in window)) return;
+  const enabled =
+    useSettingsStore.getState().imageSearch?.explorerMenu !== false;
+  try {
+    await invoke('set_image_search_explorer_menu', { enabled });
+  } catch (err) {
+    log.warn('同步资源管理器右键失败', err);
+  }
+}
+
 async function bootstrap() {
   bootstrapLogger();
   blockNativeContextMenu();
   log.info(`App bootstrap, version=${PACKAGE_JSON_VERSION}`);
+  await ensureExplorerMenu();
+  if (await handleImageSearchArg()) return;
   bootstrapView();
 }
 

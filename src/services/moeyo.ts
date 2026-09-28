@@ -173,6 +173,30 @@ export async function fetchCategories(): Promise<{
   cats: Map<number, MoeyoCategory>;
   alias: Map<number, number>;
 }> {
+  // 0) 优先用本地站点缓存 / 内置种子里的分类与 alias（精简结果是固定的，不必每次联网）
+  try {
+    const cache = await readSiteCache();
+    const catsSrc = cache?.categories?.length
+      ? cache.categories
+      : MOEYO_SITE_SEED?.categories;
+    if (catsSrc?.length) {
+      const cats = new Map<number, MoeyoCategory>(
+        catsSrc.map((c) => [c.id, { ...c }]),
+      );
+      const aliasSrc =
+        (cache?.categoryAlias as Record<string, number> | undefined) ||
+        (MOEYO_SITE_SEED?.categoryAlias as
+          | Record<string, number>
+          | undefined) ||
+        {};
+      const alias = new Map<number, number>(
+        Object.entries(aliasSrc).map(([k, v]) => [Number(k), Number(v)]),
+      );
+      return { cats, alias };
+    }
+  } catch {
+    // 忽略，走联网兜底
+  }
   // 1) 翻页取全所有分类
   const all = new Map<number, MoeyoCategory>();
   for (let page = 1; page <= 20; page += 1) {

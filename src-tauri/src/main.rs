@@ -2,12 +2,24 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod fsutil;
+mod image_search;
 mod media_proxy;
 mod network;
 
 use tauri::{CustomMenuItem, Manager, SystemTray, SystemTrayEvent, SystemTrayMenu, WindowEvent};
 
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    image_search::capture_cli_args(&args);
+    // 单实例：非主实例且带 --image-search → 把路径转给已运行实例后直接退出（不新开窗口）
+    let primary = image_search::start_control_listener();
+    if !primary {
+        if let Some(p) = image_search::current_arg() {
+            image_search::forward_arg(&p);
+            std::process::exit(0);
+        }
+    }
+
     let show_item = CustomMenuItem::new("show", "显示窗口");
     let quit_item = CustomMenuItem::new("quit", "退出");
     let tray_menu = SystemTrayMenu::new()
@@ -50,6 +62,10 @@ fn main() {
           network::get_auto_start,
           network::quit_app,
           media_proxy::media_proxy_port,
+          image_search::reverse_image_search,
+          image_search::take_image_search_arg,
+          image_search::take_pending_image_search,
+          image_search::set_image_search_explorer_menu,
           fsutil::get_path_mtimes,
           fsutil::get_folder_stats,
           fsutil::generate_thumbnail,

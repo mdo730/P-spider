@@ -4,13 +4,13 @@
 
 ## 一句话现状
 
-P-Spider（fork 自 x-spider）**v1.4.2 已发布（2026-09-27，GitHub Release `v1.4.2`）**。**1.4.2 新增/修复：** 时间流——moeyo/fig-memo 文章**按真实时间混入**（站点日期按 +09:00 归一，修“老浮在顶端”）、切标签回来**恢复滚动位置**、**每 20 分钟自动刷新 moeyo/fig-memo**（不碰订阅）、右下角**日期刻度条**（竖向长条刻度、悬停/拖动显示日期圆球、松手跳转、点空白取消）、同图 `001.jpg`/`001s.jpg` 去重；**自动更新检测**（启动 + 每 24h，走 `releases.atom` 避开 API 限流；有新版侧栏「关于」红点 + 关于页提示）。**1.4.1 修复/新增：** 未下载转贴视频**边下边播**（Rust 本地流式代理 media_proxy，仅 127.0.0.1、透传 Range、走应用代理）、本地库「打开本地储存位置」改为**选中文件**、图片切割可**附带作者/原帖**（文本+HTML 多格式）、文章详情保存按钮移到底部圆形、正文/标题**可选中** + 选中文字右键菜单、moeyo 补「Hpoi」搜索按钮、图片单独「保存到本地」（含 moeyo 正文内嵌图）、moeyo 图片 `001.jpg`/`001s.jpg` 重复修复、**GIF「下载即转真 gif」**（系统 ffmpeg）+ 时间流 GIF 会动、**本地文件删除后兜底**（按推文 ID 反查直链 + 远程经代理）。**1.4.0 新增：** ① **moeyo 来源**（moeyo.com，克隆 fig-memo：订阅追新/建库/列表分页详情保存/自动标签树/收藏/时间流记事；分类整备为 8 项 + 别名归并 + 事件独占；**去掉厂商标签**）；② **时间流大改**——接入 moeyo 记事、**未下载转贴进时间流**（默认关闭的订阅开关、按原创/hpoi 去重、可跳 app 内 fig-memo 正文）、视频应用内播放 + 右键「保存到本地」、本地视频缓存缩略图、**置顶为默认页**（原主页改名「X主页」）、滚动位置会话保持 + 右下角刷新/回顶、分类标注 + 头像；③ **订阅修复**：失败不再每秒无限重试（此前整晚锤爆 X → 403 空体/非 JSON）、检查限流（并发 4/200ms）、转贴更新接入、「文件夹」按钮修复；④ **内置 moeyo 站点(31k)+hpoi(21.5k) 种子**（首启秒开）；⑤ 性能修复（moeyo 点年份标签卡死：标签覆盖集改为只预计算一次）。更早：1.3.2 hpoi 候选匹配 + 数据种子；1.3.1 自研查看器/统一切割菜单/缩略图 Rust 化。
+P-Spider（fork 自 x-spider）**v1.4.3 已发布（2026-09-28，GitHub Release `v1.4.3`）**。**1.4.3 新增：** **以图搜图**（仅 Google Lens）——图片**右键**（app 内已移除，只留「资源管理器右键」）与**资源管理器右键**「用 P-Spider 以图搜图」；本地图经 Yandex 图床桥取公开 URL → 打开 `lens.google.com/uploadbyurl`；**设置→以图搜图**：默认**开机自动注册**资源管理器右键（可「去除右键菜单」，去除后不再自动注册）；**单实例**（固定端口 6803，二次实例把路径转给已运行实例并退出）；按扩展名注册（含 **webp/avif** 等）。另：**moeyo 分类改读本地缓存/内置种子**（不再每次联网重载）、**moeyo 建库加年份范围**（同 fig-memo）。**v1.4.2 已发布（2026-09-27）**。**1.4.2 新增/修复：** 时间流——moeyo/fig-memo 文章**按真实时间混入**（站点日期按 +09:00 归一，修“老浮在顶端”）、切标签回来**恢复滚动位置**、**每 20 分钟自动刷新 moeyo/fig-memo**（不碰订阅）、右下角**日期刻度条**（竖向长条刻度、悬停/拖动显示日期圆球、松手跳转、点空白取消）、同图 `001.jpg`/`001s.jpg` 去重；**自动更新检测**（启动 + 每 24h，走 `releases.atom` 避开 API 限流；有新版侧栏「关于」红点 + 关于页提示）。**1.4.1 修复/新增：** 未下载转贴视频**边下边播**（Rust 本地流式代理 media_proxy，仅 127.0.0.1、透传 Range、走应用代理）、本地库「打开本地储存位置」改为**选中文件**、图片切割可**附带作者/原帖**（文本+HTML 多格式）、文章详情保存按钮移到底部圆形、正文/标题**可选中** + 选中文字右键菜单、moeyo 补「Hpoi」搜索按钮、图片单独「保存到本地」（含 moeyo 正文内嵌图）、moeyo 图片 `001.jpg`/`001s.jpg` 重复修复、**GIF「下载即转真 gif」**（系统 ffmpeg）+ 时间流 GIF 会动、**本地文件删除后兜底**（按推文 ID 反查直链 + 远程经代理）。**1.4.0 新增：** ① **moeyo 来源**（moeyo.com，克隆 fig-memo：订阅追新/建库/列表分页详情保存/自动标签树/收藏/时间流记事；分类整备为 8 项 + 别名归并 + 事件独占；**去掉厂商标签**）；② **时间流大改**——接入 moeyo 记事、**未下载转贴进时间流**（默认关闭的订阅开关、按原创/hpoi 去重、可跳 app 内 fig-memo 正文）、视频应用内播放 + 右键「保存到本地」、本地视频缓存缩略图、**置顶为默认页**（原主页改名「X主页」）、滚动位置会话保持 + 右下角刷新/回顶、分类标注 + 头像；③ **订阅修复**：失败不再每秒无限重试（此前整晚锤爆 X → 403 空体/非 JSON）、检查限流（并发 4/200ms）、转贴更新接入、「文件夹」按钮修复；④ **内置 moeyo 站点(31k)+hpoi(21.5k) 种子**（首启秒开）；⑤ 性能修复（moeyo 点年份标签卡死：标签覆盖集改为只预计算一次）。更早：1.3.2 hpoi 候选匹配 + 数据种子；1.3.1 自研查看器/统一切割菜单/缩略图 Rust 化。
 
 ## 项目关键信息
 
 - 路径：本仓库（git 仓库，分支 `master`）
 - 技术栈：Tauri v1 + React18 + TS + Vite + Tailwind + antd5 + Zustand
-- 版本：`1.4.2`（**已发布 2026-09-27**；`package.json` 与 `src-tauri/Cargo.toml` 同步）
+- 版本：`1.4.3`（**已发布 2026-09-28**；`package.json` 与 `src-tauri/Cargo.toml` 同步）
 - 文档：`DEVELOPMENT.md`（架构地图 + 功能 + 待办 + 发布流程），**改动后同步更新**
 - 回滚点：分支 `backup-1.2.2`（commit `c3fd23c`）、zip `x-spider-backup-1.2.2.zip`
 
@@ -126,6 +126,12 @@ P-Spider（fork 自 x-spider）**v1.4.2 已发布（2026-09-27，GitHub Release 
 81. **自动更新检测（1.4.2）**：`stores/update.ts` + `hooks/background-tasks/useCheckUpdateAuto.ts`——**启动 + 每 24h** 检测；`github/api.ts` 改走 **`releases.atom`**（原 `api.github.com` 匿名限流 403）；有新版 → 侧栏「关于」红点 + 关于页「有新版本 vX 可用」。
 82. **同图去重（1.4.2）**：时间流 `dedupeMediaRecords` 按 `mediaUrl` 折叠重复记录、优先非封面(jpg)那条（GIF 的 mp4/封面两条）。
 
+83. **以图搜图（1.4.3，仅 Google Lens）**：Rust `src-tauri/src/image_search.rs`——本地图 multipart 上传 **Yandex** 图床拿公开 URL（`get_public_url`）→ 打开 `https://lens.google.com/uploadbyurl?url=<pub>`（账号无关；直传的 `vsrid` 结果页会因账号不匹配报错，故不用）。命令 `reverse_image_search(input, engine, proxy, saucenao_key?)`（其余引擎代码保留：SauceNAO 直传文件、iqdb/trace.moe 解析、yandex/ascii2d 结果页；UI 只暴露 Lens）。前端 `services/image-search.ts`；**app 内右键搜图已移除**。
+84. **资源管理器右键搜图（1.4.3）**：HKCU 静态 shell 动词（`SystemFileAssociations\image` + `.ext` + `SystemFileAssociations\.ext`，含 webp/avif 等）→ `P-Spider.exe --image-search "%1"`；命令 `set_image_search_explorer_menu(enabled)`；**设置→以图搜图**默认开（`imageSearch.explorerMenu=true`，启动 `ensureExplorerMenu()` 自动注册，可「去除右键菜单」→ 之后不再自动注册）。
+85. **单实例（1.4.3）**：Rust 固定端口 `127.0.0.1:6803` 控制通道；二次实例（带 `--image-search`）把路径转发给主实例后 `exit(0)`；前端 `useImageSearchRequests` 轮询 `take_pending_image_search` → 用 Lens 搜图并开浏览器。主实例自身带参数启动则搜完退出。
+86. **moeyo 分类读缓存/种子（1.4.3）**：`fetchCategories()` 优先用本地站点缓存/内置种子的 `categories`+`categoryAlias`，无则联网兜底（不再每次打开重载分类）。
+87. **moeyo 建库年份范围（1.4.3）**：设置→moeyo「建库」旁加 `RangePicker picker="year"`，`moeyo.build({fromYear,toYear})`。
+
 ## 待办（下一步候选，按优先级）
 
 1. `download.ts` 的 `if (source === 'figmemo')` 命名分支 → 抽「按源命名钩子」去泄漏
@@ -149,12 +155,12 @@ P-Spider（fork 自 x-spider）**v1.4.2 已发布（2026-09-27，GitHub Release 
 
 ```
 我在开发 P-Spider（fork 自 x-spider 的桌面下载器），仓库在 <项目路径>，
-Tauri v1 + React18 + TS + Vite + Tailwind + antd5 + Zustand，当前版本 1.4.2（已发布）。
+Tauri v1 + React18 + TS + Vite + Tailwind + antd5 + Zustand，当前版本 1.4.3（已发布）。
 请先读 项目根目录的 DEVELOPMENT.md 和 HANDOFF.md 了解现状，再开始。
 
 约定：
 - 改完跑 pnpm typeCheck + npx eslint ./src（必要时 pnpm build）；除非我说“打包”，否则别 pnpm tauri build。
-- 打包后把 P-Spider.exe / aria2c.exe / P-Spider_1.4.2_x64-setup.exe 拷到 <测试目录>（app 开着会被占用，需先退出）。
+- 打包后把 P-Spider.exe / aria2c.exe / P-Spider_1.4.3_x64-setup.exe 拷到 <测试目录>（app 开着会被占用，需先退出）。
 - git push 要走代理：git -c http.proxy=http://127.0.0.1:7897 -c https.proxy=http://127.0.0.1:7897 push origin master；发 Release 前设 $env:HTTPS_PROXY='http://127.0.0.1:7897' 再用 gh。
 - 别用 PowerShell 直接读写源码（破坏 UTF-8中文）；用 .NET [IO.File] + UTF8Encoding($false)。
 - 用户数据（标签/收藏/订阅/历史/设置）都在 %APPDATA%\p-spider\，仓库里不放任何数据文件。

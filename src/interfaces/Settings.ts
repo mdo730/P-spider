@@ -56,6 +56,15 @@ export interface Settings_V3 extends Settings_V2 {
     /** 时间流保留天数（1~30，默认 7） */
     rangeDays?: number;
   };
+  /** 以图搜图 */
+  imageSearch?: {
+    /** 使用的搜索引擎 id（默认 google_lens） */
+    engine?: string;
+    /** SauceNAO API Key（可选） */
+    saucenaoKey?: string;
+    /** 是否在资源管理器右键显示「以图搜图」 */
+    explorerMenu?: boolean;
+  };
 }
 
 export type Settings = Settings_V3;

@@ -10,6 +10,7 @@ import {
   GlobalOutlined,
   ScissorOutlined,
   ClockCircleOutlined,
+  SearchOutlined,
 } from '@ant-design/icons';
 import Joi from 'joi';
 import { SavePathSelector } from '../components/settings/SavePathSelector';
@@ -55,12 +56,29 @@ export const Settings: React.FC = () => {
   const moeyo = useMoeyoStore();
   const [moeyoCategories, setMoeyoCategories] = useState<MoeyoCategory[]>([]);
   const updateOne = useSettingsStore((s) => s.updateOne);
+  const imageSearchCfg = useSettingsStore((s) => s.imageSearch) || {};
+  const setImageSearch = (key: string, value: unknown) =>
+    useSettingsStore.getState().updateOne('imageSearch', key, value);
+  const onToggleExplorer = async (checked: boolean) => {
+    setImageSearch('explorerMenu', checked);
+    try {
+      await invoke('set_image_search_explorer_menu', { enabled: checked });
+      message.success(
+        checked ? '已添加到资源管理器右键' : '已从资源管理器右键移除',
+      );
+    } catch (err: any) {
+      message.error(err?.message || '设置失败');
+    }
+  };
   const moeyoTimelineSetting = useSettingsStore(
     (s) => s.timeline?.moeyoCategoryIds,
   );
   // 未设置 = 全部进时间流（呈现为全选）
   const timelineCats = moeyoTimelineSetting ?? moeyoCategories.map((c) => c.id);
   const [buildYears, setBuildYears] = useState<[Dayjs, Dayjs] | null>(null);
+  const [moeyoBuildYears, setMoeyoBuildYears] = useState<[Dayjs, Dayjs] | null>(
+    null,
+  );
 
   useEffect(() => {
     fetchCategories()
@@ -400,6 +418,35 @@ export const Settings: React.FC = () => {
           <InputNumber min={1} max={30} />
         </Item>
       </Section>
+      <Section
+        title="以图搜图"
+        name="imageSearch"
+        titleIcon={<SearchOutlined />}
+      >
+        <p className="text-sm text-gray-500 mb-3">
+          搜索引擎：<strong>Google Lens</strong>
+          （右键图片 →「以图搜图」；本地图会先上传取公开地址再打开结果）
+        </p>
+        <div className="flex items-center flex-wrap gap-3">
+          <span className="font-medium">资源管理器右键</span>
+          <Switch
+            checked={imageSearchCfg.explorerMenu === true}
+            onChange={onToggleExplorer}
+          />
+          <Button
+            size="small"
+            danger
+            disabled={imageSearchCfg.explorerMenu === false}
+            onClick={() => onToggleExplorer(false)}
+          >
+            去除右键菜单
+          </Button>
+          <span className="text-sm text-gray-400">
+            在资源管理器里右键图片文件，添加「用 P-Spider 以图搜图」（Win11
+            在「显示更多选项」里）；点「去除」后今后启动**不再自动注册**，需手动再开
+          </span>
+        </div>
+      </Section>
       <Section title="代理" name="proxy" titleIcon={<GlobalOutlined />}>
         <Item label="启用代理" settingKey="enable" valuePropName="checked">
           <Switch />
@@ -560,12 +607,24 @@ export const Settings: React.FC = () => {
         <div className="flex items-center flex-wrap gap-3">
           <span className="font-medium">moeyo</span>
           <Button
-            onClick={() => moeyo.build()}
+            onClick={() =>
+              moeyo.build({
+                fromYear: moeyoBuildYears?.[0]?.year(),
+                toYear: moeyoBuildYears?.[1]?.year(),
+              })
+            }
             loading={moeyo.running && moeyo.progress?.phase === 'building'}
             disabled={moeyo.running}
           >
             建库
           </Button>
+          <DatePicker.RangePicker
+            picker="year"
+            allowEmpty={[true, true]}
+            value={moeyoBuildYears as any}
+            onChange={(v) => setMoeyoBuildYears(v as [Dayjs, Dayjs] | null)}
+            placeholder={['起始年', '结束年']}
+          />
           <Button
             onClick={() => moeyo.checkNow()}
             loading={moeyo.running && moeyo.progress?.phase === 'checking'}

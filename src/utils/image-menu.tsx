@@ -27,6 +27,8 @@ export interface ImageMenuCtx {
 interface Msg {
   success: (content: string) => void;
   error: (content: string) => void;
+  info?: (content: string) => void;
+  loading?: (content: string, duration?: number) => (() => void) | void;
 }
 
 export const IMAGE_MENU = {
