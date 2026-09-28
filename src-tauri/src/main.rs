@@ -85,6 +85,7 @@ fn main() {
           fsutil::generate_thumbnail,
           fsutil::copy_files_to_clipboard,
           fsutil::convert_video_to_gif,
+          fsutil::video_thumbnail,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

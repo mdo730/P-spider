@@ -137,6 +137,81 @@ pub fn copy_files_to_clipboard(
     }
 }
 
+/// 找 ffmpeg：优先 PATH，其次常见固定位置（用户机器上实测在 C:\Windows\ffmpeg.exe）
+fn ffmpeg_candidates() -> Vec<String> {
+    let mut v = vec!["ffmpeg".to_string()];
+    if let Ok(pf) = std::env::var("ProgramFiles") {
+        v.push(format!("{pf}\\ffmpeg\\bin\\ffmpeg.exe"));
+    }
+    v.push("C:\\Windows\\ffmpeg.exe".to_string());
+    v.push("C:\\ffmpeg\\bin\\ffmpeg.exe".to_string());
+    v
+}
+
+/// 用系统 ffmpeg 抽视频首帧为 jpg 缩略图（`size`×`size` 居中裁剪）。
+/// 优先取 0.5s 处（避开纯黑首帧），太短/失败则退回第 0 帧。
+#[tauri::command]
+pub fn video_thumbnail(src: String, dst: String, size: u32) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let vf = format!(
+            "scale={s}:{s}:force_original_aspect_ratio=increase,crop={s}:{s}",
+            s = size
+        );
+        let mut last_err = String::from("未找到 ffmpeg");
+        for exe in ffmpeg_candidates() {
+            // 先试 0.5s；没有产出再试第 0 帧
+            for seek in [Some("0.5"), None] {
+                let mut args: Vec<String> = vec![
+                    "-y".into(),
+                    "-hide_banner".into(),
+                    "-loglevel".into(),
+                    "error".into(),
+                ];
+                if let Some(t) = seek {
+                    args.push("-ss".into());
+                    args.push(t.into());
+                }
+                args.push("-i".into());
+                args.push(src.clone());
+                args.push("-frames:v".into());
+                args.push("1".into());
+                args.push("-vf".into());
+                args.push(vf.clone());
+                args.push(dst.clone());
+
+                match std::process::Command::new(&exe)
+                    .args(&args)
+                    .creation_flags(CREATE_NO_WINDOW)
+                    .output()
+                {
+                    Ok(o) => {
+                        if o.status.success() && std::path::Path::new(&dst).is_file() {
+                            return Ok(());
+                        }
+                        last_err = String::from_utf8_lossy(&o.stderr).trim().to_string();
+                        if last_err.is_empty() {
+                            last_err = format!("ffmpeg 退出码 {:?}", o.status.code());
+                        }
+                    }
+                    Err(e) => {
+                        last_err = format!("{exe} 调用失败：{e}");
+                        break; // 这个 exe 不存在，换下一个
+                    }
+                }
+            }
+        }
+        return Err(last_err);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (src, dst, size);
+        Err("仅支持 Windows".into())
+    }
+}
+
 /// 用系统 ffmpeg 把视频（GIF 的 mp4）转成真实 .gif（“下载即转”用）。
 /// 需要系统 PATH 中有 ffmpeg；没有则返回错误，调用方保留 mp4。
 #[tauri::command]

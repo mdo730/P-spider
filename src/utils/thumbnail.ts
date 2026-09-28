@@ -1,7 +1,6 @@
 import { fs, invoke, path } from '@tauri-apps/api';
 import { request } from '../ipc/network';
 import { toAssetUrl } from './asset';
-import { localMediaUrl } from './media-proxy';
 import { LibraryFolderStats, fetchFolderStats } from './library';
 
 let _log: ICategoriedLogger;
@@ -160,94 +159,10 @@ export async function generateImageThumbUrl(
   }
 }
 
-/** 视频缩略图生成超时（部分损坏/不支持的文件会一直不触发事件） */
-const VIDEO_THUMB_TIMEOUT = 10000;
-
-/** WebView 内解视频首帧 → 200×200 居中裁剪 jpg（写入同一缩略图缓存） */
-async function generateVideoFrame(
-  filePath: string,
-  out: string,
-): Promise<void> {
-  if (typeof document === 'undefined') throw new Error('无 DOM 环境');
-  const video = document.createElement('video');
-  video.muted = true;
-  video.preload = 'auto';
-  video.playsInline = true;
-  // 优先走本地代理（支持 Range，能解码/取帧）；asset 协议不支持 Range 会失败
-  video.src = localMediaUrl(filePath) || toAssetUrl(filePath);
-
-  await new Promise<void>((resolve, reject) => {
-    function cleanup() {
-      window.clearTimeout(timer);
-      video.removeEventListener('loadeddata', onLoaded);
-      video.removeEventListener('error', onError);
-    }
-    function onLoaded() {
-      cleanup();
-      resolve();
-    }
-    function onError() {
-      cleanup();
-      reject(new Error('视频加载失败'));
-    }
-    const timer = window.setTimeout(() => {
-      cleanup();
-      reject(new Error('视频缩略图生成超时'));
-    }, VIDEO_THUMB_TIMEOUT);
-    video.addEventListener('loadeddata', onLoaded);
-    video.addEventListener('error', onError);
-    video.load();
-  });
-
-  // 有长度时往后取一点，避免纯黑首帧
-  const duration = Number.isFinite(video.duration) ? video.duration : 0;
-  const seekTo = duration > 0.5 ? Math.min(1, duration * 0.25) : 0;
-  if (seekTo > 0) {
-    await new Promise<void>((resolve) => {
-      function done() {
-        video.removeEventListener('seeked', done);
-        window.clearTimeout(timer);
-        resolve();
-      }
-      const timer = window.setTimeout(done, 3000);
-      video.addEventListener('seeked', done);
-      try {
-        video.currentTime = seekTo;
-      } catch {
-        done();
-      }
-    });
-  }
-
-  const vw = video.videoWidth || MAX_THUMB_SIZE;
-  const vh = video.videoHeight || MAX_THUMB_SIZE;
-  const size = Math.min(MAX_THUMB_SIZE, Math.min(vw, vh));
-  const scale = Math.max(size / vw, size / vh);
-  const sw = size / scale;
-  const sh = size / scale;
-  const sx = (vw - sw) / 2;
-  const sy = (vh - sh) / 2;
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('无法创建 canvas 上下文');
-  ctx.drawImage(video, sx, sy, sw, sh, 0, 0, size, size);
-  const outBlob = await new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob(
-      (b) => (b ? resolve(b) : reject(new Error('toBlob 失败'))),
-      'image/jpeg',
-      0.82,
-    );
-  });
-  await fs.writeBinaryFile(out, new Uint8Array(await outBlob.arrayBuffer()));
-  video.removeAttribute('src');
-  video.load();
-}
-
 /**
- * 生成并缓存**视频首帧**缩略图（复用图片缩略图的缓存与并发限流），返回 asset URL；失败返回 null。
- * 只解一帧、且只生成一次，之后走磁盘缓存，几乎零开销。
+ * 生成并缓存**视频首帧**缩略图：走 Rust 侧 **ffmpeg**（约 0.15s/个），
+ * 复用图片缩略图的缓存与并发限流；失败返回 null（调用方占位/在线封面兜底）。
+ * 说明：不在 WebView 里解码视频——那套又慢又占资源，已弃用。
  */
 export async function generateVideoThumbUrl(
   filePath: string,
@@ -266,7 +181,11 @@ export async function generateVideoThumbUrl(
         await fs.createDir(dir, { recursive: true });
       }
       const out = await thumbFilePath(filePath);
-      await generateVideoFrame(filePath, out);
+      await invoke('video_thumbnail', {
+        src: filePath,
+        dst: out,
+        size: MAX_THUMB_SIZE,
+      });
       const url = toAssetUrl(out);
       memoryCache.set(filePath, url);
       return url;

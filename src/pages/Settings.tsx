@@ -200,7 +200,7 @@ export const Settings: React.FC = () => {
         r.failed ? `，失败 ${r.failed} 个（多无在线封面）` : ''
       }`;
     }
-    return '用在线封面给本地视频填缩略图缓存（需联网；没有历史记录/在线封面的会跳过）';
+    return '给本地视频批量生成封面（优先 ffmpeg 取首帧；没 ffmpeg 时回退在线封面）';
   })();
 
   const refreshCacheStats = async () => {
@@ -440,15 +440,16 @@ export const Settings: React.FC = () => {
                 videoCover.running ? videoCover.cancel() : videoCover.start()
               }
             >
-              {videoCover.running ? '取消溯源' : '溯源本地库封面图（联网）'}
+              {videoCover.running ? '取消' : '批量生成视频封面'}
             </Button>
             <span className="text-sm text-gray-500">
               {videoCoverStatusText}
             </span>
           </div>
           <p className="text-sm text-gray-400 mt-2">
-            视频封面不再现场截取（慢且费资源），改为用「在线封面」：下载时自动写入缓存，
-            旧文件用上面的按钮批量补齐（需要联网，没有在线封面的会跳过）。
+            视频封面用系统 ffmpeg 取首帧（约 0.15 秒/个，需已安装 ffmpeg 并在
+            PATH 中）；没 ffmpeg 时回退在线封面。浏览时命中缓存即秒开，
+            也可用上面的按钮批量预生成。
           </p>
         </div>
       </Section>

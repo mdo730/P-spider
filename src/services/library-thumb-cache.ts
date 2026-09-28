@@ -3,6 +3,7 @@ import { listRootFolders, scanDirectory } from '../utils/library';
 import {
   cacheThumbFromUrl,
   generateImageThumbUrl,
+  generateVideoThumbUrl,
   getCachedThumbUrl,
 } from '../utils/thumbnail';
 import {
@@ -170,7 +171,11 @@ export async function runVideoCoverCache(
     const cached = await getCachedThumbUrl(p);
     if (cached) {
       skipped += 1;
+    } else if (await generateVideoThumbUrl(p)) {
+      // 优先 ffmpeg 取真实首帧（约 0.15s/个）
+      generated += 1;
     } else {
+      // 没 ffmpeg / 取帧失败 → 回退在线封面
       const rec = historyMap.get(normalizePath(p));
       const url = rec ? getMediaThumbUrl(rec) : undefined;
       if (await cacheThumbFromUrl(p, url)) generated += 1;
