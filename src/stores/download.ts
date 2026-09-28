@@ -25,6 +25,7 @@ import dayjs from 'dayjs';
 import { notification as antNotification } from 'antd';
 import { EventEmitter } from '../utils/event';
 import { delay } from '../utils';
+import { pinUserFolderName } from '../services/user-folders';
 
 let _log: ICategoriedLogger;
 
@@ -72,9 +73,17 @@ export async function prepareArchiverPostDir(
   post: PlatformPost,
 ): Promise<{ dir: string; hasExternalLinks: boolean }> {
   const settings = useSettingsStore.getState();
-  const creatorName = unicodeFilenamify(
-    post.creator?.name || post.creator?.username || 'unknown',
-  );
+  // 用户名绑定：同一账号改显示名不再新建文件夹
+  const creator = post.creator;
+  let rawName = creator?.name || creator?.username || 'unknown';
+  if (creator) {
+    rawName = await pinUserFolderName(
+      post.source || 'pawchive',
+      { id: creator.id, username: creator.username },
+      rawName,
+    );
+  }
+  const creatorName = unicodeFilenamify(rawName);
   let postTitle = unicodeFilenamify(post.text || post.id || 'untitled');
   const hasExternalLinks = (post.links?.length || 0) > 0;
   if (hasExternalLinks) {
@@ -139,7 +148,20 @@ export async function prepareDownloadTask({
     fileName = media.fileName || `file-${media.id || Date.now()}`;
   } else {
     // twitter：走文件名模板机制
-    const templateData: FileNameTemplateData = { media, post };
+    // 用户名绑定：同一账号改显示名（加活动/摊位后缀等）不再新建文件夹
+    let postForDir = post;
+    const creator = post.creator;
+    if (creator) {
+      const pinned = await pinUserFolderName(
+        source,
+        { id: creator.id, username: creator.username },
+        creator.name || creator.username || '',
+      );
+      if (pinned && pinned !== creator.name) {
+        postForDir = { ...post, creator: { ...creator, name: pinned } };
+      }
+    }
+    const templateData: FileNameTemplateData = { media, post: postForDir };
     const resolvedDirName = settings.download.dirTemplate
       ? resolveVariables(settings.download.dirTemplate, templateData)
       : '';

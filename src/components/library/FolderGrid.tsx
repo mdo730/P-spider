@@ -31,6 +31,7 @@ import {
   FOLDER_SORT_OPTIONS,
   FolderSortKey,
   LibraryRootFolder,
+  getMediaKind,
   readTraceMap,
   sortFolders,
 } from '../../utils/library';
@@ -461,7 +462,11 @@ const FolderCard: React.FC<FolderCardProps> = ({
           <FolderCover
             name={folder.name}
             coverPath={coverOverride || folder.coverPath}
-            coverKind={coverOverride ? 'image' : folder.coverKind}
+            coverKind={
+              coverOverride
+                ? getMediaKind(coverOverride) || 'image'
+                : folder.coverKind
+            }
             wrapperClassName="w-full h-[9rem]"
             className="object-cover w-full h-full transition-transform group-hover:scale-105"
           />

@@ -8,6 +8,7 @@ export const BACKUP_FILES = [
   'settings.json',
   'app-state.json',
   'subscriptions.json',
+  'user-folders.json',
   'library.json',
   'figmemo-tags.json',
   'figmemo-tags-user.json',

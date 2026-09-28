@@ -36,12 +36,17 @@ export const FolderCover: React.FC<Props> = ({
   }
 
   if (coverPath && coverKind === 'video') {
+    // 视频封面：走 ffmpeg 首帧缩略图（与本地库视频一致）
     return (
-      <div
-        className={`flex flex-col items-center justify-center bg-gray-900 text-gray-300 ${wrapper}`}
-      >
-        <PlayCircleFilled className="text-4xl" />
-        <span className="mt-1 text-xs">视频</span>
+      <div className={`relative ${wrapper}`}>
+        <LocalThumb
+          kind="video"
+          filePath={coverPath}
+          alt={name}
+          className={className}
+          wrapperClassName={wrapper}
+        />
+        <PlayCircleFilled className="absolute right-1 bottom-1 text-xl text-white/90 drop-shadow" />
       </div>
     );
   }

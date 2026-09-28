@@ -165,7 +165,7 @@ export const FileGrid: React.FC<Props> = ({
             ]),
         { type: 'divider' },
         { key: 'open', label: '打开', icon: <FileOutlined /> },
-        ...(coverFolderName && !isVideo
+        ...(coverFolderName
           ? [
               {
                 key: 'setCover',

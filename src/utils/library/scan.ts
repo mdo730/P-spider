@@ -194,11 +194,11 @@ export function clearFolderSummaryCache(): void {
 }
 
 /**
- * 从「本地库」排除的外部根目录：fig-memo 有独立选项卡 + 独立标签树/收藏，
+ * 从「本地库」排除的外部根目录：fig-memo / moeyo 都有独立选项卡 + 独立标签树/收藏，
  * 只是物理上保存在 saveDirBase 下，不应混入本地库（文件夹网格 / 一键缩略图 / 联网溯源）。
- * 排除点收敛在 `listRootFolders`，上述三个入口都会调用它。
+ * 排除点收敛在 `listRootFolders`，上述入口都会调用它。
  */
-const EXCLUDED_ROOT_FOLDERS = new Set(['fig-memo']);
+const EXCLUDED_ROOT_FOLDERS = new Set(['fig-memo', 'moeyo']);
 
 /** 列出 saveDirBase 下的一级文件夹（非递归；非媒体文件与 fig-memo 在此被过滤） */
 export async function listRootFolders(

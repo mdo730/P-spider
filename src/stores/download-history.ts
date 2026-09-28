@@ -66,13 +66,47 @@ export async function appendDownloadHistory(
     await fs.writeTextFile(filePath, JSON.stringify(record) + '\n', {
       append: true,
     });
+    // 有新记录 → 直接并进缓存（避免下次又整文件重解析 300ms+）
+    if (_historyCache) {
+      _historyCache.unshift(record);
+      if (_historyMapCache && record.filePath) {
+        _historyMapCache.set(normalizePath(record.filePath), record);
+      }
+    } else {
+      invalidateHistoryCache();
+    }
   } catch (err) {
     log().error('Failed to append download history', err);
   }
 }
 
-/** 读取全部历史记录（新→旧） */
+/**
+ * 解析结果内存缓存：downloads.jsonl 可能有几十 MB（十万条记录），
+ * 每次都重读重解析会让本地库/时间流卡顿。appendDownloadHistory 写入后失效。
+ */
+let _historyCache: DownloadHistoryRecord[] | null = null;
+let _historyLoading: Promise<DownloadHistoryRecord[]> | null = null;
+
+/** 清掉历史缓存（写入新记录后调用） */
+function invalidateHistoryCache(): void {
+  _historyCache = null;
+  _historyMapCache = null;
+}
+
+/** 读取全部历史记录（新→旧）；结果带内存缓存，不要就地修改返回的数组 */
 export async function readDownloadHistory(): Promise<DownloadHistoryRecord[]> {
+  if (_historyCache) return _historyCache;
+  if (_historyLoading) return _historyLoading;
+  _historyLoading = (async () => {
+    const list = await readDownloadHistoryUncached();
+    _historyCache = list;
+    _historyLoading = null;
+    return list;
+  })();
+  return _historyLoading;
+}
+
+async function readDownloadHistoryUncached(): Promise<DownloadHistoryRecord[]> {
   try {
     const filePath = await getHistoryFilePath();
     if (!(await fs.exists(filePath))) {
@@ -204,10 +238,13 @@ export function normalizePath(p: string): string {
   return p.replace(/\//g, '\\').toLowerCase();
 }
 
-/** 读取全部历史并建立「文件路径 → 记录」索引（用于本地库关联原推文） */
+let _historyMapCache: Map<string, DownloadHistoryRecord> | null = null;
+
+/** 读取全部历史并建立「文件路径 → 记录」索引（用于本地库关联原推文）；结果带缓存 */
 export async function getDownloadHistoryMap(): Promise<
   Map<string, DownloadHistoryRecord>
 > {
+  if (_historyMapCache) return _historyMapCache;
   const all = await readDownloadHistory();
   const map = new Map<string, DownloadHistoryRecord>();
   for (const record of all) {
@@ -215,6 +252,7 @@ export async function getDownloadHistoryMap(): Promise<
       map.set(normalizePath(record.filePath), record);
     }
   }
+  _historyMapCache = map;
   return map;
 }
 

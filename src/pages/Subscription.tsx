@@ -27,6 +27,7 @@ import { PageHeader } from '../components/PageHeader';
 import MediaType from '../enums/MediaType';
 import { Subscription } from '../interfaces/Subscription';
 import { retweetModeOf } from '../stores/subscription';
+import { pinUserFolderName } from '../services/user-folders';
 import xIcon from '../assets/platform-icons/x.png';
 import pawchiveIcon from '../assets/platform-icons/pawchive.png';
 import { LoadingOutlined, RetweetOutlined } from '@ant-design/icons';
@@ -226,6 +227,12 @@ const SubscriptionItem: React.FC<SubscriptionItemProps> = ({
 
   const openFolder = async () => {
     const settings = useSettingsStore.getState();
+    // 用绑定的文件夹名（首次建夹时锁定的显示名），避免改名后指到不存在的目录
+    const dirCreatorName = await pinUserFolderName(
+      sub.source,
+      { username: sub.username },
+      sub.displayName || sub.username,
+    );
     const dirName = resolveVariables(
       settings.download.dirTemplate,
       // 模板 replacer 读取的是 post.creator（见 constants/file-name-template）
@@ -234,7 +241,7 @@ const SubscriptionItem: React.FC<SubscriptionItemProps> = ({
           id: '',
           creator: {
             id: '',
-            name: sub.displayName || sub.username,
+            name: dirCreatorName || sub.displayName || sub.username,
             username: sub.username,
             avatar: '',
           },
