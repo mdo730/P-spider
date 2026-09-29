@@ -31,6 +31,9 @@ P-Spider（fork 自 x-spider）**v1.5.1 正式版已发布（2026-09-29，GitHub
 - `figmemo.jsonl`（fig-memo 每帖元数据，含 `articleTags`）
 - `figmemo-site.json`（站点缓存：posts/categories/featured/postCovers）
 - `figmemo-state.json`（订阅基线/统计）、`figmemo-favorites.json`（收藏 postId）、`downloads.jsonl`、`subscriptions.json`、`library-trace.json`
+- `user-folders.json`（1.5.1：账号 → 文件夹名绑定，首次建夹锁定显示名；改名不再新建夹）
+- `thumb-cache/`（图片 `generate_thumbnail` / 视频 `video_thumbnail`(ffmpeg) 的缩略图缓存）、`maker-logos/`（fig-memo 厂商图标 64×64）
+- 备份白名单见 `src/services/user-backup.ts`（`BACKUP_FILES`）
 
 ## 已完成（1.3.0 ~ 1.4.0，v1.4.0 已发布 2026-09-27）
 
