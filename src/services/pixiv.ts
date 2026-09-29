@@ -63,6 +63,19 @@ export function pixivImageHeaders(): Record<string, string> {
   };
 }
 
+/** 从 profile_image_urls 里挑一张头像（不同接口的 key 不一样：medium / px_170x170 / large …） */
+function pickAvatar(pii?: Record<string, string>): string | undefined {
+  if (!pii) return undefined;
+  return (
+    pii.medium ||
+    pii.px_170x170 ||
+    pii.large ||
+    pii.px_50x50 ||
+    pii.px_16x16 ||
+    Object.values(pii)[0]
+  );
+}
+
 function baseHeaders(): Record<string, string> {
   const headers: Record<string, string> = {
     'User-Agent': APP_UA,
@@ -104,10 +117,7 @@ function normalizeWork(raw: any): PixivWork {
     userId: String(user?.id ?? raw?.user_id ?? ''),
     userName: user?.account || '',
     userNick: user?.name || '',
-    userAvatar:
-      user?.profile_image_urls?.px_170x170 ||
-      user?.profile_image_urls?.px_50x50 ||
-      undefined,
+    userAvatar: pickAvatar(user?.profile_image_urls),
     tags: Array.isArray(raw?.tags)
       ? raw.tags.map((t: any) => t?.name).filter(Boolean)
       : [],
@@ -170,7 +180,7 @@ async function exchangeToken(force = false): Promise<{ user?: PixivUser }> {
           id: String(u.id),
           name: u.name || '',
           account: u.account || '',
-          avatar: u.profile_image_urls?.px_170x170,
+          avatar: pickAvatar(u.profile_image_urls),
         }
       : undefined,
   };
@@ -338,7 +348,7 @@ export async function exchangePixivCode(input: string): Promise<PixivUser> {
     id: String(u.id ?? ''),
     name: u.name || '',
     account: u.account || '',
-    avatar: u.profile_image_urls?.px_170x170,
+    avatar: pickAvatar(u.profile_image_urls),
   };
   const store = useSettingsStore.getState();
   await store.updateOne('pixiv', 'refreshToken', data.refresh_token);
@@ -358,7 +368,7 @@ export async function fetchPixivUser(userId: string): Promise<PixivUser> {
     id: String(u.id ?? userId),
     name: u.name || '',
     account: u.account || '',
-    avatar: u.profile_image_urls?.px_170x170,
+    avatar: pickAvatar(u.profile_image_urls),
   };
 }
 
@@ -422,7 +432,7 @@ export async function fetchPixivWorkDetail(
     userId: String(illust.user?.id ?? ''),
     userName: illust.user?.account || '',
     userNick: illust.user?.name || '',
-    userAvatar: illust.user?.profile_image_urls?.px_170x170,
+    userAvatar: pickAvatar(illust.user?.profile_image_urls),
     tags: Array.isArray(illust.tags)
       ? illust.tags.map((t: any) => t?.name).filter(Boolean)
       : [],

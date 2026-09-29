@@ -14,6 +14,15 @@ import { openUrl } from '../../utils/shell';
 /** 用户信息缓存（用户名 → 头像/昵称），避免重复请求 */
 const authorCache = new Map<string, { avatar?: string; name?: string }>();
 
+/** 平台显示名 */
+const PLATFORM_LABEL: Record<string, string> = {
+  twitter: 'X',
+  pawchive: 'Pawchive',
+  pixiv: 'pixiv',
+  figmemo: 'fig-memo',
+  moeyo: 'moeyo',
+};
+
 interface Props {
   info?: FileTweetInfo;
   fileName?: string;
@@ -49,10 +58,12 @@ export const TweetSidebar: React.FC<Props> = ({
     return () => document.body.classList.remove('library-tweet-bar-open');
   }, [collapsed]);
 
-  // 缺头像时：优先用「订阅」里已有的头像/昵称（本地、免请求），否则按用户名拉一次（带缓存）
+  // 缺头像时：优先用「订阅」里已有的头像/昵称（本地、免请求），否则按用户名拉一次（带缓存）。
+  // 注意：只有 X 才去调 twitter 接口；pawchive/pixiv 的用户名不走那套。
   useEffect(() => {
+    const platform = info?.platform || 'twitter';
     const username = info?.username;
-    if (!username || info?.avatar) {
+    if (platform !== 'twitter' || !username || info?.avatar) {
       setAuthorInfo(null);
       return;
     }
@@ -79,10 +90,18 @@ export const TweetSidebar: React.FC<Props> = ({
     return () => {
       cancelled = true;
     };
-  }, [info?.username, info?.avatar]);
+  }, [info?.username, info?.avatar, info?.platform]);
 
+  const platform = info?.platform || 'twitter';
+  const isTwitter = platform === 'twitter';
   const avatarUrl = info?.avatar || authorInfo?.avatar;
-  const remoteAvatar = useRemoteImageSrc(avatarUrl);
+  // pixiv 头像在 i.pximg.net，需要 Referer
+  const remoteAvatar = useRemoteImageSrc(
+    avatarUrl,
+    platform === 'pixiv'
+      ? { headers: { Referer: 'https://www.pixiv.net/' } }
+      : undefined,
+  );
   useEffect(() => setImgError(false), [avatarUrl]);
 
   if (collapsed) {
@@ -101,8 +120,12 @@ export const TweetSidebar: React.FC<Props> = ({
 
   const displayName =
     info?.displayName || authorInfo?.name || info?.username || '未知作者';
-  const profileUrl = info?.username ? buildUserUrl(info.username) : undefined;
-  const handle = info?.username ? `@${info.username}` : undefined;
+  // 作者主页：优先用记录里按平台拼好的；X 兜底 buildUserUrl，其余平台拿不到就不做可点
+  const profileUrl =
+    info?.profileUrl ||
+    (isTwitter && info?.username ? buildUserUrl(info.username) : undefined);
+  const handle = isTwitter && info?.username ? `@${info.username}` : undefined;
+  const platformLabel = PLATFORM_LABEL[platform];
 
   return ReactDOM.createPortal(
     <aside
@@ -162,8 +185,15 @@ export const TweetSidebar: React.FC<Props> = ({
             </Avatar>
           )}
           <div className="min-w-0">
-            <div className="font-semibold truncate" title={displayName}>
-              {displayName}
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="font-semibold truncate" title={displayName}>
+                {displayName}
+              </div>
+              {platformLabel && info && (
+                <span className="shrink-0 rounded bg-white/15 px-1.5 py-0.5 text-[10px] text-gray-300">
+                  {platformLabel}
+                </span>
+              )}
             </div>
             {handle &&
               (profileUrl ? (

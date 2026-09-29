@@ -2,7 +2,7 @@ import { fs, path } from '@tauri-apps/api';
 import { convertFileSrc } from '@tauri-apps/api/tauri';
 import MediaType from '../enums/MediaType';
 import { PlatformSource } from '../platforms';
-import { buildPostUrl } from '../twitter/url';
+import { buildPostUrl, buildUserUrl } from '../twitter/url';
 import { onTaskCompleted } from './download';
 import { cacheThumbFromUrl } from '../utils/thumbnail';
 
@@ -43,10 +43,12 @@ export interface DownloadHistoryRecord {
   downloadedAt: number;
   /** 来源：subscription=订阅自动下载，manual=手动下载 */
   source: 'subscription' | 'manual';
-  /** 来源平台（twitter/pawchive/figmemo/moeyo），用于还原原帖链接 */
+  /** 来源平台（twitter/pawchive/figmemo/moeyo/pixiv），用于还原原帖链接 */
   platform?: PlatformSource;
   /** 帖子详情页 URL */
   postUrl?: string;
+  /** 作者稳定 id（pixiv 作者主页链接用；新下载起写入） */
+  userId?: string;
 }
 
 async function getHistoryFilePath(): Promise<string> {
@@ -280,6 +282,32 @@ export interface FileTweetInfo {
   time?: string;
   url?: string;
   text?: string;
+  /** 来源平台（决定作者主页链接怎么拼、头像要不要 Referer） */
+  platform?: PlatformSource;
+  /** 作者主页 URL（按平台拼；拿不到则不显示可点） */
+  profileUrl?: string;
+}
+
+/** 按平台还原「作者主页」链接 */
+export function resolveProfileUrl(
+  record: DownloadHistoryRecord,
+): string | undefined {
+  const platform = record.platform || 'twitter';
+  if (platform === 'twitter') {
+    return record.username ? buildUserUrl(record.username) : undefined;
+  }
+  if (platform === 'pawchive') {
+    const [service, user] = (record.username || '').split('/');
+    return service && user
+      ? `https://pawchive.pw/${service}/user/${user}`
+      : undefined;
+  }
+  if (platform === 'pixiv') {
+    return record.userId
+      ? `https://www.pixiv.net/users/${record.userId}`
+      : undefined;
+  }
+  return undefined;
 }
 
 /** 下载历史记录 → 统一信息 */
@@ -293,6 +321,8 @@ export function recordToTweetInfo(
     time: record.tweetTime,
     url: resolvePostUrl(record),
     text: record.fullText,
+    platform: record.platform || 'twitter',
+    profileUrl: resolveProfileUrl(record),
   };
 }
 
@@ -324,6 +354,7 @@ onTaskCompleted.listen((task) => {
         username: task.post?.creator?.username,
         displayName: task.post?.creator?.name,
         avatar: task.post?.creator?.avatar,
+        userId: task.post?.creator?.id || undefined,
         mediaType: task.media?.type || MediaType.Photo,
         mediaUrl: task.media?.url,
         // 视频/GIF 记录下载直链，便于本地文件删除后仍能经代理流式播放

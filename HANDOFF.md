@@ -10,7 +10,7 @@
 - ④ 时间流 v2（数据源改订阅 feed 缓存 + 标注 + 分类配色 + 胶囊筛选）——**已完成（2026-09-29）**
 - ① pixiv **L2（登录/浏览/下载）+ L3（自建订阅追新 / 进时间流）——均已完成（2026-09-29）**
 
-> ✅ **已发布抢先版**：GitHub Release `v1.6.0`（**Pre-release**，2026-09-29；`releases/latest` 仍指向 `v1.5.1` 正式版）。commit `eaf6324` 已 push master。附件：`P-Spider_1.6.0_x64-setup.exe` + `P-Spider.exe` + `aria2c.exe`。绿色版目录也已更新。
+> ✅ **已发布抢先版**：GitHub Release `v1.6.0`（**Pre-release**，2026-09-29；`releases/latest` 仍指向 `v1.5.1` 正式版）。commit `eaf6324` 已 push master。附件：`P-Spider_1.6.0_x64-setup.exe` + `P-Spider.exe` + `aria2c.exe`（**已随侧栏渐变/指南补充等改动重新覆盖上传**）。绿色版目录同步更新。commit `4dc5f8f`。
 
 已完成项改了：`interfaces/Settings.ts`、`constants/settings.ts`（版本 4→5）、`stores/settings.ts`（迁移）、
 `constants/routes.tsx`（`SIDEBAR_HIDEABLE_IDS`/`applySidebarOrder`）、`components/SideBar.tsx`、
@@ -28,6 +28,10 @@
 `pages/Settings.tsx`（pixiv 区块）、`constants/routes.tsx`（路由）。typeCheck/eslint/build/cargo check 均通过。
 **登录改为浏览器 PKCE 授权码**：pixiv **已关闭 password grant**（实测报 `grant type is unauthorized`），故弃用账号密码直登；`services/pixiv.ts` 改为 `buildPixivLoginUrl()`（PKCE S256，浏览器打开 `app-api.pixiv.net/web/v1/login?...client=pixiv-android`）+ `exchangePixivCode()`（回跳 `pixiv://account/login?code=`，粘贴整段换 refresh_token，gppt 同款参数/头）。设置页：`打开 pixiv 登录页` + 粘贴框 + `完成登录`；refresh_token 手动填仍保留兜底。`utils/md5.ts` 保留但已不用。
 **新手引导改为「假界面」分章播放（1.6.0）**：把原来的 driver.js 高亮真实界面**整段换掉**（driver.js 已卸载）——改为**模拟界面（MockUI）**演示，稳、不依赖登录态/数据/路由。新增 `components/guide/MockUI.tsx`（`MockFrame` 假窗口 + `MockCard`/`MockRow`）、`content/guide-tours.tsx`（章节 id → 步骤，含 render 画假界面；目前只有 `start` 章节：欢迎 → 保存路径 → fig-memo 需手动开 → moeyo 需手动开 → 侧栏 → 登录 X → 右上角手册，共 7 步）、`components/guide/GuidePlayer.tsx`（全屏播放器：模拟画面 + 文案 + 上一步/下一步/跳过）、`stores/guide-player.ts`。`UserGuide` 每章面板有「▶ 播放本节引导」（仅配了动画的章节）；首启若 `guide.showOnStart!==false` 自动播 `start` 章；抽屉底部「启动时自动播放引导」+「播放新手引导」。后续逐章在 `guide-tours.tsx` 里补 `steps` 即可，最后再考虑串成完整流程。另新增 `stores/settings-ui.ts`（设置分组状态）。MockUI 支持 `activeSidebar`/`settingsNav`（假设置页画二级菜单），高亮改用**聚光灯**（`boxShadow: 0 0 0 9999px` 挖空目标 + 其余变暗 + 目标描边脉冲）；`MockRow highlight` 通过 `Spot` 注册高亮目标。
+
+**pixiv 头像字段修正**：`/v1/user/detail` 的头像是 `profile_image_urls.medium`（不是 `px_170x170`），导致订阅页 / pixiv 页头像取不到。新增 `pickAvatar()`（medium→px_170x170→large→…）统一取值，`fetchPixivUser` / `fetchPixivWorkDetail` / `normalizeWork` / token 响应都改用它。
+
+**本地库信息条支持多平台 + pixiv 头像**：`FileTweetInfo` 加 `platform`/`profileUrl`，`recordToTweetInfo` 按平台拼作者主页（X / pawchive `pawchive.pw/<svc>/user/<id>` / pixiv `pixiv.net/users/<id>`）；`DownloadHistoryRecord` 加 `userId`（新下载起写入）；`TweetSidebar` 改为按平台：pixiv 头像带 Referer、只在 X 才调 twitter `getUser`、`@handle` 仅 X 显示、加平台标签。时间流 feed 的 pixiv 头像改用订阅解析到的作者头像（不依赖列表字段）。⚠️ 旧 pixiv 下载记录无 `userId` → 作者主页链接暂缺（下载详情页链接仍可点）。
 
 **引导连续播放 + 首启**：`GuidePlayer` 支持多章连播（`stores/guide-player.ts` 存 `chapters[]`，新增 `playAll()`），左下角在「跳过」旁加「跳过本章」（多章时显示）；`guide-tours.tsx` 导出 `GUIDE_CHAPTERS`（按指南顺序、仅有动画的 10 章）。`UserGuide`：抽屉底部按钮改为「连续播放全部引导」、**移除「启动时自动播放引导」勾选框**；首次启动改为**直接播放新手引导（第 1 章）**并把 `guide.showOnStart` 置 false（不再自动弹抽屉/引导）。⚠️ 第 11 章以图搜图无动画，故连播为 10 章。
 

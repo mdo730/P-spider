@@ -6,7 +6,7 @@ import {
   normalizePath,
   recordToTweetInfo,
 } from '../../stores/download-history';
-import { buildPostUrl } from '../../twitter/url';
+import { buildPostUrl, buildUserUrl } from '../../twitter/url';
 
 let _log: ICategoriedLogger;
 
@@ -179,6 +179,8 @@ function tracedToInfo(record: TracedRecord): FileTweetInfo {
     time: record.tweetTime,
     url,
     text: record.fullText,
+    platform: 'twitter',
+    profileUrl: record.username ? buildUserUrl(record.username) : undefined,
   };
 }
 
@@ -195,6 +197,8 @@ function parsedToInfo(
     username: parsed.username,
     time: parsed.time,
     url,
+    platform: 'twitter',
+    profileUrl: parsed.username ? buildUserUrl(parsed.username) : undefined,
   };
 }
 

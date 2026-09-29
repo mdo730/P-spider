@@ -43,7 +43,12 @@ import {
   platformPostToFeedItem,
   writeFeedItems,
 } from '../services/feed';
-import { fetchPixivUser, fetchPixivWorks, PixivWork } from '../services/pixiv';
+import {
+  fetchPixivUser,
+  fetchPixivWorks,
+  PixivUser,
+  PixivWork,
+} from '../services/pixiv';
 import { downloadPixivWork } from '../services/pixiv-download';
 
 /**
@@ -708,15 +713,16 @@ async function checkArchiverSubscription(
 }
 
 /** 把一件 pixiv 作品转成 feed 缓存条目（时间流用；列表已带缩略图，不再逐件拉详情） */
-function pixivWorkToFeedItem(work: PixivWork) {
+function pixivWorkToFeedItem(work: PixivWork, user?: PixivUser) {
   const post: PlatformPost = {
     id: work.id,
     creator: {
-      id: work.userId,
-      name: work.userNick,
-      username: work.userName,
-      avatar: work.userAvatar,
-      profileUrl: `https://www.pixiv.net/users/${work.userId}`,
+      id: user?.id || work.userId,
+      name: user?.name || work.userNick,
+      username: user?.account || work.userName,
+      // 列表接口不一定带头像，优先用订阅检查时解析到的作者头像
+      avatar: user?.avatar || work.userAvatar,
+      profileUrl: `https://www.pixiv.net/users/${user?.id || work.userId}`,
     },
     publishedAt: dayjs(work.createDate),
     text: work.title,
@@ -769,7 +775,7 @@ async function checkPixivSubscription(
     const isNew = newestId !== sub.lastTweetId;
 
     // 时间流 v2：订阅刷新「顺带」写入 feed（含未下载；不能因为没有新作品就跳过）
-    await writeFeedItems(works.map(pixivWorkToFeedItem));
+    await writeFeedItems(works.map((w) => pixivWorkToFeedItem(w, user)));
 
     let downloaded = 0;
     const wantsPhoto = sub.mediaTypes.includes(MediaType.Photo);
