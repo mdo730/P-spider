@@ -107,19 +107,31 @@ export const LibraryPage: React.FC = () => {
     ? subStack[subStack.length - 1].path
     : opened?.path || '';
 
+  const backToLibrary = () => {
+    setOpened(null);
+    setSubStack([]);
+  };
+  const goUpOne = () => {
+    if (subStack.length > 0) setSubStack((prev) => prev.slice(0, -1));
+    else backToLibrary();
+  };
+
   const breadcrumbItems = [
     {
-      title: (
-        <a
-          onClick={() => {
-            setOpened(null);
-            setSubStack([]);
-          }}
-        >
-          {opened ? opened.name : '本地库'}
-        </a>
-      ),
+      title: <a onClick={backToLibrary}>本地库</a>,
     },
+    ...(opened
+      ? [
+          {
+            title:
+              subStack.length > 0 ? (
+                <a onClick={() => setSubStack([])}>{opened.name}</a>
+              ) : (
+                opened.name
+              ),
+          },
+        ]
+      : []),
     ...subStack.map((folder, index) => ({
       title:
         index === subStack.length - 1 ? (
@@ -154,16 +166,16 @@ export const LibraryPage: React.FC = () => {
             {opened && (
               <div className="flex items-center gap-3 pb-3">
                 <Breadcrumb items={breadcrumbItems} />
-                <Button
-                  size="small"
-                  className="ml-auto"
-                  onClick={() => {
-                    setOpened(null);
-                    setSubStack([]);
-                  }}
-                >
-                  返回
-                </Button>
+                <div className="ml-auto flex shrink-0 gap-2">
+                  <Button size="small" onClick={goUpOne}>
+                    上一级
+                  </Button>
+                  {subStack.length > 0 && (
+                    <Button size="small" onClick={backToLibrary}>
+                      返回库
+                    </Button>
+                  )}
+                </div>
               </div>
             )}
             {opened ? (

@@ -19,6 +19,10 @@ interface Props {
   rightInset?: number;
   /** 右键菜单（文件操作）；查看器会在前面追加「放大/缩小/旋转/重置」 */
   menuFor?: (image: ViewerImage) => MenuProps;
+  /** 自定义左右切换（在「全部媒体」里前后移动；不传则只在图片内循环） */
+  onNavigate?: (dir: 1 | -1) => void;
+  /** 是否显示左右箭头（默认：图片≥2 张时显示；传了 onNavigate 时可覆盖） */
+  navigationEnabled?: boolean;
 }
 
 const MIN_SCALE = 0.2;
@@ -42,6 +46,8 @@ export const ImageViewer: React.FC<Props> = ({
   onClose,
   rightInset = 0,
   menuFor,
+  onNavigate,
+  navigationEnabled,
 }) => {
   const [scale, setScale] = useState(1);
   const [rotate, setRotate] = useState(0);
@@ -69,11 +75,17 @@ export const ImageViewer: React.FC<Props> = ({
 
   const go = useCallback(
     (dir: number) => {
+      // 交给父级在「全部媒体」里切换（可跨到视频）；否则只在图片内循环
+      if (onNavigate) {
+        onNavigate(dir >= 0 ? 1 : -1);
+        return;
+      }
       if (images.length <= 1) return;
       onIndexChange((index + dir + images.length) % images.length);
     },
-    [images.length, index, onIndexChange],
+    [onNavigate, images.length, index, onIndexChange],
   );
+  const showArrows = navigationEnabled ?? images.length > 1;
 
   // 切图时重置视图与加载态
   useEffect(() => {
@@ -224,7 +236,7 @@ export const ImageViewer: React.FC<Props> = ({
       </button>
 
       {/* 左右切换 */}
-      {images.length > 1 && (
+      {showArrows && (
         <>
           <button
             type="button"

@@ -10,7 +10,7 @@
 - ④ 时间流 v2（数据源改订阅 feed 缓存 + 标注 + 分类配色 + 胶囊筛选）——**已完成（2026-09-29）**
 - ① pixiv **L2（登录/浏览/下载）+ L3（自建订阅追新 / 进时间流）——均已完成（2026-09-29）**
 
-> ✅ **已发布抢先版**：GitHub Release `v1.6.0`（**Pre-release**，2026-09-29；`releases/latest` 仍指向 `v1.5.1` 正式版）。commit `eaf6324` 已 push master。附件：`P-Spider_1.6.0_x64-setup.exe` + `P-Spider.exe` + `aria2c.exe`（**已随侧栏渐变/指南补充等改动重新覆盖上传**）。绿色版目录同步更新。commit `4dc5f8f`。
+> ✅ **已发布抢先版**：GitHub Release `v1.6.0`（**Pre-release**，2026-09-29；`releases/latest` 仍指向 `v1.5.1` 正式版）。commit `eaf6324` 已 push master。附件：`P-Spider_1.6.0_x64-setup.exe` + `P-Spider.exe` + `aria2c.exe`（**已两次覆盖上传**：侧栏渐变/指南补充 `4dc5f8f`；pixiv 头像字段 + 本地库信息条多平台 `8b6ce8c`）。绿色版目录同步更新。最新 commit `8b6ce8c`。
 
 已完成项改了：`interfaces/Settings.ts`、`constants/settings.ts`（版本 4→5）、`stores/settings.ts`（迁移）、
 `constants/routes.tsx`（`SIDEBAR_HIDEABLE_IDS`/`applySidebarOrder`）、`components/SideBar.tsx`、

@@ -7,7 +7,7 @@ import {
   PictureOutlined,
   PlayCircleFilled,
 } from '@ant-design/icons';
-import { App, Checkbox, Dropdown, MenuProps, Modal } from 'antd';
+import { App, Checkbox, Dropdown, MenuProps } from 'antd';
 import React, { useState } from 'react';
 import { deleteLibraryFiles } from '../../services/library-actions';
 import {
@@ -21,12 +21,12 @@ import {
   TracedRecord,
   resolveFileTweetInfo,
 } from '../../utils/library';
-import { toAssetUrl } from '../../utils/asset';
 import { handleImageMenuKey, imageMenuItems } from '../../utils/image-menu';
 import { openPath, openUrl, showInFolder } from '../../utils/shell';
 import { ImageViewer } from './ImageViewer';
 import { LocalThumb } from './LocalThumb';
 import { TweetSidebar } from './TweetSidebar';
+import { VideoViewer } from './VideoViewer';
 
 const EMPTY_HISTORY_MAP = new Map<string, DownloadHistoryRecord>();
 const EMPTY_TRACE_MAP = new Map<string, TracedRecord>();
@@ -98,6 +98,47 @@ export const FileGrid: React.FC<Props> = ({
     : viewerOpen
       ? imageFiles[viewerIndex]
       : undefined;
+
+  // 视频弹窗里左右切换：在「全部媒体」里前后移动；遇到图片则切到图片查看器
+  const videoIndex = videoFile
+    ? files.findIndex((f) => f.path === videoFile.path)
+    : -1;
+  const goMedia = (dir: -1 | 1) => {
+    if (videoIndex < 0) return;
+    const i = videoIndex + dir;
+    if (i < 0 || i >= files.length) return;
+    const target = files[i];
+    if (target.kind === 'video') {
+      setVideoFile(target);
+    } else {
+      const ii = imageIndexMap.get(target.path);
+      if (ii != null) {
+        setVideoFile(null);
+        setViewerIndex(ii);
+        setSidebarCollapsed(false);
+        setViewerOpen(true);
+      }
+    }
+  };
+
+  // 图片查看器里左右切换：在「全部媒体」里前后移动；遇到视频则切到视频弹窗
+  const viewerFilePath = viewerOpen ? imageFiles[viewerIndex]?.path : undefined;
+  const navigateMedia = (dir: 1 | -1) => {
+    if (!viewerFilePath) return;
+    const i = files.findIndex((f) => f.path === viewerFilePath);
+    if (i < 0) return;
+    const j = i + dir;
+    if (j < 0 || j >= files.length) return;
+    const target = files[j];
+    if (target.kind === 'image') {
+      const ii = imageIndexMap.get(target.path);
+      if (ii != null) setViewerIndex(ii);
+    } else {
+      setViewerOpen(false);
+      setSidebarCollapsed(false);
+      setVideoFile(target);
+    }
+  };
 
   const reveal = async (file: FileRef) => {
     try {
@@ -291,6 +332,8 @@ export const FileGrid: React.FC<Props> = ({
           onClose={() => setViewerOpen(false)}
           rightInset={sidebarCollapsed ? 0 : 320}
           menuFor={menuFor}
+          onNavigate={navigateMedia}
+          navigationEnabled={files.length > 1}
         />
       )}
 
@@ -307,25 +350,17 @@ export const FileGrid: React.FC<Props> = ({
         />
       )}
 
-      <Modal
-        open={!!videoFile}
-        footer={null}
-        width="92%"
-        centered
-        wrapClassName="library-video-wrap"
-        styles={{ body: { padding: 0, background: '#0f1114' } }}
-        destroyOnClose
-        onCancel={() => setVideoFile(null)}
-      >
-        {videoFile && (
-          <video
-            src={toAssetUrl(videoFile.path)}
-            controls
-            autoPlay
-            className="w-full max-h-[80vh] bg-black"
-          />
-        )}
-      </Modal>
+      {videoFile && (
+        <VideoViewer
+          path={videoFile.path}
+          index={videoIndex}
+          total={files.length}
+          rightInset={sidebarCollapsed ? 0 : 320}
+          onPrev={() => goMedia(-1)}
+          onNext={() => goMedia(1)}
+          onClose={() => setVideoFile(null)}
+        />
+      )}
     </>
   );
 };
