@@ -9,7 +9,7 @@ import { listen } from '@tauri-apps/api/event';
 import { getCurrent } from '@tauri-apps/api/window';
 import { SideBar } from './components/SideBar';
 import { UserGuide } from './components/UserGuide';
-import { ANTD_THEME } from './constants/antd-theme';
+import { ANTD_THEME, PRIMARY_COLOR_SPECTATOR } from './constants/antd-theme';
 import { useBootstrap } from './hooks/useBootstrap';
 import { useRunBackgroundTasks } from './hooks/useRunBackgroundTasks';
 import { useAppStateStore } from './stores/app-state';
@@ -127,7 +127,7 @@ export const App: React.FC = () => {
   const theme = spectator
     ? {
         ...ANTD_THEME,
-        token: { ...ANTD_THEME.token, colorPrimary: '#D76998' },
+        token: { ...ANTD_THEME.token, colorPrimary: PRIMARY_COLOR_SPECTATOR },
       }
     : ANTD_THEME;
 

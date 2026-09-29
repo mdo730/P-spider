@@ -8,6 +8,10 @@ import { useFigmemoStore } from '../stores/figmemo';
 import { useMoeyoStore } from '../stores/moeyo';
 import { useSettingsStore } from '../stores/settings';
 import { useUpdateStore } from '../stores/update';
+import {
+  SIDEBAR_GRADIENT,
+  SIDEBAR_GRADIENT_SPECTATOR,
+} from '../constants/antd-theme';
 import { Account } from './Account';
 
 interface SideBarItemProps {
@@ -79,6 +83,8 @@ export const SideBar: React.FC = () => {
   const hidden = useSettingsStore((s) => s.sidebar?.hidden || []);
   const order = useSettingsStore((s) => s.sidebar?.order || []);
   const iconOnly = useSettingsStore((s) => s.sidebar?.iconOnly === true);
+  const spectator = useSettingsStore((s) => s.app?.spectator === true);
+  const gradient = spectator ? SIDEBAR_GRADIENT_SPECTATOR : SIDEBAR_GRADIENT;
 
   const routes = applySidebarOrder(order).filter(
     (r) =>
@@ -101,15 +107,22 @@ export const SideBar: React.FC = () => {
   return (
     <aside
       aria-label="侧边栏"
+      style={{
+        // 上 80% 实色，下 20% 渐变到底色（8:2）
+        backgroundImage: `linear-gradient(to bottom, ${gradient.top} 0%, ${gradient.top} 80%, ${gradient.bottom} 100%)`,
+      }}
       className={clsx(
-        'fixed top-0 left-0 h-full bg-ant-color-primary z-40 transition-all flex flex-col',
+        'fixed top-0 left-0 h-full z-40 transition-all flex flex-col overflow-hidden',
         iconOnly ? 'w-14' : 'w-52',
       )}
     >
-      <div className="shrink-0">
+      <div className="relative shrink-0">
         <Account />
       </div>
-      <nav aria-label="页面导航" className="flex-1 overflow-y-auto pb-4">
+      <nav
+        aria-label="页面导航"
+        className="relative flex-1 overflow-y-auto pb-4"
+      >
         <ul className={clsx('pt-4 space-y-1', iconOnly && 'flex flex-col')}>
           {routes.map((route) => (
             <Item

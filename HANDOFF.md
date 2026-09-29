@@ -2,7 +2,7 @@
 
 > 用途：开新会话时把本项目状态快速交接给 AI。最后更新：2026-09-29
 
-## 进行中：v1.6.0（未发布）
+## v1.6.0（抢先版已发布 2026-09-29）
 
 四项功能已全部定稿（详见 `PLAN-1.6.0.md`），**一次性作为一个版本发布**：
 - ② 侧栏（显示/隐藏 + 排序 + 紧凑化）——**已完成**
@@ -10,7 +10,7 @@
 - ④ 时间流 v2（数据源改订阅 feed 缓存 + 标注 + 分类配色 + 胶囊筛选）——**已完成（2026-09-29）**
 - ① pixiv **L2（登录/浏览/下载）+ L3（自建订阅追新 / 进时间流）——均已完成（2026-09-29）**
 
-> ✅ v1.6.0 四项（②③④①）代码层面全部完成，**已 `pnpm tauri build` 打包（版本号升至 1.6.0）并拷到绿色版**；待桌面实测 + commit + 发布。
+> ✅ **已发布抢先版**：GitHub Release `v1.6.0`（**Pre-release**，2026-09-29；`releases/latest` 仍指向 `v1.5.1` 正式版）。commit `eaf6324` 已 push master。附件：`P-Spider_1.6.0_x64-setup.exe` + `P-Spider.exe` + `aria2c.exe`。绿色版目录也已更新。
 
 已完成项改了：`interfaces/Settings.ts`、`constants/settings.ts`（版本 4→5）、`stores/settings.ts`（迁移）、
 `constants/routes.tsx`（`SIDEBAR_HIDEABLE_IDS`/`applySidebarOrder`）、`components/SideBar.tsx`、
