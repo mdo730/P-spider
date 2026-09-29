@@ -8,6 +8,7 @@ import { useMoeyoTagsStore } from '../stores/moeyo-tags';
 import { useSettingsStore } from '../stores/settings';
 import { getMediaKind, isMediaFile, mapLimit } from '../utils/library';
 import { unicodeFilenamify } from '../utils/unicode';
+import { isSpectatorOn } from '../utils/spectator';
 import { HpoiMatch } from './hpoi';
 import moeyoSiteSeedData from '../data/moeyo-site-seed.json';
 import moeyoHpoiSeedData from '../data/moeyo-hpoi.json';
@@ -779,6 +780,9 @@ async function processPost(
   }
 
   // 标签不在此处打：统一由 syncLocalTags 基于本地文件夹同步（本地有才建）
+
+  // 超级旁观者：追新（isFeed）时不自动下载文件，仅更新元数据/缓存供时间流使用
+  if (isFeed && isSpectatorOn()) return 0;
 
   if (images.length === 0) return 0;
 

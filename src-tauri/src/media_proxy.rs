@@ -50,6 +50,8 @@ fn handle(req: tiny_http::Request) -> Result<(), String> {
     let mut target = String::new();
     let mut proxy = String::new();
     let mut local = String::new();
+    // 可选 Referer（如 pixiv 图片防盗链需 https://www.pixiv.net/）；缺省沿用 x.com
+    let mut referer = String::new();
     for pair in query.split('&') {
         let mut it = pair.splitn(2, '=');
         let k = it.next().unwrap_or("");
@@ -59,8 +61,12 @@ fn handle(req: tiny_http::Request) -> Result<(), String> {
             "u" => target = dv,
             "p" => proxy = dv,
             "f" => local = dv,
+            "r" => referer = dv,
             _ => {}
         }
+    }
+    if referer.is_empty() {
+        referer = "https://x.com/".to_string();
     }
 
     // 本地文件：给 WebView 的 <video> 一个支持 Range 的 http 源
@@ -92,7 +98,7 @@ fn handle(req: tiny_http::Request) -> Result<(), String> {
     let mut r = client
         .get(&target)
         .header("User-Agent", UA)
-        .header("Referer", "https://x.com/");
+        .header("Referer", referer);
     if let Some(rg) = range {
         r = r.header("Range", rg);
     }

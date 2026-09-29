@@ -27,6 +27,10 @@ import {
   buildTagIndex,
   dedupeTagSelection,
 } from '../../utils/library';
+import { tagChipStyle } from '../../utils/tag-color';
+
+/** moeyo 的「分类」根名（其整棵子树的标签用低饱和固定色） */
+const CATEGORY_ROOT_NAME = 'moeyo';
 
 interface Props {
   filter: LibraryFilter;
@@ -60,6 +64,11 @@ export const CategorySidebar: React.FC<Props> = ({
 
   const index = useMemo(() => buildTagIndex(tags), [tags]);
   const treeData = useMemo(() => toTreeData(index.roots), [index]);
+  // 「分类」根整棵子树的标签 id → 用低饱和固定色（与时间流标注统一）
+  const categoryIds = useMemo(() => {
+    const root = index.roots.find((r) => r.name === CATEGORY_ROOT_NAME);
+    return root ? index.subtreeIds(root.id) : new Set<string>();
+  }, [index]);
 
   // 标签树虚拟滚动的容器高度
   const treeBoxRef = useRef<HTMLDivElement>(null);
@@ -186,9 +195,19 @@ export const CategorySidebar: React.FC<Props> = ({
     const count = counts.byId[id] || 0;
     return (
       <span className="group flex w-full items-center gap-1 pr-1 min-w-0">
-        <span className="truncate" title={name}>
-          {name}
-        </span>
+        {categoryIds.has(id) ? (
+          <span
+            className="truncate rounded border px-1"
+            style={tagChipStyle(name)}
+            title={name}
+          >
+            {name}
+          </span>
+        ) : (
+          <span className="truncate" title={name}>
+            {name}
+          </span>
+        )}
         {count > 0 && <span className="text-xs text-gray-400">{count}</span>}
         <Dropdown
           trigger={['click']}

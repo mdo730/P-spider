@@ -108,3 +108,25 @@ export async function pinUserFolderName(
   save();
   return name;
 }
+
+/** 只读：取该账号已绑定的文件夹名（未绑定返回 undefined；不写盘、不锁定） */
+export async function lookupUserFolderName(
+  source: PlatformSource,
+  ids: { id?: string; username?: string },
+): Promise<string | undefined> {
+  const map = await load();
+  if (ids.id) {
+    const byId = map[`${source}:id:${ids.id}`];
+    if (byId) return byId;
+  }
+  if (ids.username) {
+    const byUn = map[`${source}:un:${ids.username.toLowerCase()}`];
+    if (byUn) return byUn;
+  }
+  return undefined;
+}
+
+/** 只读：取「平台+用户名/id → 文件夹名」全量映射（时间流批量解析本地库标签用） */
+export async function getUserFolderMap(): Promise<Record<string, string>> {
+  return { ...(await load()) };
+}

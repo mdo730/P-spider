@@ -246,3 +246,186 @@ pub fn convert_video_to_gif(src: String, dst: String) -> Result<(), String> {
     }
 }
 
+/// 下载 pixiv ugoira 的 zip → 解压帧序列 → 用系统 ffmpeg 合成 mp4（或 gif）。
+/// `frames_json`：[{"file":"000000.jpg","delay":100}]（delay 毫秒）。
+/// 供 pixiv 动图下载（默认 mp4；勾选「GIF 转真 gif」时 format=gif）。
+#[tauri::command]
+pub async fn download_and_convert_ugoira(
+    url: String,
+    headers: std::collections::HashMap<String, String>,
+    enable_proxy: bool,
+    proxy_url: String,
+    frames_json: String,
+    out_path: String,
+    format: String,
+) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        use std::io::Write;
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+        // 1) 下载 zip（走应用代理；带 Referer 破防盗链）
+        let mut b = reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(15))
+            .timeout(std::time::Duration::from_secs(120));
+        if enable_proxy && !proxy_url.is_empty() {
+            let ph = reqwest::Proxy::http(proxy_url.clone()).map_err(|e| e.to_string())?;
+            let ps = reqwest::Proxy::https(proxy_url.clone()).map_err(|e| e.to_string())?;
+            b = b.proxy(ph).proxy(ps);
+        } else if !enable_proxy {
+            b = b.no_proxy();
+        }
+        let client = b.build().map_err(|e| e.to_string())?;
+        let mut req = client.get(&url);
+        for (k, v) in headers {
+            req = req.header(k, v);
+        }
+        let resp = req.send().await.map_err(|e| e.to_string())?;
+        if !resp.status().is_success() {
+            return Err(format!("下载 ugoira zip 失败：HTTP {}", resp.status().as_u16()));
+        }
+        let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
+
+        // 2) 临时目录
+        let nanos = std::time::SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let tmp = std::env::temp_dir().join(format!(
+            "p-spider-ugoira-{}-{}",
+            std::process::id(),
+            nanos
+        ));
+        std::fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
+        let zip_path = tmp.join("ugoira.zip");
+        std::fs::write(&zip_path, &bytes).map_err(|e| e.to_string())?;
+
+        let result = (|| -> Result<(), String> {
+            // 3) 解压（只取文件名，平铺到临时目录）
+            let zip_file = std::fs::File::open(&zip_path).map_err(|e| e.to_string())?;
+            let mut archive = zip::ZipArchive::new(zip_file).map_err(|e| e.to_string())?;
+            for i in 0..archive.len() {
+                let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
+                let name = entry.name().to_string();
+                if name.ends_with('/') {
+                    continue;
+                }
+                let safe = name.rsplit('/').next().unwrap_or(&name).to_string();
+                if safe.is_empty() {
+                    continue;
+                }
+                let mut out = std::fs::File::create(tmp.join(&safe)).map_err(|e| e.to_string())?;
+                std::io::copy(&mut entry, &mut out).map_err(|e| e.to_string())?;
+            }
+
+            // 4) 生成 concat 清单
+            #[derive(serde::Deserialize)]
+            struct Frame {
+                file: String,
+                delay: u64,
+            }
+            let frames: Vec<Frame> = serde_json::from_str(&frames_json).unwrap_or_default();
+            let mut seq: Vec<(String, u64)> = Vec::new();
+            for f in &frames {
+                let p = tmp.join(&f.file);
+                if p.is_file() {
+                    seq.push((p.to_string_lossy().replace('\\', "/"), f.delay.max(20)));
+                }
+            }
+            if seq.is_empty() {
+                let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(&tmp)
+                    .map_err(|e| e.to_string())?
+                    .filter_map(|e| e.ok())
+                    .map(|e| e.path())
+                    .filter(|p| {
+                        p.is_file()
+                            && p.extension()
+                                .and_then(|x| x.to_str())
+                                .map(|x| !x.eq_ignore_ascii_case("zip"))
+                                .unwrap_or(false)
+                    })
+                    .collect();
+                files.sort();
+                for p in files {
+                    seq.push((p.to_string_lossy().replace('\\', "/"), 100));
+                }
+            }
+            if seq.is_empty() {
+                return Err("ugoira 解压后没有帧".into());
+            }
+
+            let list_path = tmp.join("frames.txt");
+            {
+                let mut f = std::fs::File::create(&list_path).map_err(|e| e.to_string())?;
+                for (p, delay) in &seq {
+                    writeln!(f, "file '{}'", p.replace('\'', "'\\''")).map_err(|e| e.to_string())?;
+                    writeln!(f, "duration {:.3}", *delay as f64 / 1000.0)
+                        .map_err(|e| e.to_string())?;
+                }
+                if let Some((p, _)) = seq.last() {
+                    writeln!(f, "file '{}'", p.replace('\'', "'\\''")).map_err(|e| e.to_string())?;
+                }
+            }
+
+            // 5) ffmpeg 合成
+            let list_arg = list_path.to_string_lossy().replace('\\', "/");
+            let scale = "scale=trunc(iw/2)*2:trunc(ih/2)*2";
+            let is_gif = format.eq_ignore_ascii_case("gif");
+            let mut last_err = String::from("未找到 ffmpeg");
+            for exe in ffmpeg_candidates() {
+                let mut cmd = std::process::Command::new(&exe);
+                cmd.creation_flags(CREATE_NO_WINDOW);
+                if is_gif {
+                    let vf = format!(
+                        "fps=12,{},split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse",
+                        scale
+                    );
+                    cmd.args([
+                        "-y", "-hide_banner", "-loglevel", "error", "-f", "concat", "-safe", "0",
+                        "-i", &list_arg, "-vf", &vf, "-loop", "0", &out_path,
+                    ]);
+                } else {
+                    cmd.args([
+                        "-y", "-hide_banner", "-loglevel", "error", "-f", "concat", "-safe", "0",
+                        "-i", &list_arg, "-vsync", "vfr", "-pix_fmt", "yuv420p", "-vf", scale,
+                        &out_path,
+                    ]);
+                }
+                match cmd.output() {
+                    Ok(o) => {
+                        if o.status.success() && std::path::Path::new(&out_path).is_file() {
+                            return Ok(());
+                        }
+                        last_err = String::from_utf8_lossy(&o.stderr).trim().to_string();
+                        if last_err.is_empty() {
+                            last_err = format!("ffmpeg 退出码 {:?}", o.status.code());
+                        }
+                    }
+                    Err(e) => {
+                        last_err = format!("{exe} 调用失败：{e}");
+                        break;
+                    }
+                }
+            }
+            Err(last_err)
+        })();
+
+        let _ = std::fs::remove_dir_all(&tmp);
+        result
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (
+            url,
+            headers,
+            enable_proxy,
+            proxy_url,
+            frames_json,
+            out_path,
+            format,
+        );
+        Err("仅支持 Windows".into())
+    }
+}
+

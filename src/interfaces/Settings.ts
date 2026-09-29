@@ -33,6 +33,8 @@ export interface Settings_V2 {
     autoStart: boolean;
     closeAction: 'minimize' | 'exit' | 'ask';
     rememberCloseChoice: boolean;
+    /** 超级旁观者模式：不进行任何「自动」下载（订阅/追新），仅浏览；手动保存/建库仍可用 */
+    spectator?: boolean;
   };
   /** 图片切割预设（本地库右键「复制切割图像」用） */
   split: {
@@ -74,6 +76,27 @@ export interface Settings_V3 extends Settings_V2 {
   subscription?: {
     /** 订阅列表视图：detail 详细（默认）/ compact 精简 */
     viewMode?: 'detail' | 'compact';
+  };
+  /** 侧栏显示与排序 */
+  sidebar?: {
+    /** 隐藏的页面路由 id（仅白名单内的页可隐藏） */
+    hidden?: string[];
+    /** 侧栏页面排序（路由 id 数组；未列出的按默认顺序排在其后） */
+    order?: string[];
+    /** 仅显示图标（侧栏更窄） */
+    iconOnly?: boolean;
+  };
+  /** pixiv 登录（refresh_token 优先；cookie 可选兜底） */
+  pixiv?: {
+    /** refresh_token（主登录方式） */
+    refreshToken?: string;
+    /** 可选：附加到请求头的 Cookie（PHPSESSID+XSRF-TOKEN） */
+    cookie?: string;
+    /** 校验后缓存的用户信息 */
+    userId?: string;
+    userName?: string;
+    userAccount?: string;
+    userAvatar?: string;
   };
 }
 

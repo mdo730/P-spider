@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::net::ToSocketAddrs;
 use reqwest::Method;
 use serde_json::Value;
 use winreg::enums::HKEY_CURRENT_USER;
@@ -40,6 +41,30 @@ pub async fn network_fetch(
     b = b
       .connect_timeout(std::time::Duration::from_secs(15))
       .timeout(std::time::Duration::from_secs(30));
+
+    // IPv6 优先：某些网络（尤其 TUN 模式）域名 IPv4 路由不通、IPv6 正常，
+    // reqwest 默认挑 IPv4 会一直等超时。这里把解析结果 IPv6 排在前面，
+    // 失败再回退 IPv4（顺序尝试）。
+    if let Ok(parsed) = reqwest::Url::parse(&url) {
+      if let Some(host) = parsed.host_str() {
+        let port = parsed.port_or_known_default().unwrap_or(443);
+        if let Ok(addrs) = (host, port).to_socket_addrs() {
+          let mut v6: Vec<std::net::SocketAddr> = Vec::new();
+          let mut v4: Vec<std::net::SocketAddr> = Vec::new();
+          for a in addrs {
+            if a.is_ipv6() {
+              v6.push(a);
+            } else {
+              v4.push(a);
+            }
+          }
+          if !v6.is_empty() && !v4.is_empty() {
+            v6.extend(v4);
+            b = b.resolve_to_addrs(host, &v6);
+          }
+        }
+      }
+    }
 
     // Auto set proxy settings
     if enable_proxy {

@@ -26,6 +26,10 @@ fn main() {
     // 单实例：非主实例且带 --image-search → 把路径转给已运行实例后直接退出（不新开窗口）
     let primary = image_search::start_control_listener();
     if !primary {
+        if let Some(u) = image_search::current_pixiv_arg() {
+            image_search::forward_pixiv_arg(&u);
+            std::process::exit(0);
+        }
         if let Some(p) = image_search::current_arg() {
             image_search::forward_arg(&p);
             std::process::exit(0);
@@ -76,6 +80,9 @@ fn main() {
           image_search::reverse_image_search,
           image_search::take_image_search_arg,
           image_search::take_pending_image_search,
+          image_search::take_pixiv_auth_arg,
+          image_search::take_pending_pixiv_auth,
+          image_search::set_pixiv_auth_scheme,
           image_search::set_image_search_explorer_menu,
           backup::export_user_backup,
           backup::import_user_backup,
@@ -86,6 +93,7 @@ fn main() {
           fsutil::copy_files_to_clipboard,
           fsutil::convert_video_to_gif,
           fsutil::video_thumbnail,
+          fsutil::download_and_convert_ugoira,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -4,7 +4,6 @@
 //! 这时只用 shell.open 打开链接，浏览器往往会开在后台，用户看不到结果。
 //! 这里补一次前台激活（AllowSetForegroundWindow + SetForegroundWindow）。
 
-use std::os::windows::process::CommandExt;
 use windows_sys::Win32::Foundation::{CloseHandle, LPARAM, BOOL, HWND};
 use windows_sys::Win32::System::Threading::{
     OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION,
@@ -12,13 +11,11 @@ use windows_sys::Win32::System::Threading::{
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     keybd_event, KEYEVENTF_KEYUP, VK_MENU,
 };
+use windows_sys::Win32::UI::Shell::ShellExecuteW;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     AllowSetForegroundWindow, EnumWindows, GetWindowTextLengthW, GetWindowThreadProcessId,
     IsWindowVisible, SetForegroundWindow, ShowWindow, ASFW_ANY, SW_RESTORE,
 };
-
-/// 不弹黑框
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// 常见浏览器/内嵌浏览器的进程名关键字
 const BROWSER_HINTS: &[&str] = &[
@@ -96,11 +93,22 @@ pub fn open_url_foreground(url: String) -> Result<(), String> {
     // 允许随后启动/激活的进程（浏览器）自行抢前台
     unsafe { AllowSetForegroundWindow(ASFW_ANY) };
 
-    std::process::Command::new("cmd")
-        .args(["/C", "start", "", &url])
-        .creation_flags(CREATE_NO_WINDOW)
-        .spawn()
-        .map_err(|e| e.to_string())?;
+    // 用 ShellExecuteW 打开，避免 `cmd /C start` 把 URL 里的 `&` 当命令分隔符截断
+    let op: Vec<u16> = "open\0".encode_utf16().collect();
+    let file: Vec<u16> = url.encode_utf16().chain(std::iter::once(0)).collect();
+    let ret = unsafe {
+        ShellExecuteW(
+            0,
+            op.as_ptr(),
+            file.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            1, // SW_SHOWNORMAL
+        )
+    } as isize;
+    if ret <= 32 {
+        return Err(format!("打开链接失败（ShellExecute={ret}）"));
+    }
 
     // 同步等待再激活：调用方（资源管理器启动的实例）会紧接着退出进程，
     // 若放到子线程里做，进程一退线程就没了。浏览器窗口创建/切页需要一点时间。

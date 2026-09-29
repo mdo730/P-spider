@@ -30,12 +30,23 @@ import { retweetModeOf } from '../stores/subscription';
 import { pinUserFolderName } from '../services/user-folders';
 import xIcon from '../assets/platform-icons/x.png';
 import pawchiveIcon from '../assets/platform-icons/pawchive.png';
+import pixivIcon from '../assets/platform-icons/pixiv.svg';
 import { LoadingOutlined, RetweetOutlined } from '@ant-design/icons';
 import { useSettingsStore } from '../stores/settings';
 import { useSubscriptionStore } from '../stores/subscription';
 import { buildUserUrl } from '../twitter/url';
 import { resolveVariables } from '../utils/file-name-template';
 import { showInFolder } from '../utils/shell';
+import { useRemoteImageSrc } from '../hooks/useRemoteImage';
+
+/** pixiv 头像在 i.pximg.net，需带 Referer 经后端拉取；其它平台直连 */
+function useSubAvatar(sub: Subscription): string | undefined {
+  const fetched = useRemoteImageSrc(
+    sub.source === 'pixiv' ? sub.avatar : undefined,
+    { headers: { Referer: 'https://www.pixiv.net/' } },
+  );
+  return sub.source === 'pixiv' ? fetched : sub.avatar;
+}
 
 const INTERVAL_OPTIONS = [
   { value: 15, label: '15 分钟' },
@@ -60,11 +71,19 @@ const STATUS_MAP: Record<
 const PLATFORM_LABEL: Record<string, string> = {
   twitter: 'X',
   pawchive: 'Pawchive',
+  pixiv: 'pixiv',
 };
 
 const PLATFORM_ICON: Record<string, string> = {
   twitter: xIcon,
   pawchive: pawchiveIcon,
+  pixiv: pixivIcon,
+};
+
+const PLATFORM_TAG_COLOR: Record<string, string> = {
+  twitter: 'blue',
+  pawchive: 'purple',
+  pixiv: 'geekblue',
 };
 
 /** 按订阅平台生成创作者主页链接 */
@@ -74,6 +93,9 @@ function buildSubProfileUrl(sub: Subscription): string {
     return service && user
       ? `https://pawchive.pw/${service}/user/${user}`
       : '#';
+  }
+  if (sub.source === 'pixiv') {
+    return `https://www.pixiv.net/users/${sub.username}`;
   }
   return buildUserUrl(sub.username);
 }
@@ -211,6 +233,7 @@ const SubscriptionItem: React.FC<SubscriptionItemProps> = ({
     mediaTypes: MediaType[];
     includeRetweets?: boolean;
   }>();
+  const avatarSrc = useSubAvatar(sub);
   const status = STATUS_MAP[sub.status];
   const intervalLabel =
     INTERVAL_OPTIONS.find((o) => o.value === sub.intervalMin)?.label ||
@@ -278,12 +301,12 @@ const SubscriptionItem: React.FC<SubscriptionItemProps> = ({
   return (
     <li className="flex items-center justify-between p-3 border-[1px] border-gray-200 rounded-md">
       <div className="flex items-center min-w-0">
-        <Avatar src={sub.avatar} size={42} alt="头像">
+        <Avatar src={avatarSrc} size={42} alt="头像">
           {(sub.displayName || sub.username)?.slice(0, 1)}
         </Avatar>
         <div className="ml-3 min-w-0">
           <div className="flex items-center space-x-2">
-            <Tag color={sub.source === 'twitter' ? 'blue' : 'purple'}>
+            <Tag color={PLATFORM_TAG_COLOR[sub.source] || 'purple'}>
               {PLATFORM_LABEL[sub.source] || sub.source}
             </Tag>
             <a
@@ -412,6 +435,7 @@ const SubscriptionCompact: React.FC<{
 }> = ({ sub, onRemove, onToggle, onCheckNow }) => {
   const { modal } = App.useApp();
   const [menuOpen, setMenuOpen] = useState(false);
+  const avatarSrc = useSubAvatar(sub);
   const mode = retweetModeOf(sub);
   const updated = sub.lastCheckedAt
     ? dayjs(sub.lastCheckedAt).format('MM-DD HH:mm')
@@ -455,7 +479,7 @@ const SubscriptionCompact: React.FC<{
         }`}
       >
         <div className="relative">
-          <Avatar src={sub.avatar} size={56} alt="头像" shape="square">
+          <Avatar src={avatarSrc} size={56} alt="头像" shape="square">
             {(sub.displayName || sub.username)?.slice(0, 1)}
           </Avatar>
           {/* 顶部：最近更新（检查）时间 */}

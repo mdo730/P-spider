@@ -13,7 +13,6 @@ import {
   Select,
   Space,
   Spin,
-  Tag,
 } from 'antd';
 import {
   ArrowUpOutlined,
@@ -26,6 +25,7 @@ import {
   LinkOutlined,
   PlayCircleFilled,
   ReloadOutlined,
+  TagOutlined,
 } from '@ant-design/icons';
 import { RetweetMode } from '../interfaces/Subscription';
 import dayjs from 'dayjs';
@@ -46,11 +46,12 @@ import {
   DownloadHistoryRecord,
   getMediaOriginalUrl,
   getMediaThumbUrl,
-  getTimelineGroups,
   TimelineGroup,
 } from '../stores/download-history';
 import { useDownloadStore } from '../stores/download';
+import { PlatformMedia, PlatformSource } from '../platforms';
 import { toPlatformMedia } from '../platforms/twitter';
+import { useRemoteImageSrc } from '../hooks/useRemoteImage';
 import { TwitterMedia } from '../interfaces/TwitterMedia';
 import {
   handleImageMenuKey,
@@ -60,17 +61,19 @@ import {
 import { buildUserUrl } from '../twitter/url';
 import {
   getRecentSiteNotes,
-  getSiteCategoryMap as getFigmemoCategoryMap,
   refreshSitePosts as refreshFigmemoSites,
 } from '../services/figmemo';
 import {
   getRecentSiteNotes as getMoeyoNotes,
-  getSiteCategoryMap as getMoeyoCategoryMap,
   refreshSitePosts as refreshMoeyoSites,
 } from '../services/moeyo';
 import { getRecentRetweetNotes, RetweetNote } from '../services/retweets';
+import { FeedItem, getRecentFeedItems } from '../services/feed';
+import { getUserFolderMap } from '../services/user-folders';
 import { useFigmemoStore } from '../stores/figmemo';
 import { useMoeyoStore } from '../stores/moeyo';
+import { useLibraryStore } from '../stores/library';
+import { tagChipActiveStyle, tagChipStyle } from '../utils/tag-color';
 import { useSettingsStore } from '../stores/settings';
 import { useRouteStore } from '../stores/route';
 import figmemoIcon from '../assets/platform-icons/figmemo.png';
@@ -144,6 +147,7 @@ function noteGroup(
     articlePage: page,
     sourceLabel,
     categories: n.categories,
+    filterTokens: [page === 'figmemo' ? 'fig-memo' : 'moeyo'],
     records: n.coverUrl
       ? [
           {
@@ -176,6 +180,7 @@ function retweetGroup(n: RetweetNote): TimelineGroup {
     avatar: n.authorAvatar,
     retweetedBy: n.retweetedBy[0]?.screenName,
     retweetedByCount: n.retweetedBy.length,
+    filterTokens: ['转贴'],
     records: n.medias.map((m) => ({
       postId: n.id,
       tweetTime: n.retweetedAt,
@@ -190,6 +195,82 @@ function retweetGroup(n: RetweetNote): TimelineGroup {
       postUrl: n.link,
       username: n.screenName,
       displayName: n.authorName,
+    })),
+  };
+}
+
+/** 本地库「一级文件夹名 → 标签名[]」映射（来自 library.json 的 categories） */
+function buildFolderTagMap(): Map<string, string[]> {
+  const map = new Map<string, string[]>();
+  for (const c of useLibraryStore.getState().categories) {
+    for (const f of c.folders) {
+      const arr = map.get(f);
+      if (arr) {
+        if (!arr.includes(c.name)) arr.push(c.name);
+      } else {
+        map.set(f, [c.name]);
+      }
+    }
+  }
+  return map;
+}
+
+/**
+ * feed 条目 → 命中的「本地库标签」名。
+ * 作者文件夹名经「账号 → 文件夹名」绑定（user-folders.json）解析，
+ * 绑定优先（id > username），再回退显示名 / 用户名。
+ */
+function resolveFeedLibraryTags(
+  item: FeedItem,
+  folderTags: Map<string, string[]>,
+  pinned: Record<string, string>,
+): string[] {
+  const src = item.source;
+  const candidates: string[] = [];
+  const push = (n?: string) => {
+    if (n && !candidates.includes(n)) candidates.push(n);
+  };
+  if (item.userId) push(pinned[`${src}:id:${item.userId}`]);
+  if (item.username) push(pinned[`${src}:un:${item.username.toLowerCase()}`]);
+  push(item.displayName);
+  push(item.username);
+  const tags: string[] = [];
+  for (const n of candidates) {
+    const t = folderTags.get(n);
+    if (t) {
+      for (const x of t) if (!tags.includes(x)) tags.push(x);
+    }
+  }
+  return tags;
+}
+
+/** 把 feed 缓存条目（X/Pawchive/pixiv）转成时间流分组 */
+function feedGroup(item: FeedItem, libraryTags: string[]): TimelineGroup {
+  return {
+    postId: item.id,
+    tweetTime: item.time,
+    fullText: item.text,
+    username: item.username,
+    displayName: item.displayName,
+    avatar: item.avatar,
+    kind: 'download',
+    libraryTags,
+    filterTokens: libraryTags,
+    records: item.medias.map((m) => ({
+      postId: item.id,
+      tweetTime: item.time,
+      mediaType: m.type,
+      mediaUrl: m.url,
+      videoUrl: m.videoUrl,
+      filePath: '',
+      fileName: '',
+      downloadedAt: 0,
+      source: 'subscription',
+      platform: item.source,
+      postUrl: item.url,
+      username: item.username,
+      displayName: item.displayName,
+      avatar: item.avatar,
     })),
   };
 }
@@ -213,6 +294,12 @@ export const TimelinePage: React.FC = () => {
   const rangeDays = useSettingsStore(
     (s) => s.timeline?.rangeDays ?? RANGE_DAYS,
   );
+  // 胶囊筛选：本地库标签 + [转贴] + [fig-memo] + [moeyo]（多选并集，未命中隐藏）
+  const [filterTags, setFilterTags] = useState<Set<string>>(new Set());
+  const [filterOpen, setFilterOpen] = useState(false);
+  const libraryCategories = useLibraryStore((s) => s.categories);
+  const figmemoEnabled = useFigmemoStore((s) => s.featureEnabled);
+  const moeyoEnabled = useMoeyoStore((s) => s.featureEnabled);
 
   const build = useCallback(async (): Promise<TimelineGroup[]> => {
     const days = Math.min(
@@ -222,31 +309,29 @@ export const TimelinePage: React.FC = () => {
         useSettingsStore.getState().timeline?.rangeDays ?? RANGE_DAYS,
       ),
     );
-    const downloads = await getTimelineGroups(days);
-    const downloaded = new Set(downloads.map((g) => g.postId));
-    // 给已下载的 fig-memo / moeyo 条目补上分类标注
+    // 时间流 v2：X / Pawchive / pixiv 来自订阅刷新结果 feed 缓存（下不下载都能看到）
+    const folderTags = buildFolderTagMap();
+    let pinned: Record<string, string> = {};
     try {
-      const fmMap = useFigmemoStore.getState().featureEnabled
-        ? await getFigmemoCategoryMap()
-        : null;
-      const moMap = useMoeyoStore.getState().featureEnabled
-        ? await getMoeyoCategoryMap()
-        : null;
-      for (const g of downloads) {
-        if (g.categories?.length) continue;
-        const pf = g.records[0]?.platform;
-        if (pf === 'figmemo' && fmMap) g.categories = fmMap.get(g.postId);
-        else if (pf === 'moeyo' && moMap) g.categories = moMap.get(g.postId);
-      }
+      pinned = await getUserFolderMap();
     } catch {
       // 忽略
     }
+    let downloads: TimelineGroup[] = [];
+    try {
+      const feed = await getRecentFeedItems(days);
+      downloads = feed.map((it) =>
+        feedGroup(it, resolveFeedLibraryTags(it, folderTags, pinned)),
+      );
+    } catch {
+      // 忽略
+    }
+
     const notes: TimelineGroup[] = [];
     if (useFigmemoStore.getState().featureEnabled) {
       try {
         for (const n of await getRecentSiteNotes(days)) {
-          if (!downloaded.has(n.postId))
-            notes.push(noteGroup('figmemo', 'fig-memo', n));
+          notes.push(noteGroup('figmemo', 'fig-memo', n));
         }
       } catch {
         // 忽略
@@ -258,8 +343,7 @@ export const TimelinePage: React.FC = () => {
           days,
           useSettingsStore.getState().timeline?.moeyoCategoryIds,
         )) {
-          if (!downloaded.has(n.postId))
-            notes.push(noteGroup('moeyo', 'moeyo', n));
+          notes.push(noteGroup('moeyo', 'moeyo', n));
         }
       } catch {
         // 忽略
@@ -268,8 +352,7 @@ export const TimelinePage: React.FC = () => {
     const retweets: TimelineGroup[] = [];
     try {
       for (const n of await getRecentRetweetNotes(days)) {
-        // 与已下载条目按原创推文 id 去重（原作者本就订阅时会被这里滤掉）
-        if (!downloaded.has(n.id)) retweets.push(retweetGroup(n));
+        retweets.push(retweetGroup(n));
       }
     } catch {
       // 忽略
@@ -383,30 +466,59 @@ export const TimelinePage: React.FC = () => {
     return () => clearInterval(timer);
   }, [refreshSites]);
 
+  // 筛选后的条目（多选并集；没命中的隐藏）；默认 [全部] 不过滤
+  const displayedGroups = useMemo(() => {
+    if (filterTags.size === 0) return groups;
+    return groups.filter((g) =>
+      (g.filterTokens || []).some((t) => filterTags.has(t)),
+    );
+  }, [groups, filterTags]);
+
+  // 筛选浮窗里的胶囊选项：本地库标签 + 转贴 + 站点（fig-memo/moeyo）
+  const filterOptions = useMemo(() => {
+    const opts = libraryCategories.map((c) => c.name);
+    const withFixed = (t: string) => {
+      if (!opts.includes(t)) opts.push(t);
+    };
+    withFixed('转贴');
+    if (figmemoEnabled) withFixed('fig-memo');
+    if (moeyoEnabled) withFixed('moeyo');
+    return opts;
+  }, [libraryCategories, figmemoEnabled, moeyoEnabled]);
+
+  const toggleFilterTag = (tag: string) => {
+    setFilterTags((prev) => {
+      const next = new Set(prev);
+      if (next.has(tag)) next.delete(tag);
+      else next.add(tag);
+      return next;
+    });
+  };
+
   const loadMore = useCallback(() => {
     setLoadingMore(true);
     // 模拟异步，避免快速连续触发
     setTimeout(() => {
       setVisibleCount((prev) => {
-        const next = Math.min(prev + LOAD_MORE_STEP, groups.length);
+        const next = Math.min(prev + LOAD_MORE_STEP, displayedGroups.length);
         visibleCountCache = next;
         return next;
       });
       setLoadingMore(false);
     }, 200);
-  }, [groups.length]);
+  }, [displayedGroups.length]);
 
   useEffect(() => {
     const el = sentinelRef.current;
     if (!el) return;
     const observer = new IntersectionObserver((entries) => {
-      if (entries[0].isIntersecting && visibleCount < groups.length) {
+      if (entries[0].isIntersecting && visibleCount < displayedGroups.length) {
         loadMore();
       }
     });
     observer.observe(el);
     return () => observer.disconnect();
-  }, [groups.length, visibleCount, loadMore]);
+  }, [displayedGroups.length, visibleCount, loadMore]);
 
   // 滚动位置保存/恢复（滚动容器是外层 <main>，切标签会重建）
   // 找到真正可滚动的祖先（App 外层 overflow-auto 的 div，而非 <main>）
@@ -452,28 +564,30 @@ export const TimelinePage: React.FC = () => {
     scrollTopCache = 0;
   };
 
-  const visibleGroups = groups.slice(0, visibleCount);
+  const visibleGroups = displayedGroups.slice(0, visibleCount);
 
   // 拖日期刻度条 → 定位到该日期（必要时先展开渲染到该条，再滚动到它）
   const jumpToDate = useCallback(
     (ms: number) => {
-      if (groups.length === 0) return;
-      let idx = groups.findIndex((g) => new Date(g.tweetTime).getTime() <= ms);
-      if (idx < 0) idx = groups.length - 1;
+      if (displayedGroups.length === 0) return;
+      let idx = displayedGroups.findIndex(
+        (g) => new Date(g.tweetTime).getTime() <= ms,
+      );
+      if (idx < 0) idx = displayedGroups.length - 1;
       const need = idx + 1;
       if (need > visibleCount) {
         visibleCountCache = need;
         setVisibleCount(need);
       }
       requestAnimationFrame(() => {
-        const g = groups[idx];
+        const g = displayedGroups[idx];
         const el = document.getElementById(
           `tl-${g.kind || 'download'}-${g.postId}`,
         );
         el?.scrollIntoView({ block: 'start' });
       });
     },
-    [groups, visibleCount],
+    [displayedGroups, visibleCount],
   );
 
   return (
@@ -486,12 +600,17 @@ export const TimelinePage: React.FC = () => {
           </div>
         ) : visibleGroups.length === 0 ? (
           <Empty
-            description={`近 ${rangeDays} 天还没有内容，订阅自动下载 / 新记事会显示在这里`}
+            description={
+              groups.length > 0
+                ? '没有命中筛选的内容'
+                : `近 ${rangeDays} 天还没有内容，订阅刷新 / 新记事会显示在这里`
+            }
           />
         ) : (
           <>
             <p className="text-sm text-gray-400">
-              近 {rangeDays} 天共 {groups.length} 条（含下载与未下载新记事）
+              近 {rangeDays} 天共 {displayedGroups.length} 条
+              {filterTags.size > 0 && `（筛自 ${groups.length} 条）`}
             </p>
             <ul className="space-y-4">
               {visibleGroups.map((group) => (
@@ -509,19 +628,19 @@ export const TimelinePage: React.FC = () => {
                 <Spin size="small" />
               </div>
             )}
-            {visibleCount >= groups.length && (
+            {visibleCount >= displayedGroups.length && (
               <p className="text-center text-gray-400 text-sm py-4">
-                已加载全部 {groups.length} 条
+                已加载全部 {displayedGroups.length} 条
               </p>
             )}
           </>
         )}
       </section>
 
-      {/* 右下角圆形按钮：日期定位 / 刷新 / 回到顶部 */}
+      {/* 右下角圆形按钮：日期定位 / 刷新 / 标签筛选 / 回到顶部 */}
       <div className="fixed right-6 bottom-6 z-50 flex flex-col items-end gap-3">
         <TimelineDateScrubber
-          groups={groups}
+          groups={displayedGroups}
           rangeDays={rangeDays}
           onJump={jumpToDate}
         />
@@ -536,6 +655,23 @@ export const TimelinePage: React.FC = () => {
         </button>
         <button
           type="button"
+          title="标签筛选"
+          onClick={() => setFilterOpen((v) => !v)}
+          className={`relative flex h-11 w-11 items-center justify-center rounded-full bg-white shadow-lg ring-1 ring-black/5 transition-all duration-200 hover:scale-110 active:scale-95 ${
+            filterTags.size > 0 || filterOpen
+              ? 'text-ant-color-primary'
+              : 'text-gray-600 hover:text-ant-color-primary'
+          }`}
+        >
+          <TagOutlined className="text-lg" />
+          {filterTags.size > 0 && (
+            <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-ant-color-primary px-1 text-[10px] leading-none text-white">
+              {filterTags.size}
+            </span>
+          )}
+        </button>
+        <button
+          type="button"
           title="回到顶部"
           onClick={scrollToTop}
           className="flex h-11 w-11 items-center justify-center rounded-full bg-white text-gray-600 shadow-lg ring-1 ring-black/5 transition-all duration-200 hover:scale-110 hover:text-ant-color-primary active:scale-95"
@@ -543,6 +679,45 @@ export const TimelinePage: React.FC = () => {
           <ArrowUpOutlined className="text-lg" />
         </button>
       </div>
+
+      {/* 标签筛选浮窗（约 1/4 屏）：胶囊多选并集；默认 [全部] */}
+      {filterOpen && (
+        <div className="fixed bottom-24 right-6 z-40 flex w-[min(360px,82vw)] max-h-[45vh] flex-col overflow-hidden rounded-xl bg-white shadow-2xl ring-1 ring-black/5">
+          <div className="flex items-center justify-between border-b border-gray-100 px-3 py-2">
+            <span className="text-sm font-medium">标签筛选</span>
+            <span className="text-xs text-gray-400">多选并集 · 未命中隐藏</span>
+          </div>
+          <div className="flex flex-wrap gap-2 overflow-y-auto p-3">
+            <button
+              type="button"
+              onClick={() => setFilterTags(new Set())}
+              className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+                filterTags.size === 0
+                  ? 'border-transparent bg-ant-color-primary text-white'
+                  : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+              }`}
+            >
+              全部
+            </button>
+            {filterOptions.map((t) => {
+              const active = filterTags.has(t);
+              return (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => toggleFilterTag(t)}
+                  style={active ? tagChipActiveStyle(t) : tagChipStyle(t)}
+                  className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+                    active ? '' : 'hover:brightness-95'
+                  }`}
+                >
+                  {t}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -740,8 +915,15 @@ const TimelineItem: React.FC<{
       : group.articlePage === 'moeyo'
         ? (moeyoIcon as string)
         : undefined;
+  // pixiv 头像在 i.pximg.net，需带 Referer 经后端拉取
+  const pixivAvatar = useRemoteImageSrc(
+    first?.platform === 'pixiv' ? group.avatar || first?.avatar : undefined,
+    { headers: { Referer: 'https://www.pixiv.net/' } },
+  );
   const avatarSrc =
-    group.avatar || (group.kind === 'note' ? platformIcon : first?.avatar);
+    first?.platform === 'pixiv'
+      ? pixivAvatar || group.avatar || first?.avatar
+      : group.avatar || (group.kind === 'note' ? platformIcon : first?.avatar);
   const avatarName = group.displayName || group.username || '?';
 
   const menuFor = (ctx: ImageMenuCtx): MenuProps => ({
@@ -864,7 +1046,17 @@ const TimelineItem: React.FC<{
           },
         };
       }
-      const media = toPlatformMedia(tmedia);
+      const src = (record.platform || 'twitter') as PlatformSource;
+      // pixiv 图片已是图本身，直接用原 url 作下载直链（不走推特缩略图/原图转换）
+      const media: PlatformMedia =
+        src === 'pixiv'
+          ? {
+              id: record.postId,
+              type: record.mediaType,
+              url: record.mediaUrl,
+              downloadUrl: record.mediaUrl,
+            }
+          : toPlatformMedia(tmedia);
       const post = {
         id: record.postId,
         creator: {
@@ -877,10 +1069,10 @@ const TimelineItem: React.FC<{
         text: group.fullText,
         medias: [media],
         postUrl: record.postUrl,
-        source: 'twitter' as const,
+        source: src,
       };
       await useDownloadStore.getState().createDownloadTask({
-        source: 'twitter',
+        source: src,
         post,
         media,
       });
@@ -930,6 +1122,12 @@ const TimelineItem: React.FC<{
                     ? ` 等 ${group.retweetedByCount} 人`
                     : ''}
                 </span>
+                <span
+                  className="ml-2 rounded border px-1.5 py-0.5 text-xs"
+                  style={tagChipStyle('转贴')}
+                >
+                  转贴
+                </span>
               </span>
             ) : isNote ? (
               <span className="font-medium">{group.sourceLabel || '记事'}</span>
@@ -950,13 +1148,37 @@ const TimelineItem: React.FC<{
                 @{first?.username}
               </span>
             )}
+            {/* 记事：站点分类色标 */}
             {isNote && group.categories && group.categories.length > 0 && (
               <div className="mt-1 flex flex-wrap gap-1">
                 {group.categories.map((c) => (
-                  <Tag key={c} className="!mr-0">
+                  <span
+                    key={c}
+                    className="rounded border px-1.5 py-0.5 text-xs"
+                    style={tagChipStyle(c)}
+                  >
                     {c}
-                  </Tag>
+                  </span>
                 ))}
+              </div>
+            )}
+            {/* X / Pawchive / pixiv：本地库标签（最多最靠前 3 个） */}
+            {!isNote && group.libraryTags && group.libraryTags.length > 0 && (
+              <div className="mt-1 flex flex-wrap gap-1">
+                {group.libraryTags.slice(0, 3).map((t) => (
+                  <span
+                    key={t}
+                    className="rounded border px-1.5 py-0.5 text-xs"
+                    style={tagChipStyle(t)}
+                  >
+                    {t}
+                  </span>
+                ))}
+                {group.libraryTags.length > 3 && (
+                  <span className="text-xs text-gray-400">
+                    +{group.libraryTags.length - 3}
+                  </span>
+                )}
               </div>
             )}
           </div>
@@ -982,9 +1204,12 @@ const TimelineItem: React.FC<{
               : record.filePath || undefined;
           const rawThumb = getMediaThumbUrl(record);
           const rawOriginal = getMediaOriginalUrl(record);
+          // pixiv 图片 i.pximg.net 有防盗链，经代理时需带 Referer
+          const mediaReferer =
+            record.platform === 'pixiv' ? 'https://www.pixiv.net/' : undefined;
           // 远程图（pbs 等被墙）也经本地代理取，本地文件删了仍能显示
           const toRemote = (u?: string) =>
-            u && /^https?:/i.test(u) ? mediaProxyUrl(u) : u;
+            u && /^https?:/i.test(u) ? mediaProxyUrl(u, mediaReferer) : u;
           const thumbUrl = toRemote(rawThumb);
           const originalUrl = toRemote(rawOriginal);
           // 只有视频走视频播放器；GIF 单独处理（要动、但不要播放器 UI）
@@ -1002,7 +1227,7 @@ const TimelineItem: React.FC<{
           if (isGif) {
             const localIsGif = !!localPath && /\.gif$/i.test(localPath);
             const remoteAnimSrc = record.videoUrl
-              ? mediaProxyUrl(record.videoUrl)
+              ? mediaProxyUrl(record.videoUrl, mediaReferer)
               : undefined;
             const animSrc = localIsGif
               ? toAssetUrl(localPath!)

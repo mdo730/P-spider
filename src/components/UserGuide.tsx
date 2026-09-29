@@ -1,33 +1,28 @@
 /* eslint-disable react/prop-types */
 import { QuestionOutlined } from '@ant-design/icons';
-import { Checkbox, Collapse, Drawer } from 'antd';
+import { Button, Collapse, Drawer } from 'antd';
 import { useMount } from 'ahooks';
 import React, { useState } from 'react';
 import { USER_GUIDE } from '../content/user-guide';
+import { GUIDE_TOURS } from '../content/guide-tours';
+import { GuidePlayer } from './guide/GuidePlayer';
+import { useGuidePlayerStore } from '../stores/guide-player';
 import { useSettingsStore } from '../stores/settings';
 
 /**
  * 使用指南：右上角圆形「?」按钮 → 右侧抽屉。
- * 首次启动（设置 guide.showOnStart 未关）自动弹出，底部有「下次启动不再显示」。
+ * 首次启动自动播放「新手引导」（设置 guide.showOnStart 未关）；抽屉里可重新播放。
  */
 export const UserGuide: React.FC = () => {
   const [open, setOpen] = useState(false);
-  /** 是否由「首次启动」自动打开（决定是否显示底部不再提示） */
-  const [autoOpened, setAutoOpened] = useState(false);
-  const [dontRemind, setDontRemind] = useState(false);
 
   useMount(() => {
-    const show = useSettingsStore.getState().guide?.showOnStart !== false;
-    if (show) {
-      setAutoOpened(true);
-      setOpen(true);
+    if (useSettingsStore.getState().guide?.showOnStart !== false) {
+      // 首次启动：播放新手引导（第 1 章「快速上手」），并把 showOnStart 关掉不再自动弹
+      useGuidePlayerStore.getState().open('start');
+      useSettingsStore.getState().updateOne('guide', 'showOnStart', false);
     }
   });
-
-  const applyDontRemind = (checked: boolean) => {
-    setDontRemind(checked);
-    useSettingsStore.getState().updateOne('guide', 'showOnStart', !checked);
-  };
 
   return (
     <>
@@ -35,10 +30,8 @@ export const UserGuide: React.FC = () => {
         type="button"
         title="使用指南"
         aria-label="使用指南"
-        onClick={() => {
-          setAutoOpened(false);
-          setOpen(true);
-        }}
+        data-tour="help"
+        onClick={() => setOpen(true)}
         className="fixed top-4 right-4 z-[900] flex h-9 w-9 items-center justify-center rounded-full border-[1px] border-gray-200 bg-white text-gray-500 shadow-sm transition-colors hover:border-ant-color-primary hover:text-ant-color-primary"
       >
         <QuestionOutlined />
@@ -51,14 +44,20 @@ export const UserGuide: React.FC = () => {
         open={open}
         onClose={() => setOpen(false)}
         footer={
-          autoOpened ? (
-            <Checkbox
-              checked={dontRemind}
-              onChange={(e) => applyDontRemind(e.target.checked)}
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs text-gray-400">
+              各章可单独播放，也可一次看完全部
+            </span>
+            <Button
+              type="primary"
+              onClick={() => {
+                setOpen(false);
+                useGuidePlayerStore.getState().playAll();
+              }}
             >
-              下次启动不再显示
-            </Checkbox>
-          ) : null
+              连续播放全部引导
+            </Button>
+          </div>
         }
       >
         <Collapse
@@ -67,15 +66,33 @@ export const UserGuide: React.FC = () => {
             key: s.id,
             label: s.title,
             children: (
-              <ul className="list-disc space-y-1 pl-5 text-sm leading-relaxed text-gray-600">
-                {s.items.map((t, i) => (
-                  <li key={i}>{t}</li>
-                ))}
-              </ul>
+              <div>
+                {GUIDE_TOURS[s.id]?.length ? (
+                  <Button
+                    size="small"
+                    type="primary"
+                    ghost
+                    className="mb-2"
+                    onClick={() => {
+                      setOpen(false);
+                      useGuidePlayerStore.getState().open(s.id);
+                    }}
+                  >
+                    ▶ 播放本节引导
+                  </Button>
+                ) : null}
+                <ul className="list-disc space-y-1 pl-5 text-sm leading-relaxed text-gray-600">
+                  {s.items.map((t, i) => (
+                    <li key={i}>{t}</li>
+                  ))}
+                </ul>
+              </div>
             ),
           }))}
         />
       </Drawer>
+
+      <GuidePlayer />
     </>
   );
 };

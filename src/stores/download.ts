@@ -141,13 +141,13 @@ export async function prepareDownloadTask({
     );
     const baseName = media.fileName || `file-${media.id || Date.now()}`;
     fileName = `${datePrefix} ${baseName}`.trim();
-  } else if (source !== 'twitter') {
+  } else if (source !== 'twitter' && source !== 'pixiv') {
     // 归档站（pawchive）：固定两级目录，附件保留原始文件名
     const { dir: archiverDir } = await prepareArchiverPostDir(post);
     dir = archiverDir;
     fileName = media.fileName || `file-${media.id || Date.now()}`;
   } else {
-    // twitter：走文件名模板机制
+    // twitter / pixiv：走文件名模板机制
     // 用户名绑定：同一账号改显示名（加活动/摊位后缀等）不再新建文件夹
     let postForDir = post;
     const creator = post.creator;
@@ -211,7 +211,9 @@ function aria2DownloadOptions(task: DownloadTask): Record<string, any> {
         ? 'https://fig-memo-r18.site/'
         : task.source === 'moeyo'
           ? 'https://moeyo.com/'
-          : 'https://pawchive.pw/';
+          : task.source === 'pixiv'
+            ? 'https://www.pixiv.net/'
+            : 'https://pawchive.pw/';
     options.header = [
       'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       `Referer: ${referer}`,
@@ -222,6 +224,11 @@ function aria2DownloadOptions(task: DownloadTask): Record<string, any> {
       'Sec-Fetch-Mode: no-cors',
       'Sec-Fetch-Site: cross-site',
     ];
+    // pixiv：若填了 Cookie 一并带上（i.pximg.net 主要靠 Referer，Cookie 聊备一格）
+    if (task.source === 'pixiv') {
+      const cookie = useSettingsStore.getState().pixiv?.cookie;
+      if (cookie) options.header.push(`Cookie: ${cookie}`);
+    }
   }
   return options;
 }

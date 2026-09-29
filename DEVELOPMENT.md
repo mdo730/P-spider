@@ -73,6 +73,8 @@ src-tauri/
 - **间隔机制**：相对时间，从该订阅**最后一次成功检查**起算（非整点）。`intervalMin` 单位分钟
 - **去重**：`lastTweetId` 记录基线，新推文用 `R.takeWhile(p.id !== lastTweetId)` 截取
 - **首次订阅**：立即后台检查建立基线，不下载历史，只追新
+- **多站点并行 + 分站限流（1.6.0）**：`checkSubscriptionsThrottled` 按 `source` 分组，**X / pawchive / pixiv 各跑各的队列并行检测**，各自并发/间隔：twitter 4/200ms、pawchive 2/600ms、pixiv 2/1000ms（原先共用一条队列，几条慢的 pawchive 会堵住全部 X）。
+- **Rust 请求 IPv6 优先（1.6.0）**：`network.rs` 的 `network_fetch` 解析域名后把 **IPv6 地址排在前面**（`resolve_to_addrs`），失败再回退 IPv4。原因：TUN 等网络下个别站点（Cloudflare，如 pawchive）**IPv6 通、IPv4 不通**，reqwest 默认挑 IPv4 会一直等到超时 → 订阅全军覆没。
 - **已订阅状态**：主页 `DownloadController` 对比 username 显示"已订阅"
 
 ### 统计
@@ -81,15 +83,21 @@ src-tauri/
 - 字节数来源：`onTaskCompleted` 事件（download.ts 在任务首次 complete 时 emit，携带 aria2 实际 totalSize）
 - 柱状图按数量渲染，y 轴刻度自适应（`getNiceTicks`，放大 1.2 倍取 nice 步长）
 
-### 时间流
+### 时间流（v2，2026-09-29）
 
-- 数据源：`downloads.jsonl`（每条下载记录一行 JSON）
-- 记录字段：postId、tweetTime（推文时间，非下载时间）、fullText、用户名、媒体类型、mediaUrl、filePath、source（subscription/manual）
-- 展示：近 7 天，按推文分组（同推文多图合并），首屏 25 条推文，滚动 +5
-- 缩略图：**本地优先（2026-09-25）**——照片且有 `filePath` 时用 `LocalThumb`（本地缩略图缓存，秒开）+ 本地预览；视频/GIF（本地是 mp4、无本地缩略图）仍走 `mediaUrl?format=jpg&name=thumb`（推特 CDN）
-- 原图预览：本地照片用本地文件 asset URL；其余用 `mediaUrl` 原图
+- **数据源（1.6.0 起）**：`%APPDATA%\p-spider\timeline-feed.jsonl`（**订阅刷新结果 feed 缓存**）。由现有订阅刷新逻辑在拉取时**顺带**写入（X/Pawchive/pixiv，不新增轮询）：`stores/subscription.ts` 的 `checkTwitterSubscription`/`checkArchiverSubscription` 在拉完最新一页后调 `services/feed.ts` 的 `writeFeedItems`（按 post id 去重、批量防抖落盘）。字段：`id/source/url/time(ISO)/text/username/displayName/avatar/userId/medias[{type,url,videoUrl?,thumbUrl?}]`。**保留天数跟随设置 `timeline.rangeDays`（1~30）**。
+  - **无首启种子**：feed 完全由订阅刷新产生；升级后需一次订阅刷新（点时间流「刷新」或等订阅到点）才有 X/Pawchive 内容，之后随刷新自然积累。
+  - `downloads.jsonl` **保留**（本地库「溯源」仍用），只是**不再作为时间流数据源**。
+- 其他来源：fig-memo/moeyo 的**未下载新记事**走各站点缓存（`getRecentSiteNotes`）；**转贴**走 `retweets.jsonl`（`getRecentRetweetNotes`）。
+- **标注**（作者 ID 下方）：X/Pawchive/pixiv 挂**本地库标签**（`library.json` 的 `categories`，作用于保存目录一级作者文件夹；作者文件夹名经 `user-folders.json` 的「账号→文件夹名」绑定解析，回退显示名/用户名）——**最多最靠前 3 个**；fig-memo/moeyo 挂**分类**；转贴挂 `[转贴]`。
+- **分类配色**：`utils/tag-color.ts` 按名字 hash 到一组**低饱和度固定色板**，同一分类名永远同色；时间流的分类标注 + fig-memo/moeyo 侧栏「分类」根下的标签统一用。
+- **胶囊筛选**：右下角圆形按钮组在**刷新与回到顶部之间**加「标签」按钮 → 展开约 1/4 屏浮窗，胶囊 = **本地库标签 + [转贴] + [fig-memo] + [moeyo]**（站点分类不进筛选）；默认 `[全部]`，多选**并集**，没命中的条目隐藏。本地库标签当前扁平（无层级），故为精确匹配。
+- 原 v1 记录字段（下载历史）：postId、tweetTime（推文时间，非下载时间）、fullText、用户名、媒体类型、mediaUrl、filePath、source（subscription/manual）
+- 展示：按保留天数（设置 `timeline.rangeDays`，1~30），按推文分组（同推文多图合并），首屏 25 条推文，滚动 +5
+- 缩略图：feed 条目不携带本地路径 → 统一走**远程 CDN 缩略图**（经 `mediaProxyUrl` 代理显示）；记事用站点封面。⚠️ v2 起不再像 v1 那样对已下载图片用本地缩略图
+- 原图预览：用 `mediaUrl` 原图（经代理）；视频/GIF 本地/远程均可播放（远程经本地流式代理）
 - ⚠️ `getMediaThumbUrl` 只有**推特**才加 `?format=jpg&name=thumb`（fig-memo/pawchive 的 `mediaUrl` 已是图本身，加参数会失效）
-- **注意**：只记录功能上线后新下载的内容，旧历史不会回溯
+- 说明：feed 缓存包含**未下载**内容，时间流不再只显示下载过的条目
 
 ### 自启动
 
@@ -224,6 +232,21 @@ src-tauri/
 - ⚠️ 注意：站点改版可能影响解析（都在 `services/figmemo.ts` 内）；R18 内容自行把握
 - ⚠️ 待清理：`download.ts` 里仍有 `if (source === 'figmemo')` 的命名分支（计划抽成「按源命名钩子」）
 
+### pixiv（1.6.0，L2 + L3 已完成）
+
+- **登录**（`services/pixiv.ts`）：**pixiv 已关闭 password grant**，改用 **OAuth2 PKCE 授权码登录**（gppt 同款）——`buildPixivLoginUrl()` 生成 `code_verifier`+S256 `code_challenge`，浏览器打开 `https://app-api.pixiv.net/web/v1/login?code_challenge=…&code_challenge_method=S256&client=pixiv-android`；用户浏览器登录后回跳 `pixiv://account/login?code=…`，把整段粘回 `exchangePixivCode()`：POST `oauth.secure.pixiv.net/auth/token`（grant_type=authorization_code、code、code_verifier、redirect_uri=`…/users/auth/pixiv/callback`、iOS UA/App-OS 头）换 `refresh_token`，**只存 refresh_token**。`access_token` 内存缓存（提前 60s 过期；401 自动重换）。**兜底**：手动填 refresh_token「保存并校验」；Cookie 可填但不依赖。用户名/@account/ID 从换 token 响应取。（`utils/md5.ts` 保留但密码登录已弃用。）
+  - **零复制（pixiv:// 协议回传）**：点「打开登录页」时注册 `HKCU\Software\Classes\pixiv`（`set_pixiv_auth_scheme`，命令 `"exe" "%1"`）；浏览器登录后回跳 `pixiv://account/login?code=…`，Windows 直接拉起/转发给 P-Spider（二次实例经 6803 控制通道，前缀 `PIXA\t`），`usePixivAuthRequests` 轮询 `take_pending_pixiv_auth`/`take_pixiv_auth_arg` → `exchangePixivCode()` 自动完成登录，成功后移除协议注册。仍可手动粘贴兜底。
+  - ⚠️ 顺带修 `open_url_foreground`：原用 `cmd /C start "" <url>`，`&` 被 cmd 当分隔符截断（登录 URL 只剩第一个参数→pixiv 报「不正確的請求」），已改用 `ShellExecuteW` 完整传递。
+- **API**：`app-api.pixiv.net`，请求头 `User-Agent: PixivAndroidApp/...` + `App-OS` + `Authorization: Bearer`；统一带 `filter=for_android`（R18 需账号开启「R-18 表示」）。用到：`/v1/user/detail`、`/v1/user/illusts?type=illust|manga&offset=`、`/v1/illust/detail`、`/v1/ugoira/metadata`。
+- **浏览页**（`pages/Pixiv.tsx` + `stores/pixiv.ts`）：顶部输入**画师主页链接 / 作品链接 / 纯数字 ID** 自动识别（作品链接会反查画师）；画师信息卡 + 作品网格；筛选 = 作品类型（插画/漫画/动图）+ 时间范围；无限滚动。缩略图/头像经 `useRemoteImageSrc` 带 `Referer: https://www.pixiv.net/` 走代理拉取（破 i.pximg.net 防盗链）。**暂无订阅按钮**。
+- **下载**（`services/pixiv-download.ts`）：沿用设置里的**目录/文件名模板**（`USER_SCREEN_NAME`=画师 account、`USER_NAME`=昵称、`POST_ID`、`POST_TIME`、`MEDIA_INDEX`=页码）——`stores/download.ts` 把 `source==='twitter' || 'pixiv'` 都走模板分支，aria2 加 `Referer: https://www.pixiv.net/`（+ 可选 Cookie）。多图全下走 aria2（source=`pixiv`，`PlatformSource` 新增）。
+  - **ugoira 动图**：`services/pixiv.ts` 取元数据 → Rust 命令 **`download_and_convert_ugoira`**（`src-tauri/src/fsutil.rs`：reqwest 下 zip → `zip` crate 解压帧 → 写 ffmpeg concat 清单（含每帧 delay）→ ffmpeg 合成 **mp4**；设置勾了「GIF 转真 gif」则合成 **gif**），完成后写 `downloads.jsonl` 历史。
+- **批量「开始下载全部」（按筛选）**：走 `platforms/pixiv.ts` 适配器 + `createCreationTask('pixiv', ...)`；适配器列表只取 `illust`（**ugoira 跳过、manga 暂不含**，少量边角后续补），对每件作品拉一次 `illust/detail` 取原图（并发 4）。
+- **画师→文件夹名绑定**：复用 `user-folders.json`（键 `pixiv:un:<account>` / `pixiv:id:<userId>`），让时间流本地库标签对得上。
+- **数据/版本**：settings **版本 5→6**（新增 `settings.pixiv`）；无新增数据文件（登录信息存 `settings.json`）。路由/侧栏加 `pixiv`（`SIDEBAR_HIDEABLE_IDS` 已含）。
+- **L3 订阅（已完成）**：pixiv 页画师卡「订阅该画师」+ 间隔选择（`username` 存画师数字 id）；`stores/subscription.ts` 的 `checkPixivSubscription` 拉 `/v1/user/illusts?type=illust` 最新一页 → 与 `lastTweetId`（复用字段）基线对比 → 新的用 `downloadPixivWork` 下载 + **写 feed 缓存**（`pixivWorkToFeedItem`，缩略图作媒体，不逐件拉详情）；首次只建基线。**限速**复用订阅调度的并发闸门（`CHECK_CONCURRENCY=4` + 200ms）。⚠️ 只订阅插画（含动图）；漫画暂不含；超级旁观者开启时不下载但仍写 feed/更新基线。
+- **进时间流**：feed 条目 `source/platform='pixiv'`；`Timeline` 对 pixiv 远程图/头像经 `mediaProxyUrl(url, 'https://www.pixiv.net/')` 带 Referer（`media_proxy.rs` 新增可选 `r=` 参数）；本地库标签经 `pixiv:un:<account>` 绑定解析。
+- ⚠️ **未桌面实测**：refresh_token 换 token、app-api 兼容性、ugoira 转码、订阅追新均需 `pnpm tauri dev` 真机验证（浏览器预览无 IPC/代理）。
 
 
 ### 回滚点（1.1.3）

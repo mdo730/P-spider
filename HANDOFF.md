@@ -1,6 +1,68 @@
 # P-Spider 会话交接（HANDOFF）
 
-> 用途：开新会话时把本项目状态快速交接给 AI。最后更新：2026-09-28
+> 用途：开新会话时把本项目状态快速交接给 AI。最后更新：2026-09-29
+
+## 进行中：v1.6.0（未发布）
+
+四项功能已全部定稿（详见 `PLAN-1.6.0.md`），**一次性作为一个版本发布**：
+- ② 侧栏（显示/隐藏 + 排序 + 紧凑化）——**已完成**
+- ③ 超级旁观者（设置开关；只拦自动下载；主色 #D76998）——**已完成**
+- ④ 时间流 v2（数据源改订阅 feed 缓存 + 标注 + 分类配色 + 胶囊筛选）——**已完成（2026-09-29）**
+- ① pixiv **L2（登录/浏览/下载）+ L3（自建订阅追新 / 进时间流）——均已完成（2026-09-29）**
+
+> ✅ v1.6.0 四项（②③④①）代码层面全部完成，**已 `pnpm tauri build` 打包（版本号升至 1.6.0）并拷到绿色版**；待桌面实测 + commit + 发布。
+
+已完成项改了：`interfaces/Settings.ts`、`constants/settings.ts`（版本 4→5）、`stores/settings.ts`（迁移）、
+`constants/routes.tsx`（`SIDEBAR_HIDEABLE_IDS`/`applySidebarOrder`）、`components/SideBar.tsx`、
+`pages/Settings.tsx`（侧栏区块 + 旁观者开关）、`utils/spectator.ts`、`stores/subscription.ts`、`services/figmemo.ts`、`services/moeyo.ts`、`App.tsx`（主题色）。
+
+④ 时间流 v2 改了：新增 `services/feed.ts`（feed 缓存 `timeline-feed.jsonl`）、`utils/tag-color.ts`（低饱和固定色板）；
+改 `stores/subscription.ts`（订阅刷新顺带写 feed）、`pages/Timeline.tsx`（数据源改 feed + 标注 + 标签筛选浮窗）、
+`stores/download-history.ts`（`TimelineGroup` 加 `libraryTags`/`filterTokens`）、`services/user-folders.ts`（只读查询）、
+`components/figmemo|moeyo/CategorySidebar.tsx`（分类标签上色）。typeCheck/eslint/build 均通过。
+
+① pixiv **L2** 改了：新增 `services/pixiv.ts`（OAuth refresh_token → app-api）、`services/pixiv-download.ts`、`stores/pixiv.ts`、
+`pages/Pixiv.tsx`、`platforms/pixiv.ts`（适配器）、`assets/platform-icons/pixiv.svg`；Rust 新增 `download_and_convert_ugoira`（ugoira zip→ffmpeg→mp4/gif）。
+改 `platforms/types.ts`（`PlatformSource` 加 `pixiv`）、`platforms/index.ts`、`stores/download.ts`（pixiv 走模板 + Referer/Cookie）、
+`components/library/PlatformBadge.tsx`、`interfaces/Settings.ts`+`constants/settings.ts`（版本 5→6）+`stores/settings.ts`、
+`pages/Settings.tsx`（pixiv 区块）、`constants/routes.tsx`（路由）。typeCheck/eslint/build/cargo check 均通过。
+**登录改为浏览器 PKCE 授权码**：pixiv **已关闭 password grant**（实测报 `grant type is unauthorized`），故弃用账号密码直登；`services/pixiv.ts` 改为 `buildPixivLoginUrl()`（PKCE S256，浏览器打开 `app-api.pixiv.net/web/v1/login?...client=pixiv-android`）+ `exchangePixivCode()`（回跳 `pixiv://account/login?code=`，粘贴整段换 refresh_token，gppt 同款参数/头）。设置页：`打开 pixiv 登录页` + 粘贴框 + `完成登录`；refresh_token 手动填仍保留兜底。`utils/md5.ts` 保留但已不用。
+**新手引导改为「假界面」分章播放（1.6.0）**：把原来的 driver.js 高亮真实界面**整段换掉**（driver.js 已卸载）——改为**模拟界面（MockUI）**演示，稳、不依赖登录态/数据/路由。新增 `components/guide/MockUI.tsx`（`MockFrame` 假窗口 + `MockCard`/`MockRow`）、`content/guide-tours.tsx`（章节 id → 步骤，含 render 画假界面；目前只有 `start` 章节：欢迎 → 保存路径 → fig-memo 需手动开 → moeyo 需手动开 → 侧栏 → 登录 X → 右上角手册，共 7 步）、`components/guide/GuidePlayer.tsx`（全屏播放器：模拟画面 + 文案 + 上一步/下一步/跳过）、`stores/guide-player.ts`。`UserGuide` 每章面板有「▶ 播放本节引导」（仅配了动画的章节）；首启若 `guide.showOnStart!==false` 自动播 `start` 章；抽屉底部「启动时自动播放引导」+「播放新手引导」。后续逐章在 `guide-tours.tsx` 里补 `steps` 即可，最后再考虑串成完整流程。另新增 `stores/settings-ui.ts`（设置分组状态）。MockUI 支持 `activeSidebar`/`settingsNav`（假设置页画二级菜单），高亮改用**聚光灯**（`boxShadow: 0 0 0 9999px` 挖空目标 + 其余变暗 + 目标描边脉冲）；`MockRow highlight` 通过 `Spot` 注册高亮目标。
+
+**引导连续播放 + 首启**：`GuidePlayer` 支持多章连播（`stores/guide-player.ts` 存 `chapters[]`，新增 `playAll()`），左下角在「跳过」旁加「跳过本章」（多章时显示）；`guide-tours.tsx` 导出 `GUIDE_CHAPTERS`（按指南顺序、仅有动画的 10 章）。`UserGuide`：抽屉底部按钮改为「连续播放全部引导」、**移除「启动时自动播放引导」勾选框**；首次启动改为**直接播放新手引导（第 1 章）**并把 `guide.showOnStart` 置 false（不再自动弹抽屉/引导）。⚠️ 第 11 章以图搜图无动画，故连播为 10 章。
+
+**fig-memo 标签树 / moeyo 同词条跳转补充**：第 6 章引导加「左侧标签树」一步（`FigmemoWithTreeMock`），指南 fig-memo 节补标签树说明。第 7 章 moeyo 加「同词条跳转」一步（`MoeyoDetailMock`），指南 moeyo 节补：**已有功能**——moeyo 文章与 fig-memo 文章关联同一 hpoi 词条时，moeyo 详情显示「在 fig-memo 查看」一键跳转（`services/figmemo.ts` 的 `getHpoiPostIndex` 反向索引）。⚠️ 目前只有 **moeyo → fig-memo** 单向；反向未做。
+
+**第 4~10 章引导 + 指南重排**：`user-guide.ts` 把「以图搜图」移到最后一章（现：1 快速上手 / 2 账号登录 / 3 浏览下载订阅 / 4 时间流 / 5 下载与本地库 / 6 fig-memo / 7 moeyo / 8 侧栏与界面 / 9 超级旁观者 / 10 数据与备份 / 11 以图搜图）。`guide-tours.tsx` 新增 4~10 章假界面（时间流 3 步、下载 4 步、fig-memo 3 步、moeyo 2 步、侧栏 3 步、超级旁观者 1 步、数据 1 步），新增 mock：时间流、下载管理、文章列表、文章详情；`MockFrame` 支持 `highlight="settingsNav"`。**11 以图搜图暂未配动画。**
+
+**X 主页输入支持链接**：新增 `utils/twitter-input.ts` 的 `parseTwitterScreenName()`，X主页输入框支持「用户名 / @用户名 / 主页链接 / 推文链接（取作者名）」（`pages/Homepage.tsx` 的 `startSearch` 先解析再 `loadUser`）；`x.com/i/status/…` 这类不带作者名的链接识别不了（提示用户）。
+
+**第 3 章引导**：`content/guide-tours.tsx` 加 `browse` 章假界面（4 步：怎么找作者 / 下载内容 / 订阅作者 / 管理订阅），新增假「X主页」（搜索+下载配置+订阅按钮+作品网格）与假「订阅页」两个 mock；`MockUI` 导出 `Spot` 供内容区高亮。
+
+**第 2 章引导微调**：文案去掉「pixiv 已关闭账号密码直登」这类历史说明（指南同步，新人向不写历史）；R18 步改用真实截图 `src/assets/guide/pixiv-r18.png`（原图 1902×978 压到 1000×514 / 100KB）。
+
+**指南章节重构 + 第 2 章引导**：`content/user-guide.ts` 新增「2. 账号登录」（X cookie + pixiv PKCE + refresh_token 兜底 + R18），并把原「2 浏览与下载」「3 订阅与追新」**合并为「3. 浏览、下载与订阅」**，删除独立 pixiv 章、后续章节顺延重编号（现共 11 章）。`content/guide-tours.tsx` 加 `login` 章假界面引导（3 步：登录 X / 登录 pixiv / R18）。
+
+**文案订正**：引导/指南里「fig-memo / moeyo / pixiv 各自建子目录」有误 → 改为「X / pixiv 走文件夹·文件名模板；Pawchive 固定 创作者名/帖子标题；fig-memo / moeyo 站点名/日期标题」。
+
+**使用指南重写（1.6.0）**：`src/content/user-guide.ts` 全面更新（订阅入口改到平台页/含 pixiv、时间流 v2 feed 来源+标签筛选、pixiv 登录/订阅、侧栏自定义+仅图标、超级旁观者、设置左侧分组、数据备份）。
+
+**侧栏图标**：X主页 / Pawchive 也换成站点图标（`constants/routes.tsx` → `siteIcon` 用 `x.png` / `pawchive.png`，透明底）；`x.png` 换成 256×256 高清版（同时惠及平台角标）。
+
+**设置页结构改版**：`pages/Settings.tsx` 改为**左侧二级导航 + 右侧内容**（5 组：常规 / 下载 / 平台 / 站点 / 工具与数据）；`components/settings/Section.tsx` 加 `SettingsTabContext`（按分组只渲染当前组区块）。同时就地压缩：下载置顶、侧栏改「编辑侧边栏」弹窗、订阅+数据备份合并（4 按钮同行）、图片切割/时间流/代理/应用改为同行或两行；代理地址恢复 `http://` 校验。
+
+**侧栏小改**：fig-memo / moeyo / pixiv 的侧栏图标改用各站 favicon（`constants/routes.tsx` 的 `siteIcon()`；`Route.icon` 类型为 `ReactElement`）；新增设置「仅显示图标（侧栏更窄）」`settings.sidebar.iconOnly`（`w-52→w-14`、主内容 `pl-52→pl-14`、Account 同步收窄）。
+
+**订阅提速/修复一轮**：① `stores/subscription.ts` 的 `checkSubscriptionsThrottled` 改**按平台分组并行**（X/pawchive/pixiv 各队列、各自并发间隔）；② `src-tauri/src/network.rs` 改 **IPv6 优先**（TUN 下 pawchive 的 IPv4 不通导致全部订阅超时报错）；③ `services/feed.ts` 写盘改**串行队列**（多站点并发写避免互相覆盖）；④ pixiv 头像（i.pximg.net 需 Referer）在**订阅页/设置页**也走 `useRemoteImage` 带 Referer。
+
+**又加：`pixiv://` 协议回传（零复制）**——`image_search.rs` 加 `set_pixiv_auth_scheme`（注册 HKCU `Software\Classes\pixiv`）+ `take_pixiv_auth_arg`/`take_pending_pixiv_auth` + 控制通道前缀路由（`PIXA\t`/`IMGS\t`）；`main.rs` 二次实例优先转发 pixiv；前端 `hooks/background-tasks/usePixivAuthRequests.ts`（挂在 `useRunBackgroundTasks`）轮询回跳并自动换 token。**顺带修** `open_url_foreground`：`cmd /C start` 会把 URL 里的 `&` 当分隔符截断（导致登录页缺参数报错），改用 `ShellExecuteW`（windows-sys 加 `Win32_UI_Shell` feature）。
+pixiv **L3** 改了：`stores/subscription.ts` 加 `checkPixivSubscription`（dispatch + 拉最新一页对比基线 + 写 feed + 新作品下载，复用并发闸门）+ `pixivWorkToFeedItem`；
+`pages/Pixiv.tsx` 加「订阅该画师」（间隔 + `addSubscription({source:'pixiv'})`）；`pages/Subscription.tsx` 补 pixiv 平台标签/图标/主页链接；
+`pages/Timeline.tsx` feed 记录带 `platform:'pixiv'` 且远程图/头像带 pixiv `Referer`（`mediaProxyUrl(url, referer)`）；Rust `media_proxy.rs` 支持可选 `r=`（Referer）参数。typeCheck/eslint/build/cargo check 均通过。
+
+**⚠️ 已修复一次白屏**：`platforms/pixiv.ts` 曾 `import { mapLimit } from '../utils/library'`，引入 `download-history → download → platforms → pixiv → utils/library → trace → download-history` 环形依赖，启动时 `download-history` 的 `onTaskCompleted.listen` 撞 **TDZ**（`onTaskCompleted` 在 `download.ts:39`）→ 整个界面白屏。已改为**文件内本地 `mapLimit`**。别再让 `platforms/*` 引 `utils/library` 桶。
+
+**提醒**：pixiv 未跑桌面实测（refresh_token 换 token、app-api 兼容性、ugoira 转码、订阅追新需 `pnpm tauri dev` 真机确认）。
 
 ## 一句话现状
 
@@ -10,7 +72,7 @@ P-Spider（fork 自 x-spider）**v1.5.1 正式版已发布（2026-09-29，GitHub
 
 - 路径：本仓库（git 仓库，分支 `master`）
 - 技术栈：Tauri v1 + React18 + TS + Vite + Tailwind + antd5 + Zustand
-- 版本：`1.5.1`（**已发布 2026-09-29，正式版**；`package.json` 与 `src-tauri/Cargo.toml` 同步）。注：`v1.5.0` 发布后没人下载，改动已并入 `v1.5.1`，旧的 `v1.5.0` release+tag 已删除
+- 版本：`1.6.0`（**开发完成并已打包 2026-09-29**：`package.json` 与 `src-tauri/Cargo.toml` 已同步升级；安装包 `P-Spider_1.6.0_x64-setup.exe`，产物已拷到「P-Spider 绿色版」）。上一个已发布版为 `1.5.1`（2026-09-29，`releases/latest`）。⚠️ 1.6.0 尚未桌面实测 / 未 commit / 未发布
 - 文档：`DEVELOPMENT.md`（架构地图 + 功能 + 待办 + 发布流程），**改动后同步更新**
 - 回滚点：分支 `backup-1.2.2`（commit `c3fd23c`）、zip `x-spider-backup-1.2.2.zip`
 

@@ -5,12 +5,14 @@ import pawchiveIcon from '../../assets/platform-icons/pawchive.png';
 import xIcon from '../../assets/platform-icons/x.png';
 import figmemoIcon from '../../assets/platform-icons/figmemo.png';
 import moeyoIcon from '../../assets/platform-icons/moeyo.png';
+import pixivIcon from '../../assets/platform-icons/pixiv.svg';
 
 const ICONS: Record<PlatformSource, string> = {
   twitter: xIcon,
   pawchive: pawchiveIcon,
   figmemo: figmemoIcon,
   moeyo: moeyoIcon,
+  pixiv: pixivIcon,
 };
 
 const LABELS: Record<PlatformSource, string> = {
@@ -18,6 +20,7 @@ const LABELS: Record<PlatformSource, string> = {
   pawchive: 'Pawchive',
   figmemo: 'fig-memo',
   moeyo: 'moeyo',
+  pixiv: 'pixiv',
 };
 
 interface Props {

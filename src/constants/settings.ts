@@ -19,6 +19,7 @@ export const DEFAULT_SETTINGS: Settings = {
     autoStart: true,
     closeAction: 'minimize',
     rememberCloseChoice: true,
+    spectator: false,
   },
   split: {
     direction: 'horizontal',
@@ -44,6 +45,19 @@ export const DEFAULT_SETTINGS: Settings = {
     // 订阅列表视图：详细 / 精简
     viewMode: 'detail',
   },
+  sidebar: {
+    hidden: [],
+    order: [],
+    iconOnly: false,
+  },
+  pixiv: {
+    refreshToken: '',
+    cookie: '',
+    userId: '',
+    userName: '',
+    userAccount: '',
+    userAvatar: '',
+  },
 };
 
-export const CURRENT_SETTINGS_VERSION = 4;
+export const CURRENT_SETTINGS_VERSION = 6;

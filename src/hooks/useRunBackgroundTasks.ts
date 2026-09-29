@@ -3,6 +3,7 @@ import { useAriaBinding } from './background-tasks/useAriaBinding';
 import { useTaskNotifications } from './background-tasks/useTaskNotifications';
 import { useCheckUpdateAuto } from './background-tasks/useCheckUpdateAuto';
 import { useImageSearchRequests } from './background-tasks/useImageSearchRequests';
+import { usePixivAuthRequests } from './background-tasks/usePixivAuthRequests';
 
 export function useRunBackgroundTasks() {
   useTaskNotifications();
@@ -10,4 +11,5 @@ export function useRunBackgroundTasks() {
   useAriaBinding();
   useCheckUpdateAuto();
   useImageSearchRequests();
+  usePixivAuthRequests();
 }

@@ -1,15 +1,18 @@
 import { PlatformAdapter, PlatformSource } from './types';
 import { twitterAdapter } from './twitter';
 import { pawchiveAdapter } from './pawchive';
+import { pixivAdapter } from './pixiv';
 
 export * from './types';
 export { twitterAdapter, TWITTER_SOURCE } from './twitter';
 export { pawchiveAdapter, PAWCHIVE_SOURCE } from './pawchive';
+export { pixivAdapter, PIXIV_SOURCE } from './pixiv';
 export { withCreator } from './archiver';
 
 const adapters: Partial<Record<PlatformSource, PlatformAdapter>> = {
   twitter: twitterAdapter,
   pawchive: pawchiveAdapter,
+  pixiv: pixivAdapter,
 };
 
 /**

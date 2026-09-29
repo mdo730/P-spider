@@ -37,9 +37,11 @@ pnpm lint              # prettier + eslint
 
 ## 关键约定
 
+- **禁止在 `src/platforms/*` 里 import `utils/library` 桶**（或 `utils/library/trace`）：会形成 `stores/download-history → stores/download → platforms → utils/library → trace → download-history` 环形依赖，启动时 `download-history` 里 `onTaskCompleted.listen` 撞 TDZ → **整个界面白屏**。需要 `mapLimit` 之类工具就在文件内本地实现。
+
 - **浏览器预览判断**：`useBootstrap.ts` 用 `'__TAURI__' in window || '__TAURI_INTERNALS__' in window` 判断是否 Tauri 环境。Tauri v1 注入 `window.__TAURI__`，v2 注入 `__TAURI_INTERNALS__`。不要只用其中一个，否则桌面版会被误判为浏览器而跳过 aria2 启动（曾因此踩坑）
 - **aria2 端口**：P-Spider 用 **6802**（原版 x-spider 用 6801），避免与 x-spider 同时运行冲突
-- **数据存储**：`%APPDATA%\p-spider\` 下，`settings.json`、`app-state.json`（含 cookie）、`subscriptions.json`（订阅+统计）、`downloads.jsonl`（下载历史，时间流数据源）
+- **数据存储**：`%APPDATA%\p-spider\` 下，`settings.json`（含 pixiv refresh_token/用户缓存）、`app-state.json`（含 cookie）、`subscriptions.json`（订阅+统计）、`downloads.jsonl`（下载历史，本地库溯源用）、`timeline-feed.jsonl`（时间流 v2 的订阅 feed 缓存）
 - **GPL-3.0**：保留原 LICENSE，分发需附源码
 
 ## 临时/实验代码清理

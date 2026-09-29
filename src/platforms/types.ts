@@ -11,7 +11,12 @@ import MediaType from '../enums/MediaType';
  */
 
 /** 平台标识 */
-export type PlatformSource = 'twitter' | 'pawchive' | 'figmemo' | 'moeyo';
+export type PlatformSource =
+  | 'twitter'
+  | 'pawchive'
+  | 'figmemo'
+  | 'moeyo'
+  | 'pixiv';
 
 /** 创作者（用户/作者），跨平台统一 */
 export interface PlatformCreator {

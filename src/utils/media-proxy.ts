@@ -26,12 +26,16 @@ function currentProxy(): string {
     : s.proxy.url || '';
 }
 
-/** 把远程媒体 URL 转成经本地代理（走应用代理、支持 Range）的 http://127.0.0.1 地址；未就绪则原样返回 */
-export function mediaProxyUrl(url: string): string {
+/**
+ * 把远程媒体 URL 转成经本地代理（走应用代理、支持 Range）的 http://127.0.0.1 地址；未就绪则原样返回。
+ * `referer`：可选，覆盖默认的 `https://x.com/`（pixiv 图片防盗链需 `https://www.pixiv.net/`）。
+ */
+export function mediaProxyUrl(url: string, referer?: string): string {
   if (!port) return url;
+  const r = referer ? `&r=${encodeURIComponent(referer)}` : '';
   return `http://127.0.0.1:${port}/media?u=${encodeURIComponent(
     url,
-  )}&p=${encodeURIComponent(currentProxy())}`;
+  )}&p=${encodeURIComponent(currentProxy())}${r}`;
 }
 
 /**

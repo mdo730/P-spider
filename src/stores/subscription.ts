@@ -37,11 +37,28 @@ import {
 import { createTauriFileStorage } from './persist/tauri-file-storage';
 import { mapLimit } from '../utils/library';
 import { delay } from '../utils';
+import { isSpectatorOn } from '../utils/spectator';
+import {
+  FeedSource,
+  platformPostToFeedItem,
+  writeFeedItems,
+} from '../services/feed';
+import { fetchPixivUser, fetchPixivWorks, PixivWork } from '../services/pixiv';
+import { downloadPixivWork } from '../services/pixiv-download';
 
-/** 订阅检查并发上限：兼顾速度与风控（过高会被 X 403；过低太慢） */
-const CHECK_CONCURRENCY = 4;
-/** 每次订阅检查之间的间隔（ms），降低瞬时压力 */
-const CHECK_GAP_MS = 200;
+/**
+ * 各站点独立限流参数：X / pawchive / pixiv 是**不同站点**，可并行检测、互不占用并发槽
+ * （原先所有订阅共用一个队列，几条慢的 pawchive 会堵住全部 X）。
+ */
+const SOURCE_THROTTLE: Record<string, { limit: number; gapMs: number }> = {
+  // X：并发 4（过高会被 403），间隔 200ms
+  twitter: { limit: 4, gapMs: 200 },
+  // 归档站直连：并发 2、间隔 600ms
+  pawchive: { limit: 2, gapMs: 600 },
+  // pixiv：并发 2、间隔 1000ms（官方限速较严）
+  pixiv: { limit: 2, gapMs: 1000 },
+};
+const DEFAULT_THROTTLE = { limit: 2, gapMs: 400 };
 /** 订阅出错后的重试间隔（ms）：比正常间隔短，但远大于调度 tick，避免每秒死循环 */
 const ERROR_RETRY_MS = 5 * 60 * 1000;
 /** 全局闸门：避免定时调度与手动「一键刷新」叠加成双倍并发 */
@@ -53,14 +70,31 @@ async function checkSubscriptionsThrottled(
   if (checking) return;
   checking = true;
   try {
-    await mapLimit(subs, CHECK_CONCURRENCY, async (sub) => {
-      try {
-        await checkSubscription(sub);
-      } catch (err) {
-        log().error('Subscription check failed', { id: sub.id, err });
-      }
-      await delay(CHECK_GAP_MS);
-    });
+    // 按平台分组，各站点并行、各自限流
+    const groups = new Map<string, Subscription[]>();
+    for (const s of subs) {
+      const key = s.source || 'twitter';
+      const arr = groups.get(key);
+      if (arr) arr.push(s);
+      else groups.set(key, [s]);
+    }
+    await Promise.all(
+      [...groups.entries()].map(([source, list]) => {
+        const cfg = SOURCE_THROTTLE[source] ?? DEFAULT_THROTTLE;
+        return mapLimit(list, cfg.limit, async (sub) => {
+          try {
+            await checkSubscription(sub);
+          } catch (err) {
+            log().error('Subscription check failed', {
+              id: sub.id,
+              source,
+              err,
+            });
+          }
+          await delay(cfg.gapMs);
+        });
+      }),
+    );
   } finally {
     checking = false;
   }
@@ -258,9 +292,11 @@ export const useSubscriptionStore = create(
           }
           const username = item.username.trim();
           const source: PlatformSource =
-            item.source === 'pawchive' || item.source === 'kemono'
-              ? 'pawchive'
-              : 'twitter';
+            item.source === 'pixiv'
+              ? 'pixiv'
+              : item.source === 'pawchive' || item.source === 'kemono'
+                ? 'pawchive'
+                : 'twitter';
           const key = `${source}:${username.toLowerCase()}`;
           if (!username || existing.has(key)) {
             skipped++;
@@ -356,6 +392,9 @@ export async function checkSubscription(
   if (sub.source === 'twitter') {
     return checkTwitterSubscription(sub);
   }
+  if (sub.source === 'pixiv') {
+    return checkPixivSubscription(sub);
+  }
   return checkArchiverSubscription(sub);
 }
 
@@ -387,6 +426,13 @@ async function checkTwitterSubscription(
     const user = await getUser(sub.username);
     const { twitterPosts } = await getUserMedias(user.id, undefined, 20);
 
+    // 时间流 v2：订阅刷新「顺带」把最新一页写进 feed 缓存（不新增轮询；下不下载都能看到）
+    await writeFeedItems(
+      (twitterPosts || []).map((p) =>
+        platformPostToFeedItem(toPlatformPost(p), 'twitter'),
+      ),
+    );
+
     if (!twitterPosts || twitterPosts.length === 0) {
       update({
         status: 'idle',
@@ -407,7 +453,8 @@ async function checkTwitterSubscription(
     const mode = retweetModeOf(sub);
 
     // 「仅转推」模式：不下载任何内容，只把转贴收进时间流
-    if (isNew && sub.lastTweetId && mode !== 'only') {
+    // 超级旁观者：跳过自动下载（仍更新基线，时间流照常）
+    if (isNew && sub.lastTweetId && mode !== 'only' && !isSpectatorOn()) {
       // 有基线，且最新推文不在本次列表里（即出现了新推文）
       const newPosts = R.takeWhile(
         (p: TwitterPost) => p.id !== sub.lastTweetId,
@@ -557,6 +604,13 @@ async function checkArchiverSubscription(
     // fetchPosts 返回的帖子 creator 无 name，填充已解析的 creator（目录命名用创作者名）
     const enrichedPosts = withCreator(posts, creator);
 
+    // 时间流 v2：订阅刷新「顺带」把最新一页写进 feed 缓存
+    await writeFeedItems(
+      (enrichedPosts || []).map((p) =>
+        platformPostToFeedItem(p, sub.source as FeedSource),
+      ),
+    );
+
     if (!enrichedPosts || enrichedPosts.length === 0) {
       update({
         status: 'idle',
@@ -575,7 +629,8 @@ async function checkArchiverSubscription(
 
     let downloaded = 0;
 
-    if (isNew && sub.lastTweetId) {
+    // 超级旁观者：跳过自动下载（仍更新基线）
+    if (isNew && sub.lastTweetId && !isSpectatorOn()) {
       const newPosts = R.takeWhile(
         (p: PlatformPost) => p.id !== sub.lastTweetId,
         enrichedPosts,
@@ -643,6 +698,109 @@ async function checkArchiverSubscription(
     return { downloaded };
   } catch (err: any) {
     log().error('Pawchive subscription check failed', { id: sub.id, err });
+    update({
+      status: 'error',
+      lastCheckedAt: Date.now(),
+      errorMessage: err?.message || '未知原因',
+    });
+    return { downloaded: 0 };
+  }
+}
+
+/** 把一件 pixiv 作品转成 feed 缓存条目（时间流用；列表已带缩略图，不再逐件拉详情） */
+function pixivWorkToFeedItem(work: PixivWork) {
+  const post: PlatformPost = {
+    id: work.id,
+    creator: {
+      id: work.userId,
+      name: work.userNick,
+      username: work.userName,
+      avatar: work.userAvatar,
+      profileUrl: `https://www.pixiv.net/users/${work.userId}`,
+    },
+    publishedAt: dayjs(work.createDate),
+    text: work.title,
+    medias: work.thumbUrl
+      ? [
+          {
+            id: `${work.id}-0`,
+            type: MediaType.Photo,
+            url: work.thumbUrl,
+            downloadUrl: work.thumbUrl,
+          },
+        ]
+      : [],
+    tags: work.tags,
+    postUrl: `https://www.pixiv.net/artworks/${work.id}`,
+    source: 'pixiv',
+  };
+  return platformPostToFeedItem(post, 'pixiv');
+}
+
+/**
+ * pixiv 订阅检查（L3）：自建列表，不依赖 pixiv「关注」。
+ * 拉画师最新一页作品 → 与 lastTweetId 基线对比 → 新的下载 + 写 feed 缓存（进时间流 v2）。
+ * ⚠️ 只订阅「插画」（含动图，动图会走 zip→mp4/gif）；漫画暂不含。
+ */
+async function checkPixivSubscription(
+  sub: Subscription,
+): Promise<{ downloaded: number }> {
+  const { updateSubscription } = useSubscriptionStore.getState();
+  const update = (patch: Partial<Subscription>) =>
+    updateSubscription(sub.id, patch);
+
+  update({ status: 'running', errorMessage: undefined });
+
+  try {
+    const user = await fetchPixivUser(sub.username);
+    const { works } = await fetchPixivWorks(sub.username, 0, 'illust');
+
+    if (!works || works.length === 0) {
+      update({
+        status: 'idle',
+        lastCheckedAt: Date.now(),
+        displayName: user.name,
+        avatar: user.avatar,
+      });
+      return { downloaded: 0 };
+    }
+
+    const newestId = works[0].id;
+    const isNew = newestId !== sub.lastTweetId;
+
+    // 时间流 v2：订阅刷新「顺带」写入 feed（含未下载；不能因为没有新作品就跳过）
+    await writeFeedItems(works.map(pixivWorkToFeedItem));
+
+    let downloaded = 0;
+    const wantsPhoto = sub.mediaTypes.includes(MediaType.Photo);
+    // 超级旁观者：跳过自动下载（仍更新基线与 feed）
+    if (isNew && sub.lastTweetId && wantsPhoto && !isSpectatorOn()) {
+      const newWorks = R.takeWhile(
+        (w: PixivWork) => w.id !== sub.lastTweetId,
+        works,
+      );
+      for (const work of newWorks) {
+        try {
+          downloaded += await downloadPixivWork(work);
+        } catch (err) {
+          log().warn('pixiv 作品下载失败', { id: work.id, err });
+        }
+      }
+    }
+
+    update({
+      status: 'idle',
+      lastTweetId: newestId,
+      lastCheckedAt: Date.now(),
+      displayName: user.name,
+      avatar: user.avatar,
+      downloadedCount: sub.downloadedCount + downloaded,
+      dailyStats: addDailyStats(sub.dailyStats, downloaded),
+    });
+
+    return { downloaded };
+  } catch (err: any) {
+    log().error('pixiv subscription check failed', { id: sub.id, err });
     update({
       status: 'error',
       lastCheckedAt: Date.now(),

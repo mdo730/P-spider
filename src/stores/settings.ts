@@ -57,6 +57,19 @@ export const useSettingsStore = create(
         if (version < 4) {
           state.timeline = { maxTextLen: 200, maxImages: 6 };
         }
+        if (version < 5) {
+          state.sidebar = { hidden: [], order: [] };
+          state.app = { ...(state.app || {}), spectator: false };
+        }
+        if (version < 6) {
+          // pixiv 登录信息（refresh_token + 可选 cookie + 用户缓存）
+          state.pixiv = { ...DEFAULT_SETTINGS.pixiv, ...(state.pixiv || {}) };
+          // 侧栏「仅图标」
+          state.sidebar = {
+            ...DEFAULT_SETTINGS.sidebar,
+            ...(state.sidebar || {}),
+          };
+        }
 
         return state;
       },

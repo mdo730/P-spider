@@ -18,6 +18,7 @@ import { useSettingsStore } from './stores/settings';
 
 const AppInternal: React.FC = () => {
   const currentRoute = useRouteStore((state) => state.route);
+  const sidebarIconOnly = useSettingsStore((s) => s.sidebar?.iconOnly === true);
   const [closeModalVisible, setCloseModalVisible] = useState(false);
   const [rememberChoice, setRememberChoice] = useState(false);
 
@@ -78,7 +79,9 @@ const AppInternal: React.FC = () => {
     <div className="bg-gray-50 w-full h-full overflow-auto">
       <SideBar />
       <main
-        className="w-full overflow-auto transition-all pl-52"
+        className={`w-full overflow-auto transition-all ${
+          sidebarIconOnly ? 'pl-14' : 'pl-52'
+        }`}
         key={currentRoute?.id}
         aria-label={currentRoute?.name}
       >
@@ -119,13 +122,17 @@ const AppInternal: React.FC = () => {
 
 export const App: React.FC = () => {
   const { ready, error } = useBootstrap();
+  // 超级旁观者：主色切换为 #D76998 作常驻提醒
+  const spectator = useSettingsStore((s) => s.app?.spectator === true);
+  const theme = spectator
+    ? {
+        ...ANTD_THEME,
+        token: { ...ANTD_THEME.token, colorPrimary: '#D76998' },
+      }
+    : ANTD_THEME;
 
   return (
-    <ConfigProvider
-      theme={ANTD_THEME}
-      autoInsertSpaceInButton={false}
-      locale={zhCN}
-    >
+    <ConfigProvider theme={theme} autoInsertSpaceInButton={false} locale={zhCN}>
       <AntApp>
         <div className="css-var-r0 select-none text-gray-800 relative w-screen h-screen flex flex-col overflow-hidden">
           {!ready && (

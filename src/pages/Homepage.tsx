@@ -7,6 +7,7 @@ import { DownloadController } from '../components/homepage/DownloadController';
 import { useAppStateStore } from '../stores/app-state';
 import { useHomepageStore } from '../stores/homepage';
 import { buildUserUrl } from '../twitter/url';
+import { parseTwitterScreenName } from '../utils/twitter-input';
 
 export const Homepage: React.FC = () => {
   const { message } = App.useApp();
@@ -27,9 +28,14 @@ export const Homepage: React.FC = () => {
     }));
   const searchAbortControllerRef = useRef<AbortController>();
 
-  const startSearch = async (sn: string) => {
-    if (!sn) return;
-    sn = sn.trim();
+  const startSearch = async (input: string) => {
+    if (!input) return;
+    // 支持：用户名 / @用户名 / 主页链接 / 推文链接
+    const sn = parseTwitterScreenName(input);
+    if (!sn) {
+      message.error('无法识别，请输入用户名、主页链接或推文链接');
+      return;
+    }
     setKeyword(sn);
 
     if (searchAbortControllerRef.current) {
@@ -44,7 +50,7 @@ export const Homepage: React.FC = () => {
       addSearchHistory(sn);
     } catch (err: any) {
       log.error(err);
-      message.error('加载失败，请检查用户 ID 是否正确');
+      message.error('加载失败，请检查用户名 / 链接是否正确');
     }
   };
 
@@ -64,7 +70,7 @@ export const Homepage: React.FC = () => {
                 onChange={(e) => setKeyword(e.target.value)}
                 placeholder={
                   cookieString
-                    ? '请输入用户 ID，如：shiratamacaron'
+                    ? '用户名 / 主页链接 / 推文链接（如 shiratamacaron）'
                     : '请先登录后再搜索'
                 }
                 className="text-center"

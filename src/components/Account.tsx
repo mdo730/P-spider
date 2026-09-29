@@ -8,6 +8,7 @@ import { LogoutOutlined, QuestionCircleOutlined } from '@ant-design/icons';
 import FormItem from 'antd/es/form/FormItem';
 import { useForm } from 'antd/es/form/Form';
 import { parseCookie, stringifyCookie } from '../utils/cookie';
+import { useSettingsStore } from '../stores/settings';
 import clsx from 'clsx';
 
 export const Account: React.FC = () => {
@@ -23,6 +24,7 @@ export const Account: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [form] = useForm();
   const { message } = App.useApp();
+  const iconOnly = useSettingsStore((s) => s.sidebar?.iconOnly === true);
 
   useEffect(() => {
     (async () => {
@@ -68,10 +70,13 @@ export const Account: React.FC = () => {
 
   return (
     <>
-      <div className="px-4">
+      <div className={iconOnly ? 'px-1' : 'px-4'}>
         <section
           aria-label="个人信息"
-          className="flex flex-col justify-center items-center border-b-[1px] py-6 border-[rgba(255,255,255,0.5)]"
+          className={clsx(
+            'flex flex-col justify-center items-center border-b-[1px] border-[rgba(255,255,255,0.5)]',
+            iconOnly ? 'py-3' : 'py-6',
+          )}
         >
           {!accountInfo && (
             <>
@@ -83,7 +88,9 @@ export const Account: React.FC = () => {
                 )}
                 onClick={() => setModalOpen(true)}
               >
-                <Avatar size={50}>{loading ? '加载中' : '登录'}</Avatar>
+                <Avatar size={iconOnly ? 36 : 50}>
+                  {loading ? '加载中' : '登录'}
+                </Avatar>
               </button>
               <span className="sr-only" role="alert">
                 账号未登录
@@ -103,20 +110,27 @@ export const Account: React.FC = () => {
                 href={`https://twitter.com/${accountInfo.screenName}`}
                 rel="noreferrer"
               >
-                <Avatar size={50} src={accountInfo.avatar} alt="头像" />
+                <Avatar
+                  size={iconOnly ? 36 : 50}
+                  src={accountInfo.avatar}
+                  alt="头像"
+                />
               </a>
-              <div className="text-white mt-1 font-bold">
-                {accountInfo.screenName}
-              </div>
+              {!iconOnly && (
+                <div className="text-white mt-1 font-bold">
+                  {accountInfo.screenName}
+                </div>
+              )}
               <div>
                 <button
                   onClick={() => {
                     setCookieString('');
                   }}
+                  title="登出"
                   className="text-white bg-transparent hover:text-gray-200 transition-colors text-sm"
                 >
                   <LogoutOutlined aria-hidden />
-                  <span className="ml-1">登出</span>
+                  {!iconOnly && <span className="ml-1">登出</span>}
                 </button>
               </div>
             </>

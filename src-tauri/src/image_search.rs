@@ -14,11 +14,26 @@ use winreg::RegKey;
 
 /// 启动参数里传来的待搜图路径（资源管理器右键调用）
 static IMAGE_SEARCH_ARG: Mutex<Option<String>> = Mutex::new(None);
+/// 启动参数里传来的 pixiv 授权回跳 URL（`pixiv://account/login?code=...`，协议处理拉起）
+static PIXIV_AUTH_ARG: Mutex<Option<String>> = Mutex::new(None);
 
 pub fn capture_cli_args(args: &[String]) {
   if let Some(i) = args.iter().position(|a| a == "--image-search") {
     if let Some(p) = args.get(i + 1) {
       if let Ok(mut g) = IMAGE_SEARCH_ARG.lock() {
+        *g = Some(p.clone());
+      }
+    }
+  }
+  // pixiv 协议回跳：`pixiv://account/login?code=...`（也兼容 --pixiv-auth <url>）
+  if let Some(u) = args.iter().find(|a| a.starts_with("pixiv://")) {
+    if let Ok(mut g) = PIXIV_AUTH_ARG.lock() {
+      *g = Some(u.clone());
+    }
+  }
+  if let Some(i) = args.iter().position(|a| a == "--pixiv-auth") {
+    if let Some(p) = args.get(i + 1) {
+      if let Ok(mut g) = PIXIV_AUTH_ARG.lock() {
         *g = Some(p.clone());
       }
     }
@@ -30,20 +45,39 @@ pub fn take_image_search_arg() -> Option<String> {
   IMAGE_SEARCH_ARG.lock().ok().and_then(|mut g| g.take())
 }
 
+#[tauri::command]
+pub fn take_pixiv_auth_arg() -> Option<String> {
+  PIXIV_AUTH_ARG.lock().ok().and_then(|mut g| g.take())
+}
+
 /// 本进程启动参数里的待搜图路径（不取走；用于“二次实例”转发判断）
 pub fn current_arg() -> Option<String> {
   IMAGE_SEARCH_ARG.lock().ok().and_then(|g| g.clone())
 }
 
+/// 本进程启动参数里的 pixiv 授权回跳 URL（不取走）
+pub fn current_pixiv_arg() -> Option<String> {
+  PIXIV_AUTH_ARG.lock().ok().and_then(|g| g.clone())
+}
+
 /// 把路径通过控制端口转发给已在运行的实例
 pub fn forward_arg(path: &str) {
   if let Ok(mut s) = TcpStream::connect("127.0.0.1:6803") {
-    let _ = s.write_all(format!("{path}\n").as_bytes());
+    let _ = s.write_all(format!("IMGS\t{path}\n").as_bytes());
+  }
+}
+
+/// 把 pixiv 授权回跳 URL 通过控制端口转发给已在运行的实例
+pub fn forward_pixiv_arg(url: &str) {
+  if let Ok(mut s) = TcpStream::connect("127.0.0.1:6803") {
+    let _ = s.write_all(format!("PIXA\t{url}\n").as_bytes());
   }
 }
 
 /// 已运行实例收到、待前端处理的搜图请求队列
 static PENDING: Mutex<Vec<String>> = Mutex::new(Vec::new());
+/// 已运行实例收到、待前端处理的 pixiv 授权回跳队列
+static PENDING_PIXIV: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 /// 启动单实例控制监听（固定端口 6803）；返回是否为主实例
 pub fn start_control_listener() -> bool {
@@ -54,10 +88,20 @@ pub fn start_control_listener() -> bool {
           let mut line = String::new();
           if BufReader::new(&stream).read_line(&mut line).is_ok() {
             let p = line.trim();
-            if !p.is_empty() {
-              if let Ok(mut q) = PENDING.lock() {
-                q.push(p.to_string());
+            if p.is_empty() {
+              continue;
+            }
+            // 前缀区分：PIXA=像素授权回跳，IMGS（或旧格式无前缀）=以图搜图
+            if let Some(rest) = p.strip_prefix("PIXA\t") {
+              if let Ok(mut q) = PENDING_PIXIV.lock() {
+                q.push(rest.to_string());
               }
+            } else if let Some(rest) = p.strip_prefix("IMGS\t") {
+              if let Ok(mut q) = PENDING.lock() {
+                q.push(rest.to_string());
+              }
+            } else if let Ok(mut q) = PENDING.lock() {
+              q.push(p.to_string());
             }
           }
         }
@@ -74,6 +118,44 @@ pub fn take_pending_image_search() -> Option<String> {
     .lock()
     .ok()
     .and_then(|mut q| (!q.is_empty()).then(|| q.remove(0)))
+}
+
+#[tauri::command]
+pub fn take_pending_pixiv_auth() -> Option<String> {
+  PENDING_PIXIV
+    .lock()
+    .ok()
+    .and_then(|mut q| (!q.is_empty()).then(|| q.remove(0)))
+}
+
+/// 注册/移除 `pixiv://` 协议处理（HKCU，免管理员），用于浏览器登录后自动回传 code。
+#[tauri::command]
+pub fn set_pixiv_auth_scheme(enabled: bool) -> Result<bool, String> {
+  let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+  let base = r"Software\Classes\pixiv";
+  if enabled {
+    let exe = std::env::current_exe()
+      .map_err(|e| e.to_string())?
+      .display()
+      .to_string();
+    let (key, _) = hkcu.create_subkey(base).map_err(|e| e.to_string())?;
+    key
+      .set_value("", &"URL:P-Spider pixiv Auth")
+      .map_err(|e| e.to_string())?;
+    key
+      .set_value("URL Protocol", &"")
+      .map_err(|e| e.to_string())?;
+    let _ = key.set_value("Icon", &exe);
+    let (cmd, _) = key
+      .create_subkey(r"shell\open\command")
+      .map_err(|e| e.to_string())?;
+    cmd
+      .set_value("", &format!("\"{}\" \"%1\"", exe))
+      .map_err(|e| e.to_string())?;
+  } else {
+    let _ = hkcu.delete_subkey_all(base);
+  }
+  Ok(true)
 }
 
 /// 添加/移除 Windows 资源管理器图片右键「用 P-Spider 以图搜图」（HKCU，免管理员）。

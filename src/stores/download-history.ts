@@ -154,8 +154,12 @@ export interface TimelineGroup {
   retweetedByCount?: number;
   /** 头像 URL（下载条目来自推文；转贴为原作者头像；记事用平台图标，留空） */
   avatar?: string;
-  /** 记事所属分类名（fig-memo/moeyo），用于时间流标注 */
+  /** 记事所属分类名（fig-memo/moeyo），用于时间流标注（低饱和固定色） */
   categories?: string[];
+  /** feed 条目（X/Pawchive/pixiv）命中的**本地库标签**名（最多展示最靠前 3 个） */
+  libraryTags?: string[];
+  /** 筛选令牌：本地库标签 + '转贴' + 'fig-memo'/'moeyo'（时间流胶囊筛选用） */
+  filterTokens?: string[];
 }
 
 /**
