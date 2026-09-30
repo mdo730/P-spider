@@ -82,6 +82,7 @@ import { toAssetUrl } from '../utils/asset';
 import { openPath, openUrl, showInFolder } from '../utils/shell';
 import { useHomepageStore } from '../stores/homepage';
 import { useSubscriptionStore } from '../stores/subscription';
+import { useSiteCacheStore } from '../stores/site-cache';
 import { ROUTES } from '../constants/routes';
 import MediaType from '../enums/MediaType';
 
@@ -450,6 +451,8 @@ export const TimelinePage: React.FC = () => {
           /* 忽略 */
         });
       }
+      // 站点列表已刷新 → 让 fig-memo / moeyo 页的会话缓存失效（跳过去能看到新文章）
+      useSiteCacheStore.getState().bump();
       const merged = await build();
       groupsCache = merged;
       setGroups(merged);
@@ -1221,6 +1224,7 @@ const TimelineItem: React.FC<{
             remoteUrl: originalUrl,
             postUrl: record.postUrl,
             author: record.username ? `@${record.username}` : undefined,
+            headers: mediaReferer ? { Referer: mediaReferer } : undefined,
           };
 
           // GIF：本地 .gif 直接 <img>（会动）；本地 mp4 / 远程用无控件的自动循环视频（像 gif）
@@ -1493,6 +1497,7 @@ const TimelineItem: React.FC<{
             remoteUrl: originalUrl,
             postUrl: record.postUrl,
             author: record.username ? `@${record.username}` : undefined,
+            headers: mediaReferer ? { Referer: mediaReferer } : undefined,
           };
           return (
             <Dropdown

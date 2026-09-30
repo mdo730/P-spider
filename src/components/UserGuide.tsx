@@ -30,7 +30,6 @@ export const UserGuide: React.FC = () => {
         type="button"
         title="使用指南"
         aria-label="使用指南"
-        data-tour="help"
         onClick={() => setOpen(true)}
         className="fixed top-4 right-4 z-[900] flex h-9 w-9 items-center justify-center rounded-full border-[1px] border-gray-200 bg-white text-gray-500 shadow-sm transition-colors hover:border-ant-color-primary hover:text-ant-color-primary"
       >

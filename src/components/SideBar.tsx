@@ -50,7 +50,12 @@ const Item: React.FC<SideBarItemProps> = ({ route, active, dot, iconOnly }) => {
           setRoute(route);
         }}
       >
-        <span className={clsx('relative', !iconOnly && 'float-left')}>
+        <span
+          className={clsx(
+            'relative inline-flex items-center justify-center text-[1.2rem] leading-none',
+            !iconOnly && 'float-left',
+          )}
+        >
           {route.icon}
           {iconOnly && dot && (
             <span

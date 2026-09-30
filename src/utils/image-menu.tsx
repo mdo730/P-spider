@@ -23,6 +23,8 @@ export interface ImageMenuCtx {
   postUrl?: string;
   /** 作者 ID（如 `@username`）；开启「附带作者/原帖信息」时与原文链接一起写剪贴板 */
   author?: string;
+  /** 远程取图需要的请求头（如 pixiv 的 Referer），「复制图像」时带上 */
+  headers?: Record<string, string>;
 }
 
 interface Msg {
@@ -99,7 +101,8 @@ export async function handleImageMenuKey(
   try {
     if (key === IMAGE_MENU.copy) {
       if (ctx.localPath) await copyLocalImageToClipboard(ctx.localPath);
-      else if (ctx.remoteUrl) await copyImageUrlToClipboard(ctx.remoteUrl);
+      else if (ctx.remoteUrl)
+        await copyImageUrlToClipboard(ctx.remoteUrl, ctx.headers);
       else return true;
       message.success('图片已复制到剪贴板');
       return true;

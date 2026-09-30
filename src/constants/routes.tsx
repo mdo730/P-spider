@@ -9,19 +9,31 @@ import {
   ClockCircleOutlined,
   FolderOutlined,
 } from '@ant-design/icons';
-import xIcon from '../assets/platform-icons/x.png';
-import pawchiveIcon from '../assets/platform-icons/pawchive.png';
-import figmemoIcon from '../assets/platform-icons/figmemo.png';
-import moeyoIcon from '../assets/platform-icons/moeyo.png';
+import xIcon from '../assets/platform-icons/x.svg';
+import pawchiveIcon from '../assets/platform-icons/pawchive.svg';
+import figmemoIcon from '../assets/platform-icons/figmemo.svg';
+import moeyoIcon from '../assets/platform-icons/moeyo.svg';
 import pixivIcon from '../assets/platform-icons/pixiv.svg';
 
-/** 侧栏用站点图标（透明底，直接显示） */
+/**
+ * 侧栏用站点图标：单色 SVG 走 CSS mask + `bg-current`，
+ * 从而跟随按钮颜色（未选中=白、选中=主题色），与 antd 图标一致。
+ */
 function siteIcon(src: string): ReactElement {
   return (
-    <img
-      src={src}
-      alt=""
-      className="inline-block h-4 w-4 object-contain align-[-0.125em]"
+    <span
+      aria-hidden
+      className="inline-block h-[1em] w-[1em] bg-current align-[-0.125em]"
+      style={{
+        WebkitMaskImage: `url("${src}")`,
+        maskImage: `url("${src}")`,
+        WebkitMaskRepeat: 'no-repeat',
+        maskRepeat: 'no-repeat',
+        WebkitMaskPosition: 'center',
+        maskPosition: 'center',
+        WebkitMaskSize: 'contain',
+        maskSize: 'contain',
+      }}
     />
   );
 }

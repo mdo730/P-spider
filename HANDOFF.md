@@ -10,7 +10,7 @@
 - ④ 时间流 v2（数据源改订阅 feed 缓存 + 标注 + 分类配色 + 胶囊筛选）——**已完成（2026-09-29）**
 - ① pixiv **L2（登录/浏览/下载）+ L3（自建订阅追新 / 进时间流）——均已完成（2026-09-29）**
 
-> ✅ **已发布抢先版**：GitHub Release `v1.6.0`（**Pre-release**，2026-09-29；`releases/latest` 仍指向 `v1.5.1` 正式版）。commit `eaf6324` 已 push master。附件：`P-Spider_1.6.0_x64-setup.exe` + `P-Spider.exe` + `aria2c.exe`（**已两次覆盖上传**：侧栏渐变/指南补充 `4dc5f8f`；pixiv 头像字段 + 本地库信息条多平台 `8b6ce8c`）。绿色版目录同步更新。最新 commit `8b6ce8c`。
+> ✅ **已发布抢先版**：GitHub Release `v1.6.0`（**Pre-release**，2026-09-29；`releases/latest` 仍指向 `v1.5.1` 正式版）。commit `eaf6324` 已 push master。附件：`P-Spider_1.6.0_x64-setup.exe` + `P-Spider.exe` + `aria2c.exe`（**已两次覆盖上传**：侧栏渐变/指南补充 `4dc5f8f`；pixiv 头像字段 + 本地库信息条多平台 `8b6ce8c`）。绿色版目录同步更新。最新 commit `88275ea`（本地库目录导航 + 视频改自绘全屏播放器），附件已再次覆盖上传。
 
 已完成项改了：`interfaces/Settings.ts`、`constants/settings.ts`（版本 4→5）、`stores/settings.ts`（迁移）、
 `constants/routes.tsx`（`SIDEBAR_HIDEABLE_IDS`/`applySidebarOrder`）、`components/SideBar.tsx`、
@@ -76,7 +76,8 @@ P-Spider（fork 自 x-spider）**v1.5.1 正式版已发布（2026-09-29，GitHub
 
 - 路径：本仓库（git 仓库，分支 `master`）
 - 技术栈：Tauri v1 + React18 + TS + Vite + Tailwind + antd5 + Zustand
-- 版本：`1.6.0`（**开发完成并已打包 2026-09-29**：`package.json` 与 `src-tauri/Cargo.toml` 已同步升级；安装包 `P-Spider_1.6.0_x64-setup.exe`，产物已拷到「P-Spider 绿色版」）。上一个已发布版为 `1.5.1`（2026-09-29，`releases/latest`）。⚠️ 1.6.0 尚未桌面实测 / 未 commit / 未发布
+- 版本：`1.6.1`（`package.json` 与 `src-tauri/Cargo.toml` 同步）。`v1.6.0` 已作为**抢先版**发布（Pre-release，2026-09-29）；`v1.6.1` 为清理/优化版（**未发布**）。上一个正式版为 `1.5.1`（`releases/latest`）。
+- 1.6.1 清理：删除死文件 `components/about/Sponsors.tsx`、`hooks/useEvent.ts`、`utils/async.ts`、`utils/md5.ts`；移除未用依赖 `lodash-es` + `@types/lodash-es`；移除已死的 `data-tour` 锚点（driver.js 已弃用）与 `Section.dataTour`。
 - 文档：`DEVELOPMENT.md`（架构地图 + 功能 + 待办 + 发布流程），**改动后同步更新**
 - 回滚点：分支 `backup-1.2.2`（commit `c3fd23c`）、zip `x-spider-backup-1.2.2.zip`
 

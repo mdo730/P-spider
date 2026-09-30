@@ -449,21 +449,19 @@ export const Settings: React.FC = () => {
               name="download"
               titleIcon={<DownloadOutlined />}
             >
-              <div data-tour="save-path">
-                <Item
-                  validator={(value) => {
-                    return Joi.string()
-                      .messages({
-                        'string.empty': '请填写保存路径模板',
-                      })
-                      .validate(value).error?.message;
-                  }}
-                  label="保存路径"
-                  settingKey="saveDirBase"
-                >
-                  <SavePathSelector required />
-                </Item>
-              </div>
+              <Item
+                validator={(value) => {
+                  return Joi.string()
+                    .messages({
+                      'string.empty': '请填写保存路径模板',
+                    })
+                    .validate(value).error?.message;
+                }}
+                label="保存路径"
+                settingKey="saveDirBase"
+              >
+                <SavePathSelector required />
+              </Item>
               <Item
                 validator={(value) => {
                   return Joi.string()
@@ -1003,11 +1001,7 @@ export const Settings: React.FC = () => {
                 </div>
               </div>
             </Section>
-            <Section
-              title="fig-memo"
-              name="parukamun"
-              dataTour="figmemo-section"
-            >
+            <Section title="fig-memo" name="parukamun">
               <div className="flex items-center gap-2 mb-3">
                 <span className="font-medium">启用 fig-memo 功能</span>
                 <Switch
@@ -1124,11 +1118,7 @@ export const Settings: React.FC = () => {
                 </span>
               </div>
             </Section>
-            <Section
-              title="moeyo（手办资讯）"
-              name="moeyo"
-              dataTour="moeyo-section"
-            >
+            <Section title="moeyo（手办资讯）" name="moeyo">
               <div className="flex items-center gap-2 mb-3">
                 <span className="font-medium">启用 moeyo 功能</span>
                 <Switch

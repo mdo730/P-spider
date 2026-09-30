@@ -94,6 +94,7 @@ fn main() {
           fsutil::convert_video_to_gif,
           fsutil::video_thumbnail,
           fsutil::download_and_convert_ugoira,
+          fsutil::copy_image_to_clipboard,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,15 +1,29 @@
-import { fs } from '@tauri-apps/api';
+import { fs, invoke } from '@tauri-apps/api';
 import { request } from '../ipc/network';
+import { useAppStateStore } from '../stores/app-state';
+import { useSettingsStore } from '../stores/settings';
 
-/** bytes → PNG → 剪贴板（远程/本地共用） */
+const isTauri = () => '__TAURI__' in window || '__TAURI_INTERNALS__' in window;
+
+/** 应用当前代理设置 → invoke 参数 */
+function proxyArgs() {
+  const s = useSettingsStore.getState();
+  return {
+    enableProxy: s.proxy.enable,
+    proxyUrl: s.proxy.useSystem
+      ? useAppStateStore.getState().systemProxyUrl
+      : s.proxy.url,
+  };
+}
+
+// ---- 以下 fallback 仅浏览器预览（无 Tauri）时用；桌面走 Rust 原生写剪贴板 ----
+
 async function writeImageBytesToClipboard(bytes: Uint8Array): Promise<void> {
   if (bytes.length === 0) throw new Error('图片为空');
-
   const ClipboardItemCtor = (window as any).ClipboardItem;
   if (!navigator.clipboard || !ClipboardItemCtor) {
     throw new Error('当前环境不支持复制图片到剪贴板');
   }
-
   const bitmap = await createImageBitmap(new Blob([bytes]));
   const canvas = document.createElement('canvas');
   canvas.width = bitmap.width;
@@ -24,16 +38,11 @@ async function writeImageBytesToClipboard(bytes: Uint8Array): Promise<void> {
       'image/png',
     );
   });
-
   await navigator.clipboard.write([
     new ClipboardItemCtor({ 'image/png': pngBlob }),
   ]);
 }
 
-/**
- * 把远程图片复制到系统剪贴板（以 PNG 写入，兼容性最好）。
- * 经 Rust 后端取字节（走代理），再经 createImageBitmap + canvas 转 PNG，避开 <img> 跨源 canvas 污染。
- */
 /** 复制纯文本（优先 WebView clipboard，失败回退 Tauri 剪贴板插件） */
 export async function copyTextToClipboard(text: string): Promise<void> {
   try {
@@ -48,12 +57,28 @@ export async function copyTextToClipboard(text: string): Promise<void> {
   await writeText(text);
 }
 
-export async function copyImageUrlToClipboard(url: string): Promise<void> {
+/**
+ * 把远程图片复制到系统剪贴板。
+ * 桌面：走 Rust 原生写剪贴板（无需窗口聚焦、快）；浏览器预览：回退 WebView API。
+ */
+export async function copyImageUrlToClipboard(
+  url: string,
+  headers?: Record<string, string>,
+): Promise<void> {
+  if (isTauri()) {
+    await invoke('copy_image_to_clipboard', {
+      url,
+      headers: headers ?? null,
+      ...proxyArgs(),
+    });
+    return;
+  }
   const res = await request({
     method: 'GET',
     url,
     responseType: 'binary',
     maxRetry: 1,
+    headers,
   });
   await writeImageBytesToClipboard(new Uint8Array(res.body as number[]));
 }
@@ -62,6 +87,10 @@ export async function copyImageUrlToClipboard(url: string): Promise<void> {
 export async function copyLocalImageToClipboard(
   filePath: string,
 ): Promise<void> {
+  if (isTauri()) {
+    await invoke('copy_image_to_clipboard', { path: filePath });
+    return;
+  }
   const bytes = await fs.readBinaryFile(filePath);
   await writeImageBytesToClipboard(
     bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes as number[]),

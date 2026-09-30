@@ -246,6 +246,63 @@ pub fn convert_video_to_gif(src: String, dst: String) -> Result<(), String> {
     }
 }
 
+/// 把图片复制到系统剪贴板（原生写，无需窗口聚焦、比 WebView clipboard API 快）。
+/// 传 `path`（本地文件）或 `url`（远程，走代理拉取）二选一；解码后以 BMP 写入剪贴板。
+#[tauri::command]
+pub fn copy_image_to_clipboard(
+  path: Option<String>,
+  url: Option<String>,
+  enable_proxy: bool,
+  proxy_url: String,
+  headers: Option<std::collections::HashMap<String, String>>,
+) -> Result<(), String> {
+  #[cfg(windows)]
+  {
+    let bytes: Vec<u8> = if let Some(p) = path.filter(|p| !p.is_empty()) {
+      std::fs::read(&p).map_err(|e| format!("读取图片失败：{e}"))?
+    } else if let Some(u) = url.filter(|u| !u.is_empty()) {
+      let mut b = reqwest::blocking::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(60));
+      if enable_proxy && !proxy_url.is_empty() {
+        b = b.proxy(reqwest::Proxy::all(&proxy_url).map_err(|e| e.to_string())?);
+      } else if !enable_proxy {
+        b = b.no_proxy();
+      }
+      let client = b.build().map_err(|e| e.to_string())?;
+      let mut req = client.get(&u);
+      if let Some(hs) = headers {
+        for (k, v) in hs {
+          req = req.header(k, v);
+        }
+      }
+      let resp = req.send().map_err(|e| e.to_string())?;
+      if !resp.status().is_success() {
+        return Err(format!("下载图片失败：HTTP {}", resp.status().as_u16()));
+      }
+      resp.bytes().map_err(|e| e.to_string())?.to_vec()
+    } else {
+      return Err("缺少图片路径或链接".into());
+    };
+
+    let img = image::load_from_memory(&bytes).map_err(|e| format!("不支持的图片格式：{e}"))?;
+    let mut bmp: Vec<u8> = Vec::new();
+    img.write_to(
+      &mut std::io::Cursor::new(&mut bmp),
+      image::ImageOutputFormat::Bmp,
+    )
+    .map_err(|e| format!("转换为 BMP 失败：{e}"))?;
+    clipboard_win::set_clipboard(clipboard_win::formats::Bitmap, bmp.as_slice())
+      .map_err(|e| format!("写入剪贴板失败：{e}"))?;
+    Ok(())
+  }
+  #[cfg(not(windows))]
+  {
+    let _ = (path, url, enable_proxy, proxy_url, headers);
+    Err("仅支持 Windows".into())
+  }
+}
+
 /// 下载 pixiv ugoira 的 zip → 解压帧序列 → 用系统 ffmpeg 合成 mp4（或 gif）。
 /// `frames_json`：[{"file":"000000.jpg","delay":100}]（delay 毫秒）。
 /// 供 pixiv 动图下载（默认 mp4；勾选「GIF 转真 gif」时 format=gif）。

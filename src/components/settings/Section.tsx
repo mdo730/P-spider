@@ -5,8 +5,6 @@ export interface SectionProps extends PropsWithChildren {
   title: string;
   name: string;
   titleIcon?: ReactNode;
-  /** 新手引导锚点（渲染为 data-tour 属性） */
-  dataTour?: string;
 }
 
 const context = createContext<Pick<SectionProps, 'name'>>({
@@ -25,7 +23,6 @@ export const Section: React.FC<SectionProps> = ({
   title,
   children,
   titleIcon = <SettingFilled />,
-  dataTour,
 }) => {
   // 有分组上下文时，只显示当前分组下的区块
   const tab = useContext(SettingsTabContext);
@@ -37,7 +34,6 @@ export const Section: React.FC<SectionProps> = ({
       <section
         className="mb-4 bg-white p-4 border-[1px] rounded-md"
         aria-label={title}
-        data-tour={dataTour}
       >
         <h2 className="font-bold text-xl mb-4 flex items-center">
           <span

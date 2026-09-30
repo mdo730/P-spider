@@ -54,6 +54,7 @@ import {
 import { useFigmemoFavoritesStore } from '../stores/figmemo-favorites';
 import { useFigmemoTagsStore } from '../stores/figmemo-tags';
 import { useRouteStore } from '../stores/route';
+import { useSiteCacheStore } from '../stores/site-cache';
 import { ROUTES } from '../constants/routes';
 import {
   DEFAULT_LIBRARY_FILTER,
@@ -121,6 +122,8 @@ const ITEMS_TTL = 3 * 60 * 1000;
 const REFRESH_INTERVAL = 5 * 60 * 1000;
 let itemsCache: FigmemoListItem[] | null = null;
 let itemsCacheAt = 0;
+/** 该缓存对应的「站点缓存版本」；时间流刷新站点后版本 +1，使这里失效 */
+let itemsCacheVersion = -1;
 let lastRefreshAt = 0;
 
 /** 列表分页每页条数 */
@@ -274,6 +277,7 @@ export const FigmemoPage: React.FC = () => {
     if (items.length > 0) {
       itemsCache = items;
       itemsCacheAt = Date.now();
+      itemsCacheVersion = useSiteCacheStore.getState().version;
     }
   }, [items]);
 
@@ -296,51 +300,57 @@ export const FigmemoPage: React.FC = () => {
 
   const relOf = (item: FigmemoListItem) => `fig-memo/${item.folderName}`;
 
-  const load = useCallback(async () => {
-    // 快速路径：最近构建过就直接用内存列表（切回不卡），仅按间隔后台静默刷新
-    if (
-      itemsCache &&
-      itemsCache.length > 0 &&
-      Date.now() - itemsCacheAt < ITEMS_TTL
-    ) {
-      setItems(itemsCache);
-      setLoading(false);
-      if (Date.now() - lastRefreshAt > REFRESH_INTERVAL) {
-        refreshSitePosts()
-          .then((next) => {
-            lastRefreshAt = Date.now();
-            setItems(next);
-          })
-          .catch(() => undefined);
-      }
-      return;
-    }
-    setLoading(true);
-    let shown = false;
-    // 列表显示与「订阅分类」解耦：始终展示站点全部文章；
-    // 订阅（enabledCategories）只决定后台追新时要自动下载哪些分类的新文章。
-    // 1) 本地缓存秒开
-    try {
-      const cached = await loadCachedSitePosts();
-      if (cached) {
-        setItems(cached);
+  const load = useCallback(
+    async (force = false) => {
+      // 快速路径：最近构建过就直接用内存列表（切回不卡），仅按间隔后台静默刷新。
+      // force=true（点「刷新」）时跳过，强制联网刷新。
+      if (
+        !force &&
+        itemsCache &&
+        itemsCache.length > 0 &&
+        Date.now() - itemsCacheAt < ITEMS_TTL &&
+        itemsCacheVersion === useSiteCacheStore.getState().version
+      ) {
+        setItems(itemsCache);
         setLoading(false);
-        shown = true;
+        if (Date.now() - lastRefreshAt > REFRESH_INTERVAL) {
+          refreshSitePosts()
+            .then((next) => {
+              lastRefreshAt = Date.now();
+              setItems(next);
+            })
+            .catch(() => undefined);
+        }
+        return;
       }
-    } catch (err) {
-      log.error(err);
-    }
-    // 2) 后台联网刷新
-    try {
-      setItems(await refreshSitePosts());
-      lastRefreshAt = Date.now();
-    } catch (err: any) {
-      log.error(err);
-      if (!shown) message.error(err?.message || '读取文章列表失败');
-    } finally {
-      setLoading(false);
-    }
-  }, [message]);
+      setLoading(true);
+      let shown = false;
+      // 列表显示与「订阅分类」解耦：始终展示站点全部文章；
+      // 订阅（enabledCategories）只决定后台追新时要自动下载哪些分类的新文章。
+      // 1) 本地缓存秒开
+      try {
+        const cached = await loadCachedSitePosts();
+        if (cached) {
+          setItems(cached);
+          setLoading(false);
+          shown = true;
+        }
+      } catch (err) {
+        log.error(err);
+      }
+      // 2) 后台联网刷新
+      try {
+        setItems(await refreshSitePosts());
+        lastRefreshAt = Date.now();
+      } catch (err: any) {
+        log.error(err);
+        if (!shown) message.error(err?.message || '读取文章列表失败');
+      } finally {
+        setLoading(false);
+      }
+    },
+    [message],
+  );
 
   useEffect(() => {
     load();
@@ -1253,7 +1263,7 @@ export const FigmemoPage: React.FC = () => {
               className="ml-auto"
               icon={<ReloadOutlined />}
               loading={loading}
-              onClick={load}
+              onClick={() => load(true)}
             >
               刷新
             </Button>
