@@ -25,10 +25,16 @@ export interface Subscription {
   intervalMin: number;
   /** 是否启用 */
   enabled: boolean;
-  /** 媒体类型过滤 */
+  /** 媒体类型过滤（X / Pawchive 用；pixiv 用 workTypes） */
   mediaTypes: MediaType[];
+  /** pixiv 作品类型：插画 / 漫画 / 动图；默认 ['illust','ugoira'] */
+  workTypes?: ('illust' | 'manga' | 'ugoira')[];
+  /** pixiv 漫画基线 id（插画+动图共用一个列表，基线复用 lastTweetId） */
+  lastMangaId?: string;
   /** 转贴模式（见 RetweetMode；默认 off）。读取请用 retweetModeOf() 兼容旧数据 */
   retweetMode?: RetweetMode;
+  /** 观察模式：只进时间流，**不进行任何自动下载**（默认 false） */
+  observe?: boolean;
   /** @deprecated 旧字段（v6 及以前），由 retweetMode 取代；仅用于数据迁移 */
   includeRetweets?: boolean;
   /** 上次检查到的最后一条推文 id，用于增量去重 */

@@ -67,17 +67,61 @@ import {
   getRecentSiteNotes as getMoeyoNotes,
   refreshSitePosts as refreshMoeyoSites,
 } from '../services/moeyo';
+import { getHpoiIntelNotes, refreshHpoiIntel } from '../services/hpoi-intel';
+import { syncHpoiIncremental } from '../services/hpoi-delta';
+import {
+  ensureHpoiIndexLoaded,
+  getHpoiHobbyRefs,
+} from '../services/hpoi-search';
+import { useHpoiFavoritesStore } from '../stores/hpoi-favorites';
+
+const REF_TO_KIND: Record<string, string> = {
+  c: 'company',
+  s: 'series',
+  w: 'works',
+  h: 'charactar',
+  p: 'person',
+};
+
+/** 只保留「与收藏相关」的情报：收藏了该词条，或其关联的厂商/作品/角色等被收藏 */
+async function filterHpoiNotesByFav<T extends { postId: string }>(
+  list: T[],
+): Promise<T[]> {
+  const favs = new Set(useHpoiFavoritesStore.getState().ids);
+  if (favs.size === 0) return [];
+  let indexReady = false;
+  try {
+    indexReady = await ensureHpoiIndexLoaded();
+  } catch {
+    indexReady = false;
+  }
+  return list.filter((n) => {
+    const id = Number(n.postId);
+    if (!id) return false;
+    if (favs.has(`hobby:${id}`)) return true;
+    if (!indexReady) return false;
+    const refs = getHpoiHobbyRefs(id);
+    if (!refs) return false;
+    return refs.some((r) => {
+      const [c, rid] = r.split(':');
+      const k = REF_TO_KIND[c];
+      return !!k && favs.has(`${k}:${rid}`);
+    });
+  });
+}
 import { getRecentRetweetNotes, RetweetNote } from '../services/retweets';
 import { FeedItem, getRecentFeedItems } from '../services/feed';
 import { getUserFolderMap } from '../services/user-folders';
 import { useFigmemoStore } from '../stores/figmemo';
 import { useMoeyoStore } from '../stores/moeyo';
+import { useHpoiIntelStore } from '../stores/hpoi-intel';
 import { useLibraryStore } from '../stores/library';
 import { tagChipActiveStyle, tagChipStyle } from '../utils/tag-color';
 import { useSettingsStore } from '../stores/settings';
 import { useRouteStore } from '../stores/route';
 import figmemoIcon from '../assets/platform-icons/figmemo.png';
 import moeyoIcon from '../assets/platform-icons/moeyo.png';
+import hpoiIcon from '../assets/platform-icons/hpoi.png';
 import { toAssetUrl } from '../utils/asset';
 import { openPath, openUrl, showInFolder } from '../utils/shell';
 import { useHomepageStore } from '../stores/homepage';
@@ -125,9 +169,16 @@ function siteIso(dateStr: string): string {
   return Number.isNaN(d.getTime()) ? dateStr : d.toISOString();
 }
 
-/** 把站点「新记事」（未下载文章）转成时间流分组 */
+/** 记事来源 → 筛选胶囊 token */
+const NOTE_TOKEN: Record<'figmemo' | 'moeyo' | 'intel', string> = {
+  figmemo: 'fig-memo',
+  moeyo: 'moeyo',
+  intel: 'hpoi',
+};
+
+/** 把站点「新记事 / 情报」（未下载条目）转成时间流分组 */
 function noteGroup(
-  page: 'figmemo' | 'moeyo',
+  page: 'figmemo' | 'moeyo' | 'intel',
   sourceLabel: string,
   n: {
     postId: string;
@@ -148,7 +199,7 @@ function noteGroup(
     articlePage: page,
     sourceLabel,
     categories: n.categories,
-    filterTokens: [page === 'figmemo' ? 'fig-memo' : 'moeyo'],
+    filterTokens: [NOTE_TOKEN[page]],
     records: n.coverUrl
       ? [
           {
@@ -160,7 +211,8 @@ function noteGroup(
             fileName: '',
             downloadedAt: 0,
             source: 'subscription',
-            platform: page,
+            // hpoi 不是下载平台，不设 platform（取图靠 URL 判别 Referer）
+            platform: page === 'intel' ? undefined : page,
             postUrl: n.link,
             displayName: sourceLabel,
           },
@@ -301,6 +353,13 @@ export const TimelinePage: React.FC = () => {
   const libraryCategories = useLibraryStore((s) => s.categories);
   const figmemoEnabled = useFigmemoStore((s) => s.featureEnabled);
   const moeyoEnabled = useMoeyoStore((s) => s.featureEnabled);
+  const intelEnabled = useHpoiIntelStore((s) => s.featureEnabled);
+
+  // 启动/启用 hpoi 时增量补齐新词条（距上次 <12h 自动跳过，后台静默）
+  useEffect(() => {
+    if (!intelEnabled) return;
+    void syncHpoiIncremental(false).catch(() => undefined);
+  }, [intelEnabled]);
 
   const build = useCallback(async (): Promise<TimelineGroup[]> => {
     const days = Math.min(
@@ -350,6 +409,22 @@ export const TimelinePage: React.FC = () => {
         // 忽略
       }
     }
+    if (useHpoiIntelStore.getState().featureEnabled) {
+      try {
+        let hpoiNotes = await getHpoiIntelNotes(
+          days,
+          useHpoiIntelStore.getState().categoryIds,
+        );
+        if (useHpoiIntelStore.getState().favoritesOnly) {
+          hpoiNotes = await filterHpoiNotesByFav(hpoiNotes);
+        }
+        for (const n of hpoiNotes) {
+          notes.push(noteGroup('intel', 'hpoi', n));
+        }
+      } catch {
+        // 忽略
+      }
+    }
     const retweets: TimelineGroup[] = [];
     try {
       for (const n of await getRecentRetweetNotes(days)) {
@@ -362,6 +437,28 @@ export const TimelinePage: React.FC = () => {
       b.tweetTime > a.tweetTime ? 1 : -1,
     );
   }, []);
+
+  // 收藏变化 / 「只看收藏相关」开关变化 → 重建时间流（否则需手动刷新）
+  const favIds = useHpoiFavoritesStore((s) => s.ids);
+  const favoritesOnly = useHpoiIntelStore((s) => s.favoritesOnly);
+  const favWatchFirst = useRef(true);
+  useEffect(() => {
+    if (favWatchFirst.current) {
+      favWatchFirst.current = false;
+      return;
+    }
+    if (!intelEnabled) return;
+    let alive = true;
+    void (async () => {
+      const merged = await build();
+      if (!alive) return;
+      groupsCache = merged;
+      setGroups(merged);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [favIds, favoritesOnly, intelEnabled, build]);
 
   // 后台为「本地已删且历史无直链」的视频/GIF 自动反查直链（网格里也能动）
   const resolveMissingMedia = useCallback(async (gs: TimelineGroup[]) => {
@@ -416,13 +513,40 @@ export const TimelinePage: React.FC = () => {
   const refresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      // 先触发订阅检查（含转贴更新），再重新聚合时间流
       const subs = useSubscriptionStore.getState();
+      // hpoi 与订阅检查**并行**跑（否则 hpoi 回溯要等订阅跑完，看起来像卡住）
+      const hpoiKey = 'hpoi-intel-refresh';
+      let hpoiStarted = false;
+      const hpoiTask = useHpoiIntelStore.getState().featureEnabled
+        ? refreshHpoiIntel(
+            useSettingsStore.getState().timeline?.rangeDays ?? RANGE_DAYS,
+            useHpoiIntelStore.getState().categoryIds,
+            (p) => {
+              hpoiStarted = true;
+              message.loading({
+                key: hpoiKey,
+                duration: 0,
+                content:
+                  p.mode === 'full'
+                    ? `hpoi 正在回溯近 30 天情报…（第 ${p.page} 页 · 已 ${p.total} 条）`
+                    : `hpoi 情报更新中…（已 ${p.total} 条）`,
+              });
+            },
+          )
+            .catch(() => undefined)
+            .finally(() => {
+              if (hpoiStarted) {
+                message.success({ key: hpoiKey, content: 'hpoi 情报已更新' });
+              }
+            })
+        : Promise.resolve();
+      // 订阅检查（含转贴更新）
       if (subs.subscriptions.length > 0) {
         await subs.checkAll().catch(() => {
           // 单个订阅失败不阻断整体刷新
         });
       }
+      await hpoiTask;
       const merged = await build();
       groupsCache = merged;
       visibleCountCache = Math.min(
@@ -448,6 +572,14 @@ export const TimelinePage: React.FC = () => {
       }
       if (useMoeyoStore.getState().featureEnabled) {
         await refreshMoeyoSites().catch(() => {
+          /* 忽略 */
+        });
+      }
+      if (useHpoiIntelStore.getState().featureEnabled) {
+        await refreshHpoiIntel(
+          useSettingsStore.getState().timeline?.rangeDays ?? RANGE_DAYS,
+          useHpoiIntelStore.getState().categoryIds,
+        ).catch(() => {
           /* 忽略 */
         });
       }
@@ -486,8 +618,9 @@ export const TimelinePage: React.FC = () => {
     withFixed('转贴');
     if (figmemoEnabled) withFixed('fig-memo');
     if (moeyoEnabled) withFixed('moeyo');
+    if (intelEnabled) withFixed('hpoi');
     return opts;
-  }, [libraryCategories, figmemoEnabled, moeyoEnabled]);
+  }, [libraryCategories, figmemoEnabled, moeyoEnabled, intelEnabled]);
 
   const toggleFilterTag = (tag: string) => {
     setFilterTags((prev) => {
@@ -917,7 +1050,9 @@ const TimelineItem: React.FC<{
       ? (figmemoIcon as string)
       : group.articlePage === 'moeyo'
         ? (moeyoIcon as string)
-        : undefined;
+        : group.articlePage === 'intel'
+          ? (hpoiIcon as string)
+          : undefined;
   // pixiv 头像在 i.pximg.net，需带 Referer 经后端拉取
   const pixivAvatar = useRemoteImageSrc(
     first?.platform === 'pixiv' ? group.avatar || first?.avatar : undefined,
@@ -1207,9 +1342,13 @@ const TimelineItem: React.FC<{
               : record.filePath || undefined;
           const rawThumb = getMediaThumbUrl(record);
           const rawOriginal = getMediaOriginalUrl(record);
-          // pixiv 图片 i.pximg.net 有防盗链，经代理时需带 Referer
+          // pixiv（i.pximg.net）/ hpoi（rfx.hpoi.net）图片有防盗链，经代理时需带 Referer
           const mediaReferer =
-            record.platform === 'pixiv' ? 'https://www.pixiv.net/' : undefined;
+            record.platform === 'pixiv'
+              ? 'https://www.pixiv.net/'
+              : /hpoi\.net/.test(rawThumb || rawOriginal || '')
+                ? 'https://www.hpoi.net/'
+                : undefined;
           // 远程图（pbs 等被墙）也经本地代理取，本地文件删了仍能显示
           const toRemote = (u?: string) =>
             u && /^https?:/i.test(u) ? mediaProxyUrl(u, mediaReferer) : u;

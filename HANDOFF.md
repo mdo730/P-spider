@@ -76,7 +76,8 @@ P-Spider（fork 自 x-spider）**v1.5.1 正式版已发布（2026-09-29，GitHub
 
 - 路径：本仓库（git 仓库，分支 `master`）
 - 技术栈：Tauri v1 + React18 + TS + Vite + Tailwind + antd5 + Zustand
-- 版本：`1.6.1`（`package.json` 与 `src-tauri/Cargo.toml` 同步）。`v1.6.0` 已作为**抢先版**发布（Pre-release，2026-09-29）；`v1.6.1` 为清理/优化版（**未发布**）。上一个正式版为 `1.5.1`（`releases/latest`）。
+- 版本：`1.6.2`（`package.json` 与 `src-tauri/Cargo.toml` 同步；**开发中，未发布**）。`v1.6.1` 已作为**体验版**发布（Pre-release，2026-09-30，commit `918f5d2`）。上一个正式版为 `1.5.1`（`releases/latest`）。
+- 1.6.2 至今改动（未提交）：pixiv 订阅/建库统一「作品类型（插画/漫画/动图）」并跟「下载配置」勾选；**批量「开始下载全部」纳入动图**（`media.ugoira` → `downloadUgoiraFromMedia`）；X/Pawchive/pixiv 订阅按钮改 **toggle（已订阅→取消）**。
 - 1.6.1 清理：删除死文件 `components/about/Sponsors.tsx`、`hooks/useEvent.ts`、`utils/async.ts`、`utils/md5.ts`；移除未用依赖 `lodash-es` + `@types/lodash-es`；移除已死的 `data-tour` 锚点（driver.js 已弃用）与 `Section.dataTour`。
 - 文档：`DEVELOPMENT.md`（架构地图 + 功能 + 待办 + 发布流程），**改动后同步更新**
 - 回滚点：分支 `backup-1.2.2`（commit `c3fd23c`）、zip `x-spider-backup-1.2.2.zip`

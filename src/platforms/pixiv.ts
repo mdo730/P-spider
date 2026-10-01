@@ -1,6 +1,7 @@
 import dayjs from 'dayjs';
 import MediaType from '../enums/MediaType';
 import {
+  fetchPixivUgoiraMeta,
   fetchPixivUser,
   fetchPixivWorkDetail,
   fetchPixivWorks,
@@ -49,7 +50,7 @@ export const PIXIV_SOURCE = 'pixiv';
  *
  * 说明：列表接口（/v1/user/illusts）只给缩略图，原图需逐个 `illust/detail` 取，
  * 因此 fetchPosts 会对本页每件作品拉一次详情（并发 4，压节奏）；
- * **ugoira 动图由页面单独处理（zip→mp4/gif），此处跳过**。
+ * **ugoira 动图**产出带 `media.ugoira`（zip+帧）的媒体，由批量任务走「zip→转码」支路。
  */
 async function resolvePixivCreator(
   identifier: string,
@@ -79,7 +80,25 @@ async function workToPost(work: PixivWork): Promise<PlatformPost> {
     profileUrl: `https://www.pixiv.net/users/${work.userId}`,
   };
   const medias: PlatformMedia[] = [];
-  if (work.type !== 'ugoira') {
+  if (work.type === 'ugoira') {
+    // 动图：拉 ugoira 元数据（zip + 帧序列），交给批量任务里的「zip→转码」支路处理
+    try {
+      const meta = await fetchPixivUgoiraMeta(work.id);
+      if (meta.zipUrl && meta.frames.length > 0) {
+        medias.push({
+          id: `${work.id}-0`,
+          type: MediaType.Video,
+          // 合成一个 mp4 地址仅用于「文件名模板」的 EXT（实际由转换命令产出）
+          url: `https://i.pximg.net/ugoira/${work.id}.mp4`,
+          thumbUrl: work.thumbUrl,
+          downloadUrl: meta.zipUrl,
+          ugoira: { zipUrl: meta.zipUrl, frames: meta.frames },
+        });
+      }
+    } catch {
+      // 取不到元数据则不产出媒体（跳过），不阻断整页
+    }
+  } else {
     try {
       const detail = await fetchPixivWorkDetail(work.id);
       detail.urls.forEach((url, i) => {
@@ -119,13 +138,33 @@ async function workToPost(work: PixivWork): Promise<PlatformPost> {
 export const pixivAdapter: PlatformAdapter = {
   source: PIXIV_SOURCE,
   resolveCreator: resolvePixivCreator,
-  async fetchPosts(creatorId: string, cursor?: string) {
-    const offset = cursor ? Number(cursor) : 0;
-    const { works, nextOffset } = await fetchPixivWorks(creatorId, offset);
-    const posts = await mapLimit(works, 4, (w) => workToPost(w));
-    return {
-      posts,
-      cursor: nextOffset !== null ? String(nextOffset) : null,
-    };
+  async fetchPosts(creatorId, cursor, _count, options) {
+    // 按「作品类型」勾选决定拉哪些列表；复合游标 "type:offset"（插画列表到底后接着漫画）
+    const types =
+      options?.workTypes && options.workTypes.length
+        ? options.workTypes
+        : ['illust', 'manga'];
+    const needIllust = types.includes('illust') || types.includes('ugoira');
+    const needManga = types.includes('manga');
+    const matches = (w: PixivWork) => types.includes(w.type);
+    const first = needIllust ? 'illust' : needManga ? 'manga' : null;
+    if (!first) return { posts: [], cursor: null };
+
+    const [t, offStr] = (cursor || `${first}:0`).split(':');
+    const type: 'illust' | 'manga' = t === 'manga' ? 'manga' : 'illust';
+    const offset = Number(offStr) || 0;
+    const { works, nextOffset } = await fetchPixivWorks(
+      creatorId,
+      offset,
+      type,
+    );
+    const posts = await mapLimit(works.filter(matches), 4, (w) =>
+      workToPost(w),
+    );
+    let next: string | null;
+    if (nextOffset !== null) next = `${type}:${nextOffset}`;
+    else if (type === 'illust' && needManga) next = 'manga:0';
+    else next = null;
+    return { posts, cursor: next };
   },
 };

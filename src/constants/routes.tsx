@@ -8,6 +8,7 @@ import {
   BarChartOutlined,
   ClockCircleOutlined,
   FolderOutlined,
+  GiftOutlined,
 } from '@ant-design/icons';
 import xIcon from '../assets/platform-icons/x.svg';
 import pawchiveIcon from '../assets/platform-icons/pawchive.svg';
@@ -42,6 +43,7 @@ import { Archiver } from '../pages/Archiver';
 import { LibraryPage } from '../pages/Library';
 import { FigmemoPage } from '../pages/Figmemo';
 import { MoeyoPage } from '../pages/Moeyo';
+import { IntelPage } from '../pages/Intel';
 import { PixivPage } from '../pages/Pixiv';
 import { DownloadManagement } from '../pages/DownloadManagement';
 import { SubscriptionPage } from '../pages/Subscription';
@@ -86,6 +88,13 @@ export const ROUTES: Route[] = [
     name: 'moeyo',
     icon: siteIcon(moeyoIcon),
     element: <MoeyoPage />,
+  },
+  {
+    id: 'intel',
+    name: 'hpoi',
+    // TODO: 换成 hpoi 单色 SVG（现暂用 antd 图标占位）
+    icon: <GiftOutlined />,
+    element: <IntelPage />,
   },
   {
     id: 'pixiv',
@@ -137,14 +146,34 @@ export const SIDEBAR_HIDEABLE_IDS: string[] = [
   'figmemo',
   'moeyo',
   'pixiv',
+  'intel',
 ];
 
-/** 按用户自定义顺序重排路由；未列在 order 里的路由按默认顺序排在其后 */
+/**
+ * 按用户自定义顺序重排路由。
+ * 新增路由（不在持久化的 order 里）**不会**被丢到最后，而是按默认顺序插到
+ * 「默认顺序里它前一个已知路由」之后——避免 hpoi 这种后加的路由跑到「关于」下面。
+ */
 export function applySidebarOrder(order: string[] = []): Route[] {
   if (order.length === 0) return ROUTES;
-  const idx = (id: string) => {
-    const i = order.indexOf(id);
-    return i === -1 ? Number.MAX_SAFE_INTEGER : i;
-  };
+  const defaultIds = ROUTES.map((r) => r.id);
+  // 用户顺序里有效且去重的部分
+  const full = order.filter(
+    (id, i) => defaultIds.includes(id) && order.indexOf(id) === i,
+  );
+  for (const id of defaultIds) {
+    if (full.includes(id)) continue;
+    const defIdx = defaultIds.indexOf(id);
+    let anchor = -1;
+    for (let i = defIdx - 1; i >= 0; i--) {
+      const pos = full.indexOf(defaultIds[i]);
+      if (pos >= 0) {
+        anchor = pos;
+        break;
+      }
+    }
+    full.splice(anchor + 1, 0, id);
+  }
+  const idx = (id: string) => full.indexOf(id);
   return [...ROUTES].sort((a, b) => idx(a.id) - idx(b.id));
 }

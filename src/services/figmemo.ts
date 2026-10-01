@@ -581,6 +581,56 @@ export async function getHpoiPostIndex(): Promise<
   return map;
 }
 
+/** hpoi 词条 id → fig-memo 文章（可能多篇）反向索引（带封面） */
+let _figmemoHpoiIndexArr: Map<
+  number,
+  { postId: string; title: string; coverUrl?: string }[]
+> | null = null;
+export async function getFigmemoHpoiPostIndex(): Promise<
+  Map<number, { postId: string; title: string; coverUrl?: string }[]>
+> {
+  if (_figmemoHpoiIndexArr) return _figmemoHpoiIndexArr;
+  const map = new Map<
+    number,
+    { postId: string; title: string; coverUrl?: string }[]
+  >();
+  const coverByPost = new Map<string, string>();
+  try {
+    const cache = await readSiteCache();
+    if (cache) {
+      for (const p of cache.posts || []) {
+        const u =
+          (p.featuredMedia && cache.featured?.[String(p.featuredMedia)]) ||
+          cache.postCovers?.[String(p.id)];
+        if (u) coverByPost.set(String(p.id), u);
+      }
+    }
+  } catch {
+    // 站点缓存缺失不影响索引
+  }
+  const push = (itemId?: number, postId?: string, title?: string) => {
+    if (!itemId || !postId) return;
+    const arr = map.get(itemId) || [];
+    arr.push({
+      postId: String(postId),
+      title: title || '',
+      coverUrl: coverByPost.get(String(postId)),
+    });
+    map.set(itemId, arr);
+  };
+  const records = await readMetaRecords();
+  const titleById = new Map(records.map((r) => [String(r.postId), r.title]));
+  for (const r of records) {
+    const h = resolveHpoi(r, String(r.postId));
+    push(h?.itemId, String(r.postId), r.title);
+  }
+  for (const [pid, s] of Object.entries(HPOI_SEED)) {
+    push(s?.itemId, pid, titleById.get(pid) || '');
+  }
+  _figmemoHpoiIndexArr = map;
+  return map;
+}
+
 /** 不作厂商的写法（文库/栏目等）：命中则不打厂商标签 */
 const MANUFACTURER_DROP = new Set([
   'メディアワークス',

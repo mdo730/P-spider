@@ -50,6 +50,14 @@ import {
   rebuildFigmemoMakerTags,
 } from '../services/figmemo';
 import { useMoeyoStore } from '../stores/moeyo';
+import { useHpoiIntelStore } from '../stores/hpoi-intel';
+import { useHpoiAuthStore } from '../stores/hpoi-auth';
+import {
+  getHpoiIndexDir,
+  importHpoiIndexZip,
+  readHpoiIndexMeta,
+} from '../services/hpoi-search';
+import { syncHpoiIncremental } from '../services/hpoi-delta';
 import {
   MoeyoCategory,
   fetchCategories as fetchMoeyoCategories,
@@ -68,7 +76,6 @@ import { SIDEBAR_HIDEABLE_IDS, applySidebarOrder } from '../constants/routes';
 const SETTINGS_GROUPS = [
   { key: 'general', label: '常规' },
   { key: 'download', label: '下载' },
-  { key: 'platform', label: '平台' },
   { key: 'sites', label: '站点' },
   { key: 'tools', label: '工具与数据' },
 ];
@@ -80,9 +87,10 @@ const SECTION_GROUP: Record<string, string> = {
   timeline: 'general',
   download: 'download',
   split: 'download',
-  pixiv: 'platform',
+  pixiv: 'sites',
   parukamun: 'sites',
   moeyo: 'sites',
+  hpoi: 'sites',
   library: 'tools',
   imageSearch: 'tools',
   dataBackup: 'tools',
@@ -106,6 +114,78 @@ export const Settings: React.FC = () => {
   );
   const moeyo = useMoeyoStore();
   const [moeyoCategories, setMoeyoCategories] = useState<MoeyoCategory[]>([]);
+  const intel = useHpoiIntelStore();
+  const hpoiAuth = useHpoiAuthStore();
+  const [hpoiAccount, setHpoiAccount] = useState('');
+  const [hpoiPassword, setHpoiPassword] = useState('');
+  const [hpoiUseEmail, setHpoiUseEmail] = useState(false);
+  const [hpoiLogging, setHpoiLogging] = useState(false);
+  const doHpoiLogin = async () => {
+    if (!hpoiAccount.trim() || !hpoiPassword) {
+      message.warning('请输入 hpoi 账号和密码');
+      return;
+    }
+    setHpoiLogging(true);
+    try {
+      await hpoiAuth.login(hpoiAccount.trim(), hpoiPassword, hpoiUseEmail);
+      setHpoiPassword('');
+      message.success('hpoi 登录成功');
+    } catch (err: any) {
+      message.error(err?.message || 'hpoi 登录失败');
+    } finally {
+      setHpoiLogging(false);
+    }
+  };
+  const [hpoiIndexMeta, setHpoiIndexMeta] = useState<{
+    builtAt?: string;
+    counts: Record<string, number>;
+  } | null>(null);
+  const [hpoiIndexImporting, setHpoiIndexImporting] = useState(false);
+  const refreshHpoiIndexMeta = async () => {
+    setHpoiIndexMeta(await readHpoiIndexMeta());
+  };
+  const doHpoiIndexImport = async () => {
+    setHpoiIndexImporting(true);
+    try {
+      const files = await importHpoiIndexZip();
+      if (!files) return;
+      await refreshHpoiIndexMeta();
+      message.success(`已导入 hpoi 索引（${files.length} 个文件）`);
+    } catch (err: any) {
+      message.error(err?.message || '导入 hpoi 索引失败');
+    } finally {
+      setHpoiIndexImporting(false);
+    }
+  };
+  const openHpoiIndexDir = async () => {
+    const dir = await getHpoiIndexDir();
+    await fs.createDir(dir, { recursive: true }).catch(() => undefined);
+    await showInFolder(dir);
+  };
+  const [hpoiSyncing, setHpoiSyncing] = useState(false);
+  const doHpoiSync = async () => {
+    setHpoiSyncing(true);
+    try {
+      const r = await syncHpoiIncremental(true);
+      if (r.skipped) {
+        message.info('未安装 hpoi 离线索引，无法增量更新');
+      } else {
+        await refreshHpoiIndexMeta();
+        message.success(
+          r.added > 0
+            ? `已补齐 ${r.added} 条新词条（${r.pages} 次请求）`
+            : '已是最新，没有新词条',
+        );
+      }
+    } catch (err: any) {
+      message.error(err?.message || '增量更新失败');
+    } finally {
+      setHpoiSyncing(false);
+    }
+  };
+  useEffect(() => {
+    void refreshHpoiIndexMeta();
+  }, []);
   const updateOne = useSettingsStore((s) => s.updateOne);
   const sidebarOrder = useSettingsStore((s) => s.sidebar?.order || []);
   const sidebarHidden = useSettingsStore((s) => s.sidebar?.hidden || []);
@@ -1222,6 +1302,146 @@ export const Settings: React.FC = () => {
                 订阅 moeyo（moeyo.com）。开启分类后每 24
                 小时自动检查新文章；「刷新」立即检查；「建库」按已开启分类下载现存文章（⚠️
                 量大）。标签（分类/厂商/年份）由站点数据**自动生成**，覆盖全部文章（含未下载）。
+              </p>
+            </Section>
+            <Section title="hpoi（手办情报）" name="hpoi">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="font-medium">启用 hpoi 情报</span>
+                <Switch
+                  checked={intel.featureEnabled}
+                  onChange={(v) => intel.setFeatureEnabled(v)}
+                />
+                <span className="text-sm text-gray-400">
+                  开启后左侧显示「hpoi」选项卡，时间流纳入 hpoi 情报
+                </span>
+              </div>
+              <div>
+                <div className="text-sm text-gray-500 mb-1">
+                  进「时间流」的分类（可多选；**都不勾 = 时间流不显示 hpoi**）
+                </div>
+                <Checkbox.Group
+                  value={intel.categoryIds}
+                  onChange={(vals) => intel.setCategoryIds(vals as number[])}
+                  options={[
+                    { label: '手办', value: 100 },
+                    { label: '动漫模型', value: 200 },
+                    { label: 'Doll娃娃', value: 300 },
+                    { label: '毛绒布偶', value: 400 },
+                    { label: '真实模型', value: 500 },
+                  ]}
+                />
+              </div>
+              <div className="flex items-center gap-2 mt-3">
+                <span className="font-medium">只看收藏相关</span>
+                <Switch
+                  checked={intel.favoritesOnly}
+                  onChange={(v) => intel.setFavoritesOnly(v)}
+                />
+                <span className="text-sm text-gray-400">
+                  时间流只显示「已收藏」词条、或其关联的厂商/作品/角色等有新情报的条目
+                </span>
+              </div>
+              <div className="mt-4 pt-3 border-t-[1px] border-gray-100">
+                <div className="font-medium mb-2">
+                  hpoi 登录（访问 R18 / 收藏等）
+                </div>
+                {hpoiAuth.utoken ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm">
+                      已登录
+                      {hpoiAuth.userName ? `：${hpoiAuth.userName}` : ''}
+                    </span>
+                    <Button
+                      size="small"
+                      danger
+                      onClick={() => {
+                        hpoiAuth.logout();
+                        message.success('已退出 hpoi');
+                      }}
+                    >
+                      退出
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Segmented
+                      value={hpoiUseEmail ? 'email' : 'phone'}
+                      onChange={(v) => setHpoiUseEmail(v === 'email')}
+                      options={[
+                        { label: '手机号', value: 'phone' },
+                        { label: '邮箱', value: 'email' },
+                      ]}
+                    />
+                    <Input
+                      value={hpoiAccount}
+                      onChange={(e) => setHpoiAccount(e.target.value)}
+                      placeholder={hpoiUseEmail ? '邮箱' : '手机号'}
+                      style={{ width: 180 }}
+                    />
+                    <Input.Password
+                      value={hpoiPassword}
+                      onChange={(e) => setHpoiPassword(e.target.value)}
+                      placeholder="密码"
+                      style={{ width: 180 }}
+                    />
+                    <Button
+                      type="primary"
+                      loading={hpoiLogging}
+                      onClick={doHpoiLogin}
+                    >
+                      登录
+                    </Button>
+                  </div>
+                )}
+              </div>
+              <div className="mt-4 pt-3 border-t-[1px] border-gray-100">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="font-medium">离线索引（搜索加速）</span>
+                  {hpoiIndexMeta ? (
+                    <span className="text-sm text-green-600">
+                      已安装：手办{' '}
+                      {(hpoiIndexMeta.counts.hobby || 0).toLocaleString()} ·
+                      厂商{' '}
+                      {(hpoiIndexMeta.counts.company || 0).toLocaleString()} ·
+                      作品 {(hpoiIndexMeta.counts.works || 0).toLocaleString()}{' '}
+                      · 角色{' '}
+                      {(hpoiIndexMeta.counts.charactar || 0).toLocaleString()}
+                    </span>
+                  ) : (
+                    <span className="text-sm text-gray-400">
+                      未安装（搜索走在线，较慢且可能被限流）
+                    </span>
+                  )}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    size="small"
+                    loading={hpoiIndexImporting}
+                    onClick={doHpoiIndexImport}
+                  >
+                    导入索引包…
+                  </Button>
+                  <Button size="small" onClick={openHpoiIndexDir}>
+                    打开索引目录
+                  </Button>
+                  <Button
+                    size="small"
+                    type="primary"
+                    loading={hpoiSyncing}
+                    disabled={!hpoiIndexMeta}
+                    onClick={doHpoiSync}
+                  >
+                    更新词条库（增量）
+                  </Button>
+                  <span className="text-xs text-gray-400">
+                    索引包（.zip）见 GitHub Release 的「hpoi 种子」可选附件
+                  </span>
+                </div>
+              </div>
+              <p className="text-sm text-gray-400 mt-2">
+                hpoi（www.hpoi.net）「最新情报」只读流：制作决定 / 官图更新 /
+                预定 / 出荷 / 延期 / 再版。⚠️ 官方 robots.txt 禁抓 /api/，已限速
+                + 缓存，请勿高频。
               </p>
             </Section>
           </SettingsTabContext.Provider>

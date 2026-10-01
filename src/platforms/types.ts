@@ -16,7 +16,8 @@ export type PlatformSource =
   | 'pawchive'
   | 'figmemo'
   | 'moeyo'
-  | 'pixiv';
+  | 'pixiv'
+  | 'hpoi';
 
 /** 创作者（用户/作者），跨平台统一 */
 export interface PlatformCreator {
@@ -55,6 +56,11 @@ export interface PlatformMedia {
     aspectRatio?: [number, number];
     url?: string;
   };
+  /**
+   * pixiv ugoira 动图：走「下载 zip → 解压帧 → ffmpeg 转 mp4/gif」，
+   * 不走 aria2 直链（批量任务里需特殊处理）。
+   */
+  ugoira?: { zipUrl: string; frames: { file: string; delay: number }[] };
 }
 
 /** 内容（推文/帖子），跨平台统一 */
@@ -80,6 +86,11 @@ export interface PlatformPage {
   cursor: string | null;
 }
 
+/** fetchPosts 的附加选项（目前仅 pixiv 用 workTypes 限定作品类型） */
+export interface FetchPostsOptions {
+  workTypes?: ('illust' | 'manga' | 'ugoira')[];
+}
+
 /** 平台适配器接口：各平台实现 resolveCreator + fetchPosts */
 export interface PlatformAdapter {
   readonly source: PlatformSource;
@@ -90,5 +101,6 @@ export interface PlatformAdapter {
     creatorId: string,
     cursor?: string,
     count?: number,
+    options?: FetchPostsOptions,
   ) => Promise<PlatformPage>;
 }

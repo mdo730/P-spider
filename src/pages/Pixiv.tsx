@@ -8,6 +8,7 @@ import {
   DatePicker,
   Empty,
   Input,
+  Popconfirm,
   Select,
   Space,
   Spin,
@@ -85,14 +86,20 @@ export const PixivPage: React.FC = () => {
     loadUser,
   } = usePixivStore();
   const [downloading, setDownloading] = useState(false);
-  const { addSubscription, subscriptions } = useSubscriptionStore();
+  const { addSubscription, removeSubscription, subscriptions } =
+    useSubscriptionStore();
   const [subInterval, setSubInterval] = useState(720);
   const [subscribing, setSubscribing] = useState(false);
-  const alreadySubscribed = userInfo.data
-    ? subscriptions.some(
+  const existingSub = userInfo.data
+    ? subscriptions.find(
         (s) => s.source === 'pixiv' && s.username === userInfo.data!.id,
       )
-    : false;
+    : undefined;
+  const onUnsubscribe = () => {
+    if (!existingSub) return;
+    removeSubscription(existingSub.id);
+    message.success('已取消订阅该画师');
+  };
   // pixiv 头像也走 Referer（i.pximg.net 防盗链）
   const avatarSrc = useRemoteImageSrc(userInfo.data?.avatar, {
     headers: pixivImageHeaders(),
@@ -101,6 +108,11 @@ export const PixivPage: React.FC = () => {
   const onSubscribe = async () => {
     const user = userInfo.data;
     if (!user) return;
+    // 订阅按「下载配置 → 作品类型」的勾选走
+    if (filter.types.length === 0) {
+      message.error('请先在「下载配置 → 作品类型」至少勾选一种');
+      return;
+    }
     setSubscribing(true);
     try {
       const r = await addSubscription({
@@ -108,6 +120,8 @@ export const PixivPage: React.FC = () => {
         username: user.id,
         intervalMin: subInterval,
         mediaTypes: [MediaType.Photo],
+        workTypes: filter.types,
+        observe: false,
       });
       message.success(
         r === 'updated'
@@ -119,6 +133,31 @@ export const PixivPage: React.FC = () => {
       );
     } catch (err: any) {
       message.error(err?.message || '订阅失败');
+    } finally {
+      setSubscribing(false);
+    }
+  };
+
+  const onObserve = async () => {
+    const user = userInfo.data;
+    if (!user) return;
+    setSubscribing(true);
+    try {
+      const r = await addSubscription({
+        source: 'pixiv',
+        username: user.id,
+        intervalMin: subInterval,
+        mediaTypes: [MediaType.Photo],
+        workTypes: filter.types.length ? filter.types : ['illust', 'ugoira'],
+        observe: true,
+      });
+      message.success(
+        r === 'updated'
+          ? '已切换该画师为观察（只进时间流）'
+          : '已观察该画师（只进时间流，不下载）',
+      );
+    } catch (err: any) {
+      message.error(err?.message || '观察失败');
     } finally {
       setSubscribing(false);
     }
@@ -173,10 +212,12 @@ export const PixivPage: React.FC = () => {
     };
     useDownloadStore.getState().createCreationTask('pixiv', creator, {
       source: 'medias',
-      mediaTypes: [MediaType.Photo],
+      // 含 Video 以便 ugoira 动图通过媒体类型过滤（动图走「zip→转码」支路）
+      mediaTypes: [MediaType.Photo, MediaType.Video],
       dateRange: filter.dateRange,
+      workTypes: filter.types,
     });
-    message.success('已创建下载任务（ugoira 动图需在网格里单独下载）');
+    message.success('已创建下载任务（按作品类型勾选）');
   };
 
   const onDownloadWork = async (work: PixivWork) => {
@@ -317,15 +358,40 @@ export const PixivPage: React.FC = () => {
                     options={INTERVAL_OPTIONS}
                     style={{ width: 110 }}
                   />
-                  <Button
-                    onClick={onSubscribe}
-                    loading={subscribing}
-                    icon={alreadySubscribed ? <CheckOutlined /> : undefined}
-                  >
-                    {alreadySubscribed ? '更新订阅' : '订阅该画师'}
-                  </Button>
+                  {existingSub && !existingSub.observe ? (
+                    <Popconfirm
+                      title="取消订阅该画师？"
+                      okText="取消订阅"
+                      cancelText="再想想"
+                      onConfirm={onUnsubscribe}
+                    >
+                      <Button type="default" danger icon={<CheckOutlined />}>
+                        已订阅
+                      </Button>
+                    </Popconfirm>
+                  ) : (
+                    <Button onClick={onSubscribe} loading={subscribing}>
+                      订阅该画师
+                    </Button>
+                  )}
+                  {existingSub?.observe ? (
+                    <Popconfirm
+                      title="取消观察该画师？"
+                      okText="取消观察"
+                      cancelText="再想想"
+                      onConfirm={onUnsubscribe}
+                    >
+                      <Button type="default" danger icon={<CheckOutlined />}>
+                        已观察
+                      </Button>
+                    </Popconfirm>
+                  ) : (
+                    <Button onClick={onObserve} loading={subscribing}>
+                      👀 观察
+                    </Button>
+                  )}
                   <span className="text-xs text-gray-400">
-                    定时检查新作品并自动下载（含插画/动图；进时间流）
+                    按上方「作品类型」勾选追新并自动下载，结果进时间流
                   </span>
                 </div>
                 <p className="text-xs text-gray-400">

@@ -502,6 +502,48 @@ export async function setHpoiMatch(
 }
 
 /** 读取 moeyo.jsonl 全部元数据记录 */
+/** hpoi 词条 id → moeyo 文章（可能多篇）反向索引（带封面） */
+let _moeyoHpoiIndex: Map<
+  number,
+  { postId: string; title: string; coverUrl?: string }[]
+> | null = null;
+export async function getMoeyoHpoiPostIndex(): Promise<
+  Map<number, { postId: string; title: string; coverUrl?: string }[]>
+> {
+  if (_moeyoHpoiIndex) return _moeyoHpoiIndex;
+  const map = new Map<
+    number,
+    { postId: string; title: string; coverUrl?: string }[]
+  >();
+  const coverByPost = new Map<string, string>();
+  try {
+    const cache = await readSiteCache();
+    if (cache) {
+      for (const p of cache.posts || []) {
+        const u =
+          (p.featuredMedia && cache.featured?.[String(p.featuredMedia)]) ||
+          cache.postCovers?.[String(p.id)];
+        if (u) coverByPost.set(String(p.id), u);
+      }
+    }
+  } catch {
+    // 站点缓存缺失不影响索引
+  }
+  for (const r of await readMetaRecords()) {
+    const itemId = r.hpoi?.itemId;
+    if (!itemId) continue;
+    const arr = map.get(itemId) || [];
+    arr.push({
+      postId: String(r.postId),
+      title: r.title || '',
+      coverUrl: coverByPost.get(String(r.postId)),
+    });
+    map.set(itemId, arr);
+  }
+  _moeyoHpoiIndex = map;
+  return map;
+}
+
 export async function readMetaRecords(): Promise<MoeyoMeta[]> {
   const out: MoeyoMeta[] = [];
   try {

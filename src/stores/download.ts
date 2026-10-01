@@ -213,7 +213,9 @@ function aria2DownloadOptions(task: DownloadTask): Record<string, any> {
           ? 'https://moeyo.com/'
           : task.source === 'pixiv'
             ? 'https://www.pixiv.net/'
-            : 'https://pawchive.pw/';
+            : task.source === 'hpoi'
+              ? 'https://www.hpoi.net/'
+              : 'https://pawchive.pw/';
     options.header = [
       'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       `Referer: ${referer}`,
@@ -631,7 +633,9 @@ async function runCreationTask(task: CreationTask, abortSignal: AbortSignal) {
       return { posts: twitterPosts.map(toPlatformPost), cursor: next };
     }
     const adapter = getAdapter(source);
-    return adapter.fetchPosts(creator.id, cursor, 50);
+    return adapter.fetchPosts(creator.id, cursor, 50, {
+      workTypes: filter.workTypes,
+    });
   };
 
   const getMediaCounts = R.reduce((acc: number, elem: PlatformPost) => {
@@ -681,6 +685,8 @@ async function runCreationTask(task: CreationTask, abortSignal: AbortSignal) {
     }
 
     const paramsList: CreateDownloadTaskParams[] = [];
+    // pixiv ugoira 动图：不能走 aria2 直链，单独收集后走「zip→转码」支路
+    const ugoiraItems: { post: PlatformPost; media: PlatformMedia }[] = [];
 
     for (const post of filteredPosts) {
       const filteredMedias = (post.medias || []).filter(
@@ -694,6 +700,10 @@ async function runCreationTask(task: CreationTask, abortSignal: AbortSignal) {
 
       log().info('FilteredMedias', filteredMedias);
       for (const media of filteredMedias) {
+        if (media.ugoira) {
+          ugoiraItems.push({ post, media });
+          continue;
+        }
         const prepared = await prepareDownloadTask({
           source,
           post,
@@ -717,7 +727,7 @@ async function runCreationTask(task: CreationTask, abortSignal: AbortSignal) {
 
     log().info('Params', paramsList);
 
-    if (paramsList.length === 0) {
+    if (paramsList.length === 0 && ugoiraItems.length === 0) {
       updateCreationTask({
         ...task,
         completeCount,
@@ -726,8 +736,26 @@ async function runCreationTask(task: CreationTask, abortSignal: AbortSignal) {
       continue;
     }
 
-    await batchCreateDownloadTask(paramsList);
-    completeCount += paramsList.length;
+    if (paramsList.length > 0) {
+      await batchCreateDownloadTask(paramsList);
+      completeCount += paramsList.length;
+    }
+
+    if (ugoiraItems.length > 0) {
+      // 动态 import：pixiv-download 依赖本模块，避免静态环形依赖
+      const { downloadUgoiraFromMedia } = await import(
+        '../services/pixiv-download'
+      );
+      for (const it of ugoiraItems) {
+        if (abortSignal.aborted) break;
+        try {
+          completeCount += await downloadUgoiraFromMedia(it.post, it.media);
+        } catch (err) {
+          log().error('ugoira download failed', { id: it.post.id, err });
+        }
+      }
+    }
+
     updateCreationTask({
       ...task,
       completeCount,

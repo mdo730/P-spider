@@ -1,6 +1,7 @@
 import dayjs, { Dayjs } from 'dayjs';
 import { request } from '../ipc/network';
 import { useSettingsStore } from '../stores/settings';
+import { delay } from '../utils';
 
 /**
  * pixiv 客户端（L2/L3 共用）
@@ -186,6 +187,77 @@ async function exchangeToken(force = false): Promise<{ user?: PixivUser }> {
   };
 }
 
+let _pixivLog: ICategoriedLogger;
+
+function pixivLog() {
+  if (!_pixivLog) _pixivLog = window.log.category('PIXIV');
+  return _pixivLog;
+}
+
+/**
+ * pixiv 限流小保险（只作用于 app-api.pixiv.net 的 API 请求，**不影响图片下载**）。
+ *
+ * pixiv 对同一 token/出口 IP 有频率限额：批量建库「每件作品都拉一次详情」时会短时爆发，
+ * 一旦 429 会把整个 token 冷却，连订阅检查（/v1/user/detail）都跟着红。
+ * 这里不提前大幅降速（下载快是好事），只在**真的 429 时**全局熔断一小段：
+ * - 优先用响应头 Retry-After 决定冷却时长，取不到则默认 20s 并随重试递增；
+ * - 冷却期内所有 pixiv API 请求排队等待，避免继续打把冷却期拖长；
+ * - 另加一个很小的 API 最小间隔，温和压一下瞬时爆发。
+ */
+const PIXIV_MIN_GAP_MS = 100;
+const PIXIV_RATE_LIMIT_MS = 20_000;
+const PIXIV_RATE_LIMIT_RETRY = 3;
+
+let pixivBlockedUntil = 0;
+let pixivLastAt = 0;
+
+/** 大小写不敏感读取响应头首值 */
+function headerValue(
+  headers: Record<string, string[]> | undefined,
+  name: string,
+): string | undefined {
+  if (!headers) return undefined;
+  const lower = name.toLowerCase();
+  for (const [k, v] of Object.entries(headers)) {
+    if (k.toLowerCase() === lower) return v?.[0];
+  }
+  return undefined;
+}
+
+/** 解析 Retry-After（秒数或 HTTP-date）→ ms；识别不了返回 0 */
+function parseRetryAfterMs(
+  headers: Record<string, string[]> | undefined,
+): number {
+  const raw = headerValue(headers, 'retry-after');
+  if (!raw) return 0;
+  const secs = Number(raw);
+  if (Number.isFinite(secs) && secs > 0) return Math.round(secs * 1000);
+  const date = Date.parse(raw);
+  if (!Number.isNaN(date)) return Math.max(0, date - Date.now());
+  return 0;
+}
+
+/** 触发/延长熔断：所有 pixiv API 请求暂停到该时间点 */
+function blockPixiv(ms: number, note: string) {
+  const until = Date.now() + Math.max(ms, 1000);
+  if (until > pixivBlockedUntil) {
+    pixivBlockedUntil = until;
+    pixivLog().warn('pixiv 触发限流，暂停 API 请求', {
+      note,
+      seconds: Math.round(ms / 1000),
+    });
+  }
+}
+
+/** 请求前过闸：等熔断解除 + 满足最小间隔 */
+async function passPixivGate() {
+  const wait = pixivBlockedUntil - Date.now();
+  if (wait > 0) await delay(wait);
+  const gap = pixivLastAt + PIXIV_MIN_GAP_MS - Date.now();
+  if (gap > 0) await delay(gap);
+  pixivLastAt = Date.now();
+}
+
 async function getToken(): Promise<string> {
   if (!tokenCache || Date.now() >= tokenCache.expiresAt) {
     await exchangeToken(true);
@@ -197,7 +269,7 @@ async function apiGet(
   path: string,
   query: Record<string, any> = {},
 ): Promise<any> {
-  const doGet = async (token: string) =>
+  const doGet = (token: string) =>
     request({
       method: 'GET',
       url: `${APP_API}${path}`,
@@ -207,23 +279,44 @@ async function apiGet(
       maxRetry: 3,
     });
   let token = await getToken();
-  let resp = await doGet(token);
-  if (resp.status === 401) {
-    // token 失效：强制重换后重试一次
-    tokenCache = null;
-    token = await getToken();
-    resp = await doGet(token);
+
+  for (let attempt = 0; attempt <= PIXIV_RATE_LIMIT_RETRY; attempt++) {
+    await passPixivGate();
+    let resp = await doGet(token);
+    if (resp.status === 401) {
+      // token 失效：强制重换后重试一次
+      tokenCache = null;
+      token = await getToken();
+      await passPixivGate();
+      resp = await doGet(token);
+    }
+
+    // 429：触发全局熔断，冷却后再试（优先按 Retry-After，取不到则递增退避）
+    if (resp.status === 429) {
+      const retryMs =
+        parseRetryAfterMs(resp.headers) || PIXIV_RATE_LIMIT_MS * (attempt + 1);
+      blockPixiv(retryMs, path);
+      if (attempt < PIXIV_RATE_LIMIT_RETRY) continue;
+      throw new Error(
+        `pixiv 请求失败：Rate Limit（触发限流保护，暂停约 ${Math.round(
+          retryMs / 1000,
+        )} 秒后自动恢复）`,
+      );
+    }
+
+    const data = resp.body as any;
+    if (resp.status >= 400) {
+      const msg =
+        data?.error?.user_message ||
+        data?.error?.message ||
+        data?.message ||
+        `status=${resp.status}`;
+      throw new Error(`pixiv 请求失败：${msg}`);
+    }
+    return data;
   }
-  const data = resp.body as any;
-  if (resp.status >= 400) {
-    const msg =
-      data?.error?.user_message ||
-      data?.error?.message ||
-      data?.message ||
-      `status=${resp.status}`;
-    throw new Error(`pixiv 请求失败：${msg}`);
-  }
-  return data;
+
+  throw new Error('pixiv 请求失败：未知原因');
 }
 
 /** 校验登录：强制换一次 token，返回用户信息（并回写设置缓存） */

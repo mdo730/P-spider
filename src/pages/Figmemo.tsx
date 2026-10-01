@@ -91,32 +91,6 @@ const TAG_GROUPS: { key: string; options: string[] }[] = [
   { key: '体型', options: ['幼女', '成女', '熟女'] },
 ];
 
-/**
- * 用 fig-memo 文章标题/正文拼出 Hpoi 搜索关键词。
- * 标题形如 `メーカー「商品名」...`；正文兜底解析 `メーカー：` / `商品名：`。
- */
-function buildHpoiKeyword(title: string, html?: string): string {
-  let maker = '';
-  let name = '';
-  const t = title.match(/^([^「]+?)「(.+?)」/);
-  if (t) {
-    maker = t[1].trim();
-    name = t[2].trim();
-  }
-  if (html && (!maker || !name)) {
-    const text = html.replace(/<[^>]*>/g, '\n');
-    if (!maker) {
-      const m = text.match(/メーカー\s*[:：]\s*([^\n]+)/);
-      if (m) maker = m[1].trim();
-    }
-    if (!name) {
-      const m = text.match(/商品名\s*[:：]\s*([^\n]+)/);
-      if (m) name = m[1].trim();
-    }
-  }
-  return [name || title.trim(), maker].filter(Boolean).join(' ');
-}
-
 // 会话级内存缓存：切走再切回 fig-memo 时直接用内存列表，避免重复「读缓存→构建→同步标签→渲染」
 const ITEMS_TTL = 3 * 60 * 1000;
 const REFRESH_INTERVAL = 5 * 60 * 1000;
@@ -707,14 +681,6 @@ export const FigmemoPage: React.FC = () => {
 
   const postUrl = selected?.link;
 
-  // Hpoi 手办维基：用「商品名 + 厂商」预填搜索（手动挑对应词条，不做脆弱的自动匹配）
-  const hpoiKeyword = selected
-    ? buildHpoiKeyword(selected.title, detail?.contentHtml)
-    : '';
-  const hpoiUrl = `https://www.hpoi.net/search?keyword=${encodeURIComponent(
-    hpoiKeyword,
-  )}&category=100`;
-
   // 当前文章在快照列表中的位置（用于「上一篇/下一篇」与进度显示）
   const navIndex = useMemo(
     () =>
@@ -883,19 +849,6 @@ export const FigmemoPage: React.FC = () => {
           >
             在原站打开
           </a>
-          <Button
-            icon={
-              <img
-                src={hpoiIcon}
-                alt="Hpoi"
-                className="w-4 h-4 object-contain"
-              />
-            }
-            title={`在 Hpoi 手办维基搜索：${hpoiKeyword}`}
-            onClick={() => openUrl(hpoiUrl)}
-          >
-            Hpoi
-          </Button>
         </div>
         <div className="flex-1 overflow-y-auto pb-10" ref={detailScrollRef}>
           <article
@@ -1169,6 +1122,25 @@ export const FigmemoPage: React.FC = () => {
                 <DownloadOutlined className="text-lg transition-transform duration-300 group-hover:scale-110" />
               )}
             </button>
+            {/* 已在 app 内打开 hpoi 词条（关联了词条时显示） */}
+            {selected.hpoi?.itemId && (
+              <button
+                type="button"
+                title="在 app 内打开 hpoi 词条"
+                onClick={() =>
+                  useRouteStore
+                    .getState()
+                    .openArticle('intel', String(selected.hpoi!.itemId))
+                }
+                className="group flex h-11 w-11 items-center justify-center rounded-full bg-white shadow-lg ring-1 ring-black/5 transition-all duration-200 ease-out hover:scale-110 hover:shadow-xl active:scale-95"
+              >
+                <img
+                  src={hpoiIcon as string}
+                  alt="hpoi"
+                  className="h-6 w-6 object-contain transition-transform duration-300 group-hover:scale-110"
+                />
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -1215,7 +1187,7 @@ export const FigmemoPage: React.FC = () => {
               value={makerId}
               options={makerOptions}
               onChange={(id) => {
-                setMakerId(id);
+                setMakerId(id == null ? null : String(id));
                 setPage(1);
               }}
             />

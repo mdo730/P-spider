@@ -78,6 +78,18 @@ export function useBootstrap() {
             }
           },
         },
+        {
+          name: 'hpoi-index',
+          async fn() {
+            // 首启释放安装包内置的 hpoi 索引（已存在/未内置则跳过，失败不影响启动）
+            try {
+              const n = await invoke<number>('install_bundled_hpoi_index');
+              if (n) log.info(`内置 hpoi 索引已释放（${n} 个文件）`);
+            } catch (err) {
+              log.warn('内置 hpoi 索引未安装或释放失败', err);
+            }
+          },
+        },
       ];
 
       for (const item of flows) {

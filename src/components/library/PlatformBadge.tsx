@@ -6,6 +6,7 @@ import xIcon from '../../assets/platform-icons/x.png';
 import figmemoIcon from '../../assets/platform-icons/figmemo.png';
 import moeyoIcon from '../../assets/platform-icons/moeyo.png';
 import pixivIcon from '../../assets/platform-icons/pixiv.svg';
+import hpoiIcon from '../../assets/platform-icons/hpoi.png';
 
 const ICONS: Record<PlatformSource, string> = {
   twitter: xIcon,
@@ -13,6 +14,7 @@ const ICONS: Record<PlatformSource, string> = {
   figmemo: figmemoIcon,
   moeyo: moeyoIcon,
   pixiv: pixivIcon,
+  hpoi: hpoiIcon,
 };
 
 const LABELS: Record<PlatformSource, string> = {
@@ -21,6 +23,7 @@ const LABELS: Record<PlatformSource, string> = {
   figmemo: 'fig-memo',
   moeyo: 'moeyo',
   pixiv: 'pixiv',
+  hpoi: 'hpoi',
 };
 
 interface Props {

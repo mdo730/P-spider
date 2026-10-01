@@ -262,6 +262,13 @@ src-tauri/
 - 回滚：`git checkout backup-1.2.2` 或解压 zip
 - 说明：本地库「多级标签树」改造前的稳定点（含平台标记、一键缩略图缓存、fig-memo 之前）
 
+### hpoi 离线索引（1.6.3）
+
+- **种子抓取** `scripts/build-hpoi-seed.mjs`：`--via-api` 用 `/api/hobby/query-v2` 分页（pageSize 200）枚举全量手办（5 大类，约 12.6 万条 / 633 请求），并从每条 `working` 派生 company/works/charactar/person；产出 `hpoi-seed/*.jsonl`（完整种子 136MB）。旧模式（sitemap + 逐页抓）保留，可按 `--types` 跑。
+- **索引构建** `scripts/build-hpoi-index.mjs`：`*.jsonl` → `%APPDATA%\p-spider\hpoi-index\<kind>.json`（紧凑「数组的数组」，hobby 行含 refs 编码 + norm；附 `meta.json` 记 counts）。**norm 必须与 app 端 `services/hpoi-search.ts` 完全一致**（NFKC + 小写 + 去空白/标点）。
+- **app 侧**：`services/hpoi-search.ts` 懒加载索引（首次搜索载入，hobby 73MB ≈ 206MB 堆）；`pages/Intel.tsx` 搜索本地优先、在线兜底。设置 →「站点」→ hpoi 有「离线索引」状态（读 `meta.json`，不加载大索引）+「导入索引包…」+「打开索引目录」。
+- **发布可选附件**：`hpoi-seed-<date>.zip`（`seed/*.jsonl` + `index/*.json`，约 45MB）挂到 GitHub Release 作可选下载。用户导入走 Rust 命令 `hpoi_index::import_hpoi_index`（复用 `zip` crate，白名单 basename 防穿越，只提取 index/*.json 到 appDataDir/hpoi-index）。
+
 ## 待办 / 已知问题 / 维护注意
 
 1. **架构解耦：下载历史改事件驱动**（✅ 已完成）

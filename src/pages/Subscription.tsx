@@ -20,10 +20,12 @@ import {
   CheckCircleFilled,
   EditOutlined,
   FolderOpenOutlined,
+  LinkOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
 import { fs, path } from '@tauri-apps/api';
 import { PageHeader } from '../components/PageHeader';
+import { ROUTES } from '../constants/routes';
 import MediaType from '../enums/MediaType';
 import { Subscription } from '../interfaces/Subscription';
 import { retweetModeOf } from '../stores/subscription';
@@ -34,6 +36,10 @@ import pixivIcon from '../assets/platform-icons/pixiv.svg';
 import { LoadingOutlined, RetweetOutlined } from '@ant-design/icons';
 import { useSettingsStore } from '../stores/settings';
 import { useSubscriptionStore } from '../stores/subscription';
+import { useArchiverBrowseStore } from '../stores/archiver-browse';
+import { useHomepageStore } from '../stores/homepage';
+import { usePixivStore } from '../stores/pixiv';
+import { useRouteStore } from '../stores/route';
 import { buildUserUrl } from '../twitter/url';
 import { resolveVariables } from '../utils/file-name-template';
 import { showInFolder } from '../utils/shell';
@@ -98,6 +104,38 @@ function buildSubProfileUrl(sub: Subscription): string {
     return `https://www.pixiv.net/users/${sub.username}`;
   }
   return buildUserUrl(sub.username);
+}
+
+/**
+ * 点击订阅名 → 跳到 app 内对应标签页并加载该作者（不喂额外 ID，直接用订阅里已有的标识/主页链接）。
+ * - X：loadUser 只吃 screenName（不解析链接）→ 喂 sub.username
+ * - pixiv：loadUser 走 parsePixivInput，支持主页链接/纯数字 ID → 喂 sub.username
+ * - Pawchive：load 支持完整主页链接 / service-id / 纯 ID → 喂 buildSubProfileUrl(sub)
+ */
+async function openSubInApp(sub: Subscription): Promise<void> {
+  if (sub.source === 'pixiv') {
+    const route = ROUTES.find((r) => r.id === 'pixiv');
+    if (route) useRouteStore.getState().setRoute(route);
+    usePixivStore.getState().setKeyword(sub.username);
+    await usePixivStore.getState().loadUser(sub.username);
+    return;
+  }
+  if (sub.source === 'pawchive') {
+    const route = ROUTES.find((r) => r.id === 'archiver');
+    if (route) useRouteStore.getState().setRoute(route);
+    const identifier = buildSubProfileUrl(sub);
+    useArchiverBrowseStore.getState().setKeyword(identifier);
+    await useArchiverBrowseStore.getState().load(identifier);
+    return;
+  }
+  // twitter：先清掉上一个用户的媒体列表，否则主页挂载时会走「加载更多」而非重新加载
+  const hp = useHomepageStore.getState();
+  hp.setKeyword(sub.username);
+  hp.clearUser();
+  hp.clearPostList();
+  const home = ROUTES.find((r) => r.id === 'home');
+  if (home) useRouteStore.getState().setRoute(home);
+  await hp.loadUser(sub.username);
 }
 
 /** 相对时间格式化：刚刚 / X 分钟前 / X 小时前 / MM-DD HH:mm */
@@ -231,7 +269,9 @@ const SubscriptionItem: React.FC<SubscriptionItemProps> = ({
   const [form] = Form.useForm<{
     intervalMin: number;
     mediaTypes: MediaType[];
+    workTypes?: ('illust' | 'manga' | 'ugoira')[];
     includeRetweets?: boolean;
+    observe?: boolean;
   }>();
   const avatarSrc = useSubAvatar(sub);
   const status = STATUS_MAP[sub.status];
@@ -243,7 +283,12 @@ const SubscriptionItem: React.FC<SubscriptionItemProps> = ({
     form.setFieldsValue({
       intervalMin: sub.intervalMin,
       mediaTypes: sub.mediaTypes,
+      workTypes:
+        sub.workTypes && sub.workTypes.length
+          ? sub.workTypes
+          : ['illust', 'ugoira'],
       includeRetweets: retweetModeOf(sub) !== 'off',
+      observe: sub.observe === true,
     });
     setEditing(true);
   };
@@ -285,6 +330,20 @@ const SubscriptionItem: React.FC<SubscriptionItemProps> = ({
 
   const saveEdit = async () => {
     const values = await form.validateFields();
+    if (sub.source === 'pixiv') {
+      const workTypes =
+        values.workTypes && values.workTypes.length
+          ? values.workTypes
+          : (['illust', 'ugoira'] as ('illust' | 'manga' | 'ugoira')[]);
+      onUpdate(sub.id, {
+        intervalMin: values.intervalMin,
+        workTypes,
+        observe: values.observe === true,
+      });
+      message.success(`已更新 ${sub.username} 的订阅设置`);
+      setEditing(false);
+      return;
+    }
     if (!values.mediaTypes || values.mediaTypes.length === 0) {
       message.error('请至少选择一个媒体类型');
       return;
@@ -293,6 +352,7 @@ const SubscriptionItem: React.FC<SubscriptionItemProps> = ({
       intervalMin: values.intervalMin,
       mediaTypes: values.mediaTypes,
       retweetMode: values.includeRetweets ? 'include' : 'off',
+      observe: values.observe === true,
     });
     message.success(`已更新 ${sub.username} 的订阅设置`);
     setEditing(false);
@@ -301,23 +361,46 @@ const SubscriptionItem: React.FC<SubscriptionItemProps> = ({
   return (
     <li className="flex items-center justify-between p-3 border-[1px] border-gray-200 rounded-md">
       <div className="flex items-center min-w-0">
-        <Avatar src={avatarSrc} size={42} alt="头像">
-          {(sub.displayName || sub.username)?.slice(0, 1)}
-        </Avatar>
+        <div className="relative shrink-0">
+          <Avatar src={avatarSrc} size={42} alt="头像">
+            {(sub.displayName || sub.username)?.slice(0, 1)}
+          </Avatar>
+          {sub.observe && (
+            <span
+              title="观察模式：只进时间流，不自动下载"
+              className="absolute -left-1 -bottom-1 flex h-5 w-5 items-center justify-center rounded-full bg-white text-[11px] shadow ring-1 ring-black/5"
+            >
+              👀
+            </span>
+          )}
+        </div>
         <div className="ml-3 min-w-0">
           <div className="flex items-center space-x-2">
             <Tag color={PLATFORM_TAG_COLOR[sub.source] || 'purple'}>
               {PLATFORM_LABEL[sub.source] || sub.source}
             </Tag>
-            <a
-              className="font-medium truncate"
-              href={buildSubProfileUrl(sub)}
-              target="_blank"
-              rel="noreferrer"
-              title={sub.username}
+            <button
+              type="button"
+              className="font-medium truncate text-ant-color-primary hover:underline"
+              title={`${sub.username}（站内打开）`}
+              onClick={() =>
+                openSubInApp(sub).catch((err: any) =>
+                  message.error(err?.message || '站内打开失败'),
+                )
+              }
             >
               {sub.displayName || sub.username}
-            </a>
+            </button>
+            <Tooltip title="在浏览器中打开">
+              <a
+                className="text-gray-400 hover:text-ant-color-primary"
+                href={buildSubProfileUrl(sub)}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <LinkOutlined />
+              </a>
+            </Tooltip>
             <Tag
               color={status.color}
               icon={sub.status === 'idle' ? <CheckCircleFilled /> : undefined}
@@ -335,6 +418,7 @@ const SubscriptionItem: React.FC<SubscriptionItemProps> = ({
               <Tag color="magenta">含转贴</Tag>
             )}
             {retweetModeOf(sub) === 'only' && <Tag color="purple">仅转推</Tag>}
+            {sub.observe && <Tag color="cyan">观察</Tag>}
           </div>
           <p className="text-sm text-gray-400 truncate">
             {sub.source === 'twitter' ? `@${sub.username}` : sub.username} ·
@@ -388,33 +472,66 @@ const SubscriptionItem: React.FC<SubscriptionItemProps> = ({
           >
             <Select options={INTERVAL_OPTIONS} />
           </Form.Item>
-          <Form.Item
-            name="mediaTypes"
-            label="媒体类型"
-            rules={[
-              {
-                required: true,
-                validator: (_, value) =>
-                  value && value.length > 0
-                    ? Promise.resolve()
-                    : Promise.reject(new Error('请至少选择一个媒体类型')),
-              },
-            ]}
-          >
-            <Checkbox.Group
-              options={[
-                { label: '照片', value: MediaType.Photo },
-                { label: '视频', value: MediaType.Video },
-                { label: 'GIF', value: MediaType.Gif },
+          {sub.source === 'pixiv' ? (
+            <Form.Item
+              name="workTypes"
+              label="作品类型"
+              rules={[
+                {
+                  required: true,
+                  validator: (_, value) =>
+                    value && value.length > 0
+                      ? Promise.resolve()
+                      : Promise.reject(new Error('请至少选择一种作品类型')),
+                },
               ]}
-            />
-          </Form.Item>
+            >
+              <Checkbox.Group
+                options={[
+                  { label: '插画', value: 'illust' },
+                  { label: '漫画', value: 'manga' },
+                  { label: '动图', value: 'ugoira' },
+                ]}
+              />
+            </Form.Item>
+          ) : (
+            <>
+              <Form.Item
+                name="mediaTypes"
+                label="媒体类型"
+                rules={[
+                  {
+                    required: true,
+                    validator: (_, value) =>
+                      value && value.length > 0
+                        ? Promise.resolve()
+                        : Promise.reject(new Error('请至少选择一个媒体类型')),
+                  },
+                ]}
+              >
+                <Checkbox.Group
+                  options={[
+                    { label: '照片', value: MediaType.Photo },
+                    { label: '视频', value: MediaType.Video },
+                    { label: 'GIF', value: MediaType.Gif },
+                  ]}
+                />
+              </Form.Item>
+              <Form.Item
+                name="includeRetweets"
+                valuePropName="checked"
+                tooltip="转贴只进时间流，不下载（默认关闭）"
+              >
+                <Checkbox>转推</Checkbox>
+              </Form.Item>
+            </>
+          )}
           <Form.Item
-            name="includeRetweets"
+            name="observe"
             valuePropName="checked"
-            tooltip="转贴只进时间流，不下载（默认关闭）"
+            tooltip="观察模式：只进时间流，不进行任何自动下载"
           >
-            <Checkbox>转推</Checkbox>
+            <Switch checkedChildren="观察" unCheckedChildren="自动下载" />
           </Form.Item>
         </Form>
       </Modal>
@@ -433,7 +550,7 @@ const SubscriptionCompact: React.FC<{
   onToggle: (id: string, enabled: boolean) => void;
   onCheckNow: (id: string) => void;
 }> = ({ sub, onRemove, onToggle, onCheckNow }) => {
-  const { modal } = App.useApp();
+  const { modal, message } = App.useApp();
   const [menuOpen, setMenuOpen] = useState(false);
   const avatarSrc = useSubAvatar(sub);
   const mode = retweetModeOf(sub);
@@ -482,6 +599,14 @@ const SubscriptionCompact: React.FC<{
           <Avatar src={avatarSrc} size={56} alt="头像" shape="square">
             {(sub.displayName || sub.username)?.slice(0, 1)}
           </Avatar>
+          {sub.observe && (
+            <span
+              title="观察模式：只进时间流，不自动下载"
+              className="absolute -left-1 -bottom-1 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-white text-[11px] shadow ring-1 ring-black/5"
+            >
+              👀
+            </span>
+          )}
           {/* 顶部：最近更新（检查）时间 */}
           <span className="absolute top-0 left-0 right-0 rounded-t-sm bg-black/55 text-center text-[9px] leading-[13px] text-white">
             {updated}
@@ -508,13 +633,16 @@ const SubscriptionCompact: React.FC<{
             </Tooltip>
           )}
         </div>
-        <a
+        <button
+          type="button"
           className="mt-1 flex w-full items-center gap-0.5"
-          href={buildSubProfileUrl(sub)}
-          target="_blank"
-          rel="noreferrer"
-          title={sub.username}
-          onClick={(e) => e.stopPropagation()}
+          title={`${sub.username}（站内打开）`}
+          onClick={(e) => {
+            e.stopPropagation();
+            openSubInApp(sub).catch((err: any) =>
+              message.error(err?.message || '站内打开失败'),
+            );
+          }}
         >
           <img
             src={PLATFORM_ICON[sub.source] || xIcon}
@@ -524,7 +652,7 @@ const SubscriptionCompact: React.FC<{
           <span className="min-w-0 flex-1 truncate text-[11px] leading-4">
             {sub.displayName || sub.username}
           </span>
-        </a>
+        </button>
       </div>
     </Dropdown>
   );

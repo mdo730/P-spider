@@ -3,6 +3,7 @@
 
 mod backup;
 mod fsutil;
+mod hpoi_index;
 mod open_url;
 mod image_search;
 mod media_proxy;
@@ -86,6 +87,8 @@ fn main() {
           image_search::set_image_search_explorer_menu,
           backup::export_user_backup,
           backup::import_user_backup,
+          hpoi_index::import_hpoi_index,
+          hpoi_index::install_bundled_hpoi_index,
           open_url::open_url_foreground,
           fsutil::get_path_mtimes,
           fsutil::get_folder_stats,

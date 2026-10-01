@@ -99,10 +99,11 @@
 
 ### 订阅（L3，已完成）
 - **自建订阅列表**（同 X，不依赖 pixiv「关注」）：pixiv 页画师卡上「订阅该画师」+ 间隔选择；`username` 存画师数字 id。
-- 定时拉画师最新一页作品（`/v1/user/illusts?type=illust`）→ 与 `lastTweetId`（复用字段）基线对比 → 新的下载；首次订阅只建基线不下载。
+- 定时拉画师最新一页作品（`/v1/user/illusts?type=illust|manga`）→ 与基线对比 → 新的下载；首次订阅只建基线不下载。
+- **作品类型**：统一为 **插画 / 漫画 / 动图**（`Subscription.workTypes: ('illust'|'manga'|'ugoira')[]`，默认 `['illust','ugoira']`）。**订阅直接跟「下载配置 → 作品类型」的勾选走**（pixiv 页订阅处不再单独放开关）；插画+动图共用一个 `illust` 列表/基线 `lastTweetId`、漫画基线 `lastMangaId`。订阅编辑弹窗对 pixiv 显示「作品类型：插画/漫画/动图」。
 - **限速**：复用订阅调度的并发闸门（`CHECK_CONCURRENCY=4` + 每单 200ms 间隔），多画师轮询不叠加。
 - 订阅结果写入 **feed 缓存** → 进**时间流 v2**（和 X/Pawchive 同类，标本地库标签；因 `resolveFeedLibraryTags` 用 `pixiv:un:<account>` 绑定）。
-- ⚠️ 只订阅「插画」（含动图，动图走 zip→mp4/gif）；漫画暂不含；超级旁观者开启时不下载但仍更新基线与 feed。
+- 动图（ugoira）走 zip→mp4/gif；超级旁观者开启时不下载但仍更新基线与 feed。适配器（批量「开始下载全部」）也**按作品类型勾选**拉取（`FetchPostsOptions.workTypes` + 复合游标，先插画后漫画），**动图也纳入批量**（适配器产出 `media.ugoira`，`runCreationTask` 收集后走 `downloadUgoiraFromMedia` 支路，不走 aria2）。
 
 ### 实现说明（L2 已落地）
 - 新增：`services/pixiv.ts`（OAuth 换 token + app-api 客户端 + 输入解析）、`services/pixiv-download.ts`（多图/ugoira 下载）、

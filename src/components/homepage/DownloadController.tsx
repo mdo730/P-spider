@@ -5,6 +5,7 @@ import {
   Checkbox,
   DatePicker,
   Form,
+  Popconfirm,
   Radio,
   Select,
   Space,
@@ -39,18 +40,25 @@ export const DownloadController: React.FC = () => {
   const { createCreationTask } = useDownloadStore((s) => ({
     createCreationTask: s.createCreationTask,
   }));
-  const { addSubscription, subscriptions } = useSubscriptionStore();
+  const { addSubscription, removeSubscription, subscriptions } =
+    useSubscriptionStore();
   const [subscribing, setSubscribing] = useState(false);
   const [intervalMin, setIntervalMin] = useState(720);
   /** 订阅时是否包含转推（转贴只进时间流，不下载；默认关） */
   const [includeRetweets, setIncludeRetweets] = useState(false);
 
-  // 是否已订阅当前检索的账号（主页为 X 平台场景，只匹配 twitter 订阅）
-  const alreadySubscribed = subscriptions.some(
+  // 当前检索账号的订阅（主页为 X 平台场景，只匹配 twitter 订阅）
+  const existingSub = subscriptions.find(
     (s) =>
       s.source === 'twitter' &&
       s.username.toLowerCase() === (user?.screenName || '').toLowerCase(),
   );
+
+  const onUnsubscribe = () => {
+    if (!existingSub) return;
+    removeSubscription(existingSub.id);
+    message.success(`已取消订阅 @${user?.screenName ?? ''}`);
+  };
 
   const onStartDownload = async () => {
     if (!user) {
@@ -89,6 +97,7 @@ export const DownloadController: React.FC = () => {
         intervalMin,
         mediaTypes: filter.mediaTypes,
         retweetMode: includeRetweets ? 'include' : 'off',
+        observe: false,
       });
       if (result === 'updated') {
         message.success(`已更新 @${user.screenName} 的订阅选项`);
@@ -100,6 +109,35 @@ export const DownloadController: React.FC = () => {
     } catch (err: any) {
       log.error(err);
       message.error(`订阅失败：${err?.message || '未知原因'}`);
+    } finally {
+      setSubscribing(false);
+    }
+  };
+
+  const onObserve = async () => {
+    if (!user) {
+      message.error('请先加载用户');
+      return;
+    }
+    setSubscribing(true);
+    try {
+      const result = await addSubscription({
+        username: user.screenName,
+        intervalMin,
+        mediaTypes: filter.mediaTypes?.length
+          ? filter.mediaTypes
+          : [MediaType.Photo, MediaType.Video, MediaType.Gif],
+        retweetMode: includeRetweets ? 'include' : 'off',
+        observe: true,
+      });
+      message.success(
+        result === 'updated'
+          ? `已切换 @${user.screenName} 为观察（只进时间流）`
+          : `已观察 @${user.screenName}（只进时间流，不下载）`,
+      );
+    } catch (err: any) {
+      log.error(err);
+      message.error(`观察失败：${err?.message || '未知原因'}`);
     } finally {
       setSubscribing(false);
     }
@@ -205,15 +243,48 @@ export const DownloadController: React.FC = () => {
           style={{ width: 110 }}
           title="订阅刷新间隔"
         />
-        <Button
-          onClick={onSubscribe}
-          loading={subscribing}
-          disabled={!user || !filter.mediaTypes?.length}
-          type="default"
-          icon={alreadySubscribed ? <CheckOutlined /> : undefined}
-        >
-          {alreadySubscribed ? '更新订阅' : '订阅'}
-        </Button>
+        {existingSub && !existingSub.observe ? (
+          <Popconfirm
+            title={`取消订阅 @${user?.screenName ?? ''}？`}
+            okText="取消订阅"
+            cancelText="再想想"
+            onConfirm={onUnsubscribe}
+          >
+            <Button type="default" danger icon={<CheckOutlined />}>
+              已订阅
+            </Button>
+          </Popconfirm>
+        ) : (
+          <Button
+            onClick={onSubscribe}
+            loading={subscribing}
+            disabled={!user || !filter.mediaTypes?.length}
+            type="default"
+          >
+            订阅
+          </Button>
+        )}
+        {existingSub?.observe ? (
+          <Popconfirm
+            title={`取消观察 @${user?.screenName ?? ''}？`}
+            okText="取消观察"
+            cancelText="再想想"
+            onConfirm={onUnsubscribe}
+          >
+            <Button type="default" danger icon={<CheckOutlined />}>
+              已观察
+            </Button>
+          </Popconfirm>
+        ) : (
+          <Button
+            onClick={onObserve}
+            loading={subscribing}
+            disabled={!user}
+            type="default"
+          >
+            👀 观察
+          </Button>
+        )}
       </section>
     </section>
   );

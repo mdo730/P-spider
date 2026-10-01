@@ -21,6 +21,7 @@ export const BACKUP_FILES = [
   'figmemo.jsonl',
   'moeyo.jsonl',
   'retweets.jsonl',
+  'hpoi-favorites.json',
 ];
 
 async function appVersion(): Promise<string> {

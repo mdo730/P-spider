@@ -514,17 +514,6 @@ export const MoeyoPage: React.FC = () => {
 
   const postUrl = selected?.link;
 
-  // Hpoi 手办维基搜索：商品名 + 厂商（来自正文结构化字段）
-  const hpoiKeyword = selected
-    ? (() => {
-        const p = parseMoeyoProduct(selected.title, detail?.contentHtml);
-        return [p.product, p.maker].filter(Boolean).join(' ');
-      })()
-    : '';
-  const hpoiUrl = `https://www.hpoi.net/search?keyword=${encodeURIComponent(
-    hpoiKeyword,
-  )}&category=100`;
-
   // 正文里指回 moeyo 的链接：加图标 + 标注（供点击跳 app 内文章）
   const articleHtml = useMemo(
     () => decorateMoeyoLinks(detail?.contentHtml || '', moeyoIcon as string),
@@ -755,19 +744,6 @@ export const MoeyoPage: React.FC = () => {
               在 fig-memo 查看
             </Button>
           )}
-          <Button
-            icon={
-              <img
-                src={hpoiIcon}
-                alt="Hpoi"
-                className="w-4 h-4 object-contain"
-              />
-            }
-            title={`在 Hpoi 手办维基搜索：${hpoiKeyword}`}
-            onClick={() => openUrl(hpoiUrl)}
-          >
-            Hpoi
-          </Button>
         </div>
         <div className="flex-1 overflow-y-auto pb-10" ref={detailScrollRef}>
           <article className="select-text bg-white rounded-md border-[1px] border-gray-200 max-w-4xl mx-auto p-6">
@@ -992,6 +968,25 @@ export const MoeyoPage: React.FC = () => {
                 <DownloadOutlined className="text-lg transition-transform duration-300 group-hover:scale-110" />
               )}
             </button>
+            {/* 已在 app 内打开 hpoi 词条（关联了词条时显示） */}
+            {selectedHpoiItemId && (
+              <button
+                type="button"
+                title="在 app 内打开 hpoi 词条"
+                onClick={() =>
+                  useRouteStore
+                    .getState()
+                    .openArticle('intel', String(selectedHpoiItemId))
+                }
+                className="group flex h-11 w-11 items-center justify-center rounded-full bg-white shadow-lg ring-1 ring-black/5 transition-all duration-200 ease-out hover:scale-110 hover:shadow-xl active:scale-95"
+              >
+                <img
+                  src={hpoiIcon as string}
+                  alt="hpoi"
+                  className="h-6 w-6 object-contain transition-transform duration-300 group-hover:scale-110"
+                />
+              </button>
+            )}
           </div>
         </div>
       </div>

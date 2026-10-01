@@ -1,5 +1,13 @@
 /* eslint-disable react/prop-types */
-import { App, Button, Checkbox, DatePicker, Form, Select } from 'antd';
+import {
+  App,
+  Button,
+  Checkbox,
+  DatePicker,
+  Form,
+  Popconfirm,
+  Select,
+} from 'antd';
 import { CheckOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import React, { useState } from 'react';
@@ -30,7 +38,8 @@ export const ArchiverDownloadController: React.FC = () => {
   const { message } = App.useApp();
   const { creator, sources } = useArchiverBrowseStore();
   const { createCreationTask } = useDownloadStore();
-  const { addSubscription, subscriptions } = useSubscriptionStore();
+  const { addSubscription, removeSubscription, subscriptions } =
+    useSubscriptionStore();
   const [filter, setFilter] = useState<DownloadFilter>({
     mediaTypes: [MediaType.Photo, MediaType.Video, MediaType.Gif],
     source: 'medias',
@@ -39,13 +48,21 @@ export const ArchiverDownloadController: React.FC = () => {
   const [retweetMode, setRetweetMode] = useState<RetweetMode>('off');
   const [subscribing, setSubscribing] = useState(false);
 
-  // 是否已订阅当前创作者（Pawchive 订阅按 service/id 匹配）
-  const alreadySubscribed = subscriptions.some(
+  // 当前创作者的订阅（Pawchive 订阅按 service/id 匹配）
+  const existingSub = subscriptions.find(
     (s) =>
       s.source === 'pawchive' &&
       !!creator &&
       s.username.toLowerCase() === creator.username.toLowerCase(),
   );
+
+  const onUnsubscribe = () => {
+    if (!existingSub) return;
+    removeSubscription(existingSub.id);
+    message.success(
+      `已取消订阅 ${creator?.name || creator?.username || ''}`.trim(),
+    );
+  };
 
   const onStartDownload = async () => {
     if (!creator) {
@@ -86,6 +103,7 @@ export const ArchiverDownloadController: React.FC = () => {
         intervalMin,
         mediaTypes: filter.mediaTypes,
         retweetMode,
+        observe: false,
       });
       if (result === 'updated') {
         message.success(
@@ -99,6 +117,33 @@ export const ArchiverDownloadController: React.FC = () => {
     } catch (err: any) {
       log.error(err);
       message.error(`订阅失败：${err?.message || '未知原因'}`);
+    } finally {
+      setSubscribing(false);
+    }
+  };
+
+  const onObserve = async () => {
+    if (!creator) return;
+    setSubscribing(true);
+    try {
+      const result = await addSubscription({
+        source: 'pawchive',
+        username: creator.username,
+        intervalMin,
+        mediaTypes: filter.mediaTypes?.length
+          ? filter.mediaTypes
+          : [MediaType.Photo, MediaType.Video, MediaType.Gif],
+        retweetMode,
+        observe: true,
+      });
+      message.success(
+        result === 'updated'
+          ? `已切换 ${creator.name || creator.username} 为观察（只进时间流）`
+          : `已观察 ${creator.name || creator.username}（只进时间流，不下载）`,
+      );
+    } catch (err: any) {
+      log.error(err);
+      message.error(`观察失败：${err?.message || '未知原因'}`);
     } finally {
       setSubscribing(false);
     }
@@ -165,14 +210,42 @@ export const ArchiverDownloadController: React.FC = () => {
           style={{ width: 190 }}
           title="转贴（转贴从不下载，只进时间流）"
         />
-        <Button
-          onClick={onSubscribe}
-          loading={subscribing}
-          disabled={!creator || !filter.mediaTypes?.length}
-          icon={alreadySubscribed ? <CheckOutlined /> : undefined}
-        >
-          {alreadySubscribed ? '更新订阅' : '订阅'}
-        </Button>
+        {existingSub && !existingSub.observe ? (
+          <Popconfirm
+            title={`取消订阅 ${creator?.name || creator?.username || ''}？`}
+            okText="取消订阅"
+            cancelText="再想想"
+            onConfirm={onUnsubscribe}
+          >
+            <Button type="default" danger icon={<CheckOutlined />}>
+              已订阅
+            </Button>
+          </Popconfirm>
+        ) : (
+          <Button
+            onClick={onSubscribe}
+            loading={subscribing}
+            disabled={!creator || !filter.mediaTypes?.length}
+          >
+            订阅
+          </Button>
+        )}
+        {existingSub?.observe ? (
+          <Popconfirm
+            title={`取消观察 ${creator?.name || creator?.username || ''}？`}
+            okText="取消观察"
+            cancelText="再想想"
+            onConfirm={onUnsubscribe}
+          >
+            <Button type="default" danger icon={<CheckOutlined />}>
+              已观察
+            </Button>
+          </Popconfirm>
+        ) : (
+          <Button onClick={onObserve} loading={subscribing} disabled={!creator}>
+            👀 观察
+          </Button>
+        )}
         <span className="text-sm text-gray-400">
           下载到 保存目录/创作者名/帖子标题
         </span>

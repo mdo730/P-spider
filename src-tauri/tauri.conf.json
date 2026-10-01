@@ -73,6 +73,9 @@
       ],
       "externalBin": [
         "binaries/aria2c"
+      ],
+      "resources": [
+        "resources/hpoi-index/*"
       ]
     },
     "systemTray": {

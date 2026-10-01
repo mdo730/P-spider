@@ -24,3 +24,8 @@ dist-ssr
 *.sw?
 
 /http
+
+# hpoi 种子原料 / 抓取工具（可重爬生成，不入库；完整版走 Release 附件）
+/hpoi-seed/
+/hpoi-seed.exe
+

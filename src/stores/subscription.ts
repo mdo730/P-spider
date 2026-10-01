@@ -48,6 +48,7 @@ import {
   fetchPixivWorks,
   PixivUser,
   PixivWork,
+  PixivWorkType,
 } from '../services/pixiv';
 import { downloadPixivWork } from '../services/pixiv-download';
 
@@ -117,8 +118,12 @@ export interface CreateSubscriptionParams {
   username: string;
   intervalMin: number;
   mediaTypes: MediaType[];
+  /** pixiv 作品类型（插画/漫画/动图） */
+  workTypes?: ('illust' | 'manga' | 'ugoira')[];
   /** 转贴模式（off / include / only；默认 off） */
   retweetMode?: RetweetMode;
+  /** 观察模式：只进时间流，不自动下载（默认 false） */
+  observe?: boolean;
   /** @deprecated 用 retweetMode 代替（兼容旧调用） */
   includeRetweets?: boolean;
   /** 平台源，默认 twitter（阶段3 UI 支持多平台后由表单选择） */
@@ -155,7 +160,9 @@ export const useSubscriptionStore = create(
         username,
         intervalMin,
         mediaTypes,
+        workTypes,
         retweetMode,
+        observe,
         includeRetweets,
         source,
       }) => {
@@ -173,7 +180,9 @@ export const useSubscriptionStore = create(
           get().updateSubscription(existing.id, {
             intervalMin,
             mediaTypes,
+            workTypes,
             retweetMode: mode,
+            observe: observe === true,
           });
           log().info('Subscription updated (dedup)', {
             id: existing.id,
@@ -189,7 +198,9 @@ export const useSubscriptionStore = create(
           username,
           intervalMin,
           mediaTypes,
+          workTypes,
           retweetMode: mode,
+          observe: observe === true,
           enabled: true,
           downloadedCount: 0,
           dailyStats: {},
@@ -459,7 +470,13 @@ async function checkTwitterSubscription(
 
     // 「仅转推」模式：不下载任何内容，只把转贴收进时间流
     // 超级旁观者：跳过自动下载（仍更新基线，时间流照常）
-    if (isNew && sub.lastTweetId && mode !== 'only' && !isSpectatorOn()) {
+    if (
+      isNew &&
+      sub.lastTweetId &&
+      mode !== 'only' &&
+      !isSpectatorOn() &&
+      !sub.observe
+    ) {
       // 有基线，且最新推文不在本次列表里（即出现了新推文）
       const newPosts = R.takeWhile(
         (p: TwitterPost) => p.id !== sub.lastTweetId,
@@ -635,7 +652,7 @@ async function checkArchiverSubscription(
     let downloaded = 0;
 
     // 超级旁观者：跳过自动下载（仍更新基线）
-    if (isNew && sub.lastTweetId && !isSpectatorOn()) {
+    if (isNew && sub.lastTweetId && !isSpectatorOn() && !sub.observe) {
       const newPosts = R.takeWhile(
         (p: PlatformPost) => p.id !== sub.lastTweetId,
         enrichedPosts,
@@ -745,8 +762,8 @@ function pixivWorkToFeedItem(work: PixivWork, user?: PixivUser) {
 
 /**
  * pixiv 订阅检查（L3）：自建列表，不依赖 pixiv「关注」。
- * 拉画师最新一页作品 → 与 lastTweetId 基线对比 → 新的下载 + 写 feed 缓存（进时间流 v2）。
- * ⚠️ 只订阅「插画」（含动图，动图会走 zip→mp4/gif）；漫画暂不含。
+ * 按 workTypes 拉「插画（含动图）」和/或「漫画」最新一页 → 各与自身基线对比
+ * （插画=lastTweetId、漫画=lastMangaId）→ 新的下载 + 写 feed（进时间流 v2）。
  */
 async function checkPixivSubscription(
   sub: Subscription,
@@ -757,46 +774,64 @@ async function checkPixivSubscription(
 
   update({ status: 'running', errorMessage: undefined });
 
+  const types: PixivWorkType[] =
+    sub.workTypes && sub.workTypes.length > 0
+      ? (sub.workTypes as PixivWorkType[])
+      : ['illust', 'ugoira'];
+  const matches = (w: PixivWork) => types.includes(w.type);
+
   try {
     const user = await fetchPixivUser(sub.username);
-    const { works } = await fetchPixivWorks(sub.username, 0, 'illust');
-
-    if (!works || works.length === 0) {
-      update({
-        status: 'idle',
-        lastCheckedAt: Date.now(),
-        displayName: user.name,
-        avatar: user.avatar,
-      });
-      return { downloaded: 0 };
-    }
-
-    const newestId = works[0].id;
-    const isNew = newestId !== sub.lastTweetId;
-
-    // 时间流 v2：订阅刷新「顺带」写入 feed（含未下载；不能因为没有新作品就跳过）
-    await writeFeedItems(works.map((w) => pixivWorkToFeedItem(w, user)));
-
-    let downloaded = 0;
     const wantsPhoto = sub.mediaTypes.includes(MediaType.Photo);
-    // 超级旁观者：跳过自动下载（仍更新基线与 feed）
-    if (isNew && sub.lastTweetId && wantsPhoto && !isSpectatorOn()) {
-      const newWorks = R.takeWhile(
-        (w: PixivWork) => w.id !== sub.lastTweetId,
-        works,
-      );
-      for (const work of newWorks) {
-        try {
-          downloaded += await downloadPixivWork(work);
-        } catch (err) {
-          log().warn('pixiv 作品下载失败', { id: work.id, err });
+    let downloaded = 0;
+    const feedItems: ReturnType<typeof pixivWorkToFeedItem>[] = [];
+    let newestIllust = sub.lastTweetId; // 插画 + 动图共用一个列表/基线
+    let newestManga = sub.lastMangaId;
+
+    const run = async (listType: 'illust' | 'manga') => {
+      const { works } = await fetchPixivWorks(sub.username, 0, listType);
+      if (!works || works.length === 0) return;
+      const baseline =
+        listType === 'illust' ? sub.lastTweetId : sub.lastMangaId;
+      const newestId = works[0].id;
+      // 只保留勾选的作品类型（动图属于 illust 列表，需按 type 细分）
+      const selected = works.filter(matches);
+      feedItems.push(...selected.map((w) => pixivWorkToFeedItem(w, user)));
+
+      // 新的下载（超级旁观者：跳过下载，但仍更新基线与 feed）
+      if (
+        newestId !== baseline &&
+        baseline &&
+        wantsPhoto &&
+        !isSpectatorOn() &&
+        !sub.observe
+      ) {
+        const newWorks = R.takeWhile(
+          (w: PixivWork) => w.id !== baseline,
+          works,
+        ).filter(matches);
+        for (const work of newWorks) {
+          try {
+            downloaded += await downloadPixivWork(work);
+          } catch (err) {
+            log().warn('pixiv 作品下载失败', { id: work.id, err });
+          }
         }
       }
-    }
+      if (listType === 'illust') newestIllust = newestId;
+      else newestManga = newestId;
+    };
+
+    if (types.includes('illust') || types.includes('ugoira'))
+      await run('illust');
+    if (types.includes('manga')) await run('manga');
+
+    if (feedItems.length > 0) await writeFeedItems(feedItems);
 
     update({
       status: 'idle',
-      lastTweetId: newestId,
+      lastTweetId: newestIllust,
+      lastMangaId: newestManga,
       lastCheckedAt: Date.now(),
       displayName: user.name,
       avatar: user.avatar,

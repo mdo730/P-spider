@@ -1,0 +1,15 @@
+{
+  "v": 1,
+  "builtAt": "2026-10-01T08:04:46.944Z",
+  "source": "E:\\OPENCODE\\x-spider\\hpoi-seed",
+  "counts": {
+    "hobby": 125944,
+    "company": 1892,
+    "series": 5224,
+    "works": 4997,
+    "charactar": 13437,
+    "person": 5501
+  },
+  "maxId": 135370,
+  "releaseRef": "2026-08-18"
+}
