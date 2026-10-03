@@ -57,8 +57,8 @@ import { downloadPixivWork } from '../services/pixiv-download';
  * （原先所有订阅共用一个队列，几条慢的 pawchive 会堵住全部 X）。
  */
 const SOURCE_THROTTLE: Record<string, { limit: number; gapMs: number }> = {
-  // X：并发 4（过高会被 403），间隔 200ms
-  twitter: { limit: 4, gapMs: 200 },
+  // X：串行 + 间隔（X 对 UserByScreenName 限流极严，并发极易触发风控返回 HTML/空）
+  twitter: { limit: 1, gapMs: 700 },
   // 归档站直连：并发 2、间隔 600ms
   pawchive: { limit: 2, gapMs: 600 },
   // pixiv：并发 2、间隔 1000ms（官方限速较严）

@@ -1,5 +1,4 @@
 import ReactDOM from 'react-dom/client';
-import { App } from './App';
 import './css/preflight.css';
 import './css/base.css';
 import dayjs from 'dayjs';
@@ -7,17 +6,9 @@ import duration from 'dayjs/plugin/duration';
 import 'dayjs/locale/zh-cn';
 import './utils/log';
 import { Logger } from './utils/log';
-// 副作用 import：确保下载历史模块常驻加载，注册 onTaskCompleted 监听，
-// 使后台订阅下载也能写入历史（时间流数据源）
-import './stores/download-history';
-// 副作用 import：fig-memo 自用订阅的后台调度（24h 追新）+ 统计监听
-import './stores/figmemo';
-// 副作用 import：moeyo 的后台调度（24h 追新）+ 统计监听
-import './stores/moeyo';
-import { invoke } from '@tauri-apps/api';
-import { reverseSearch, bestOpenUrl } from './services/image-search';
-import { useSettingsStore } from './stores/settings';
-import { openUrlForeground } from './utils/shell';
+import { getCurrent } from '@tauri-apps/api/window';
+import { ConfigProvider } from 'antd';
+import { ANTD_THEME } from './constants/antd-theme';
 
 dayjs.extend(duration);
 dayjs.locale('zh-cn');
@@ -43,9 +34,6 @@ function bootstrapLogger() {
 
 /**
  * 屏蔽 WebView 原生右键菜单（桌面应用不需要「后退/刷新/另存图片」这类菜单）。
- * 自定义菜单用 antd Dropdown 的 contextMenu 触发，不受影响；
- * 输入框/可编辑区域保留原生菜单，方便右键粘贴；
- * antd 放大预览的图片（`.ant-image-preview-img`）保留原生菜单，方便「复制图片」。
  */
 function blockNativeContextMenu() {
   window.addEventListener('contextmenu', (event) => {
@@ -60,7 +48,42 @@ function blockNativeContextMenu() {
   });
 }
 
-function bootstrapView() {
+/** 当前窗口 label（非 Tauri 环境返回 null） */
+function currentWindowLabel(): string | null {
+  try {
+    return getCurrent().label;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 桌面宠物窗（label='pet'）：**只加载宠物模块**。
+ * 绝不 import 主应用/业务 store，避免第二套 store 实例和主窗口抢写同一批 JSON。
+ */
+function bootstrapPetWindow() {
+  log.info('Bootstrap pet window');
+  void import('./pet/desktop/PetDesktop').then(({ PetDesktop }) => {
+    ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
+      <ConfigProvider theme={ANTD_THEME} autoInsertSpaceInButton={false}>
+        <div className="w-screen h-screen">
+          <PetDesktop />
+        </div>
+      </ConfigProvider>,
+    );
+  });
+}
+
+/**
+ * 主窗口：初始化业务副作用（后台任务 / 活跃度桥接）后再渲染主应用。
+ * 全部动态 import，确保**只有主窗口**会实例化这些 store。
+ */
+async function renderMainApp(): Promise<void> {
+  await import('./stores/download-history');
+  await import('./stores/figmemo');
+  await import('./stores/moeyo');
+  await import('./pet/activity-bridge');
+  const { App } = await import('./App');
   log.info('Bootstrap view');
   ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
     <App />,
@@ -69,10 +92,10 @@ function bootstrapView() {
 
 /**
  * 资源管理器右键：`P-Spider.exe --image-search "<图片路径>"`
- * 若有该参数 → 直接以图搜图并打开结果，然后退出（不在前台留窗口）。
  */
 async function handleImageSearchArg(): Promise<boolean> {
   if (!('__TAURI__' in window || '__TAURI_INTERNALS__' in window)) return false;
+  const { invoke } = await import('@tauri-apps/api');
   let path: string | null = null;
   try {
     path = await invoke<string | null>('take_image_search_arg');
@@ -81,11 +104,15 @@ async function handleImageSearchArg(): Promise<boolean> {
   }
   if (!path) return false;
   try {
+    const { reverseSearch, bestOpenUrl } = await import(
+      './services/image-search'
+    );
+    const { useSettingsStore } = await import('./stores/settings');
+    const { openUrlForeground } = await import('./utils/shell');
     const engine =
       useSettingsStore.getState().imageSearch?.engine || 'google_lens';
     const r = await reverseSearch(path, engine);
     const url = bestOpenUrl(r);
-    // 用能把浏览器提到最前的打开方式（本实例是资源管理器拉起的，无前台窗口）
     if (url) await openUrlForeground(url);
   } catch (err) {
     log.error('以图搜图（右键）失败', err);
@@ -98,9 +125,11 @@ async function handleImageSearchArg(): Promise<boolean> {
   return true;
 }
 
-/** 启动时按设置同步资源管理器右键注册（默认开启；除非用户显式关闭） */
+/** 启动时按设置同步资源管理器右键注册（仅主窗口） */
 async function ensureExplorerMenu(): Promise<void> {
   if (!('__TAURI__' in window || '__TAURI_INTERNALS__' in window)) return;
+  const { invoke } = await import('@tauri-apps/api');
+  const { useSettingsStore } = await import('./stores/settings');
   const enabled =
     useSettingsStore.getState().imageSearch?.explorerMenu !== false;
   try {
@@ -113,10 +142,24 @@ async function ensureExplorerMenu(): Promise<void> {
 async function bootstrap() {
   bootstrapLogger();
   blockNativeContextMenu();
+
+  if (currentWindowLabel() === 'pet') {
+    bootstrapPetWindow();
+    return;
+  }
+
   log.info(`App bootstrap, version=${PACKAGE_JSON_VERSION}`);
   await ensureExplorerMenu();
   if (await handleImageSearchArg()) return;
-  bootstrapView();
+  await renderMainApp();
+
+  // 若已解锁且启用桌面宠物 → 随软件启动显示（等 app-state 异步水合后再判断）
+  window.setTimeout(async () => {
+    const { useAppStateStore } = await import('./stores/app-state');
+    const { openPetWindow } = await import('./pet');
+    const s = useAppStateStore.getState();
+    if (s.petUnlocked && s.petEnabled) openPetWindow();
+  }, 1500);
 }
 
 bootstrap();

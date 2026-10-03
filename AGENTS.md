@@ -26,6 +26,9 @@ pnpm lint              # prettier + eslint
 - **除非用户明确要求打包，否则不主动打包**。只改代码 + 跑 typeCheck/eslint 验证即可。
 - 用户会一次性提完所有要改的功能，攒够再打包。**不要每改一处就打一次包**。
 - 用户没提"打包"时，所有改动停留在代码层面，等用户说打包才执行 `pnpm tauri build`。
+- **打包后同步绿色版**：把产物复制到 `E:\OPENCODE\P-Spider 绿色版\`——
+  `src-tauri/target/release/P-Spider.exe`（绿色版主程序，必须与同目录 `aria2c.exe` 同放）
+  和 `src-tauri/target/release/bundle/nsis/P-Spider_<版本>_x64-setup.exe`（安装包）。
 
 ## 打包与环境注意
 
@@ -41,8 +44,11 @@ pnpm lint              # prettier + eslint
 
 - **浏览器预览判断**：`useBootstrap.ts` 用 `'__TAURI__' in window || '__TAURI_INTERNALS__' in window` 判断是否 Tauri 环境。Tauri v1 注入 `window.__TAURI__`，v2 注入 `__TAURI_INTERNALS__`。不要只用其中一个，否则桌面版会被误判为浏览器而跳过 aria2 启动（曾因此踩坑）
 - **aria2 端口**：P-Spider 用 **6802**（原版 x-spider 用 6801），避免与 x-spider 同时运行冲突
-- **数据存储**：`%APPDATA%\p-spider\` 下，`settings.json`（含 pixiv refresh_token/用户缓存）、`app-state.json`（含 cookie）、`subscriptions.json`（订阅+统计）、`downloads.jsonl`（下载历史，本地库溯源用）、`timeline-feed.jsonl`（时间流 v2 的订阅 feed 缓存）
+- **数据存储**：`%APPDATA%\p-spider\` 下，`settings.json`（含 pixiv refresh_token/用户缓存）、`app-state.json`（含 cookie）、`subscriptions.json`（订阅+统计）、`downloads.jsonl`（下载历史，本地库溯源用）、`timeline-feed.jsonl`（时间流 v2 的订阅 feed 缓存）、`pet.json`（宠物彩蛋「香蕉君」存档）
 - **GPL-3.0**：保留原 LICENSE，分发需附源码
+
+- **宠物彩蛋解耦**：`src/pet/` 是自包含模块，core（`engine.ts`）为纯函数、零外部依赖；与业务唯一耦合点是 `pet/activity-bridge.ts`（main.tsx 副作用 import）。改宠物功能不要反向侵入业务 store；新增物品只加 `pet/items.ts` 数据。
+- **发布不要提彩蛋**：宠物「香蕉君」是隐藏彩蛋，写 GitHub Release / 更新日志时**不要提及**。测试用全皮肤存档见根目录 `pet-all-skins.json`（覆盖到 `%APPDATA%\p-spider\pet.json` 即可）。
 
 ## 临时/实验代码清理
 

@@ -3,12 +3,43 @@ import React, { useState } from 'react';
 import { PageHeader } from '../components/PageHeader';
 import Logo from '../../src-tauri/icons/128x128.png';
 import { useCheckUpdate } from '../hooks/useCheckUpdate';
-import { message } from '@tauri-apps/api/dialog';
+import { message, confirm } from '@tauri-apps/api/dialog';
+import { fs, path } from '@tauri-apps/api';
+import { Switch } from 'antd';
 import { useUpdateStore } from '../stores/update';
+import { useAppStateStore } from '../stores/app-state';
+import { closePetWindow, openPetWindow, useLogoUnlock } from '../pet';
 
 export const About: React.FC = () => {
   const checkForUpdate = useCheckUpdate();
+  const { onLogoTap } = useLogoUnlock();
+  const petUnlocked = useAppStateStore((s) => s.petUnlocked);
+  const petEnabled = useAppStateStore((s) => s.petEnabled);
+  const setPetEnabled = useAppStateStore((s) => s.setPetEnabled);
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
+
+  const onTogglePet = (checked: boolean) => {
+    setPetEnabled(checked);
+    if (checked) openPetWindow();
+    else closePetWindow();
+  };
+
+  const onDeletePetData = async () => {
+    const ok = await confirm('确定删除香蕉君的全部数据吗？此操作不可恢复。', {
+      title: '删除宠物数据',
+      type: 'warning',
+    });
+    if (!ok) return;
+    closePetWindow();
+    try {
+      const dir = await path.appDataDir();
+      const file = await path.join(dir, 'pet.json');
+      if (await fs.exists(file)) await fs.removeFile(file);
+      message('宠物数据已删除', { title: '香蕉君' });
+    } catch (err: any) {
+      message(err?.message || '删除失败，请稍后再试', { title: '删除失败' });
+    }
+  };
   const hasUpdate = useUpdateStore((s) => s.hasUpdate);
   const latestVersion = useUpdateStore((s) => s.latestVersion);
 
@@ -35,7 +66,13 @@ export const About: React.FC = () => {
     <>
       <PageHeader />
       <section className="flex items-center">
-        <img src={Logo} className="w-28" alt="logo" />
+        <img
+          src={Logo}
+          className="w-28"
+          alt="logo"
+          draggable={false}
+          onClick={onLogoTap}
+        />
         <span className="text-5xl ml-4 font-bold">P-Spider</span>
       </section>
       <ul className="space-y-2 [&_a]:underline">
@@ -91,6 +128,22 @@ export const About: React.FC = () => {
           </a>
         </li>
       </ul>
+      {petUnlocked && (
+        <section className="mt-6 space-y-2">
+          <div className="flex items-center gap-3">
+            <span>宠物</span>
+            <Switch checked={petEnabled} onChange={onTogglePet} />
+          </div>
+          <div>
+            <button
+              onClick={onDeletePetData}
+              className="rounded border border-red-300 px-2 py-0.5 text-sm text-red-600 hover:bg-red-50"
+            >
+              删除宠物数据
+            </button>
+          </div>
+        </section>
+      )}
     </>
   );
 };

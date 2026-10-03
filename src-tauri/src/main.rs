@@ -13,12 +13,36 @@ use tauri::{
     AppHandle, CustomMenuItem, Manager, SystemTray, SystemTrayEvent, SystemTrayMenu, WindowEvent,
 };
 
+use std::sync::{Arc, Mutex};
+use winapi::shared::windef::POINT;
+use winapi::um::winuser::GetCursorPos;
+
+/// 桌面宠物窗的「可交互命中区」（窗口内逻辑像素矩形：x, y, w, h）。
+/// 前端在布局变化时上报；后台线程据光标位置切换窗口的鼠标穿透。
+#[derive(Default)]
+struct PetHit {
+    rects: Vec<[f64; 4]>,
+}
+
+#[tauri::command]
+fn pet_set_hit_rects(state: tauri::State<'_, Arc<Mutex<PetHit>>>, rects: Vec<[f64; 4]>) {
+    if let Ok(mut s) = state.lock() {
+        s.rects = rects;
+    }
+}
+
 /// 显示并聚焦主窗口（托盘左键/双击、菜单「显示窗口」共用）
 fn show_main_window(app: &AppHandle) {
     if let Some(window) = app.get_window("main") {
         window.show().ok();
         window.set_focus().ok();
     }
+}
+
+/// 设置系统托盘悬停提示（桌面宠物窗用来显示宠物现状）
+#[tauri::command]
+fn set_tray_tooltip(app: AppHandle, text: String) {
+    let _ = app.tray_handle().set_tooltip(&text);
 }
 
 fn main() {
@@ -46,6 +70,46 @@ fn main() {
 
     tauri::Builder::default()
         .system_tray(tray)
+        .manage(Arc::new(Mutex::new(PetHit::default())))
+        .setup(|app| {
+            // 桌面宠物窗点击穿透：轮询光标，命中「可交互矩形」时才接收鼠标事件
+            let handle = app.handle();
+            std::thread::spawn(move || {
+                let mut last: Option<bool> = None;
+                loop {
+                    std::thread::sleep(std::time::Duration::from_millis(40));
+                    let Some(win) = handle.get_window("pet") else {
+                        last = None;
+                        continue;
+                    };
+                    let rects = handle
+                        .state::<Arc<Mutex<PetHit>>>()
+                        .lock()
+                        .map(|s| s.rects.clone())
+                        .unwrap_or_default();
+                    let (Ok(scale), Ok(pos)) = (win.scale_factor(), win.outer_position())
+                    else {
+                        continue;
+                    };
+                    let mut pt = POINT { x: 0, y: 0 };
+                    let ok = unsafe { GetCursorPos(&mut pt) };
+                    if ok == 0 {
+                        continue;
+                    }
+                    let lx = (pt.x - pos.x) as f64 / scale;
+                    let ly = (pt.y - pos.y) as f64 / scale;
+                    let inside = rects.iter().any(|r| {
+                        lx >= r[0] && lx <= r[0] + r[2] && ly >= r[1] && ly <= r[1] + r[3]
+                    });
+                    let ignore = !inside;
+                    if last != Some(ignore) {
+                        let _ = win.set_ignore_cursor_events(ignore);
+                        last = Some(ignore);
+                    }
+                }
+            });
+            Ok(())
+        })
         .on_system_tray_event(|app, event| {
             match event {
                 SystemTrayEvent::MenuItemClick { id, .. } => match id.as_str() {
@@ -77,6 +141,8 @@ fn main() {
           network::get_auto_start,
           network::quit_app,
           network::relaunch_app,
+          set_tray_tooltip,
+          pet_set_hit_rects,
           media_proxy::media_proxy_port,
           image_search::reverse_image_search,
           image_search::take_image_search_arg,

@@ -1,6 +1,25 @@
 # P-Spider 会话交接（HANDOFF）
 
-> 用途：开新会话时把本项目状态快速交接给 AI。最后更新：2026-09-29
+> 用途：开新会话时把本项目状态快速交接给 AI。最后更新：2026-10-03
+
+## v1.6.4（宠物彩蛋「香蕉君」）
+
+新增隐藏彩蛋：关于页 Logo 3 秒内连点 5 次解锁，解锁后关于页常驻入口，点开独立弹窗养成面板。完整方案见 `PLAN-pet-egg.md`。
+
+- 新增 `src/pet/**`（自包含、可整体抽出）：`engine.ts`（core 纯逻辑）、`constants.ts`（数值）、`items.ts`（物品表）、`pet-store.ts`（persist → `%APPDATA%\p-spider\pet.json`）、`activity-bridge.ts`（**唯一**业务耦合，副作用 import，订阅下载完成/搜索/浏览）、`ui/BananaSprite.tsx`（可插拔渲染层，静态图 + CSS）、`ui/PetEgg.tsx`、`ui/pet.css`、`useLogoUnlock.ts`。
+- 玩法：饱腹/清洁/心情/健康/体力 + 好感/等级/学历；下载产金（学历倍率）、打工、学习（日程制、完成后结算）、商店/图鉴、生病可治、离机衰减（挂机向、不死）、点击摸摸。数值蓝本参考 LorisYounger/VPet。
+- 改 `pages/About.tsx`（`useLogoUnlock` + 解锁后 `PetEgg`）、`main.tsx`（副作用 import `./pet/activity-bridge`）。
+- 版本 → 1.6.4（`package.json` + `src-tauri/Cargo.toml`）。
+
+### 1.6.4 后续：桌面宠物窗（批次一）
+
+彩蛋从「应用内弹窗」升级为「**独立置顶桌面窗**」（透明/无边框/可拖拽），分两批做，批次一已完成：
+
+- 多窗口架构：解锁标记移入 `app-state`；`pet.json` 由宠物窗独占；主窗口经 Tauri 事件 `pet-activity` 广播活跃度；新增 Rust 命令 `set_tray_tooltip`（托盘悬停显示宠物现状）。
+- 新增：`pet/open-window.ts`、`pet/tray.ts`、`pet/desktop/PetDesktop.tsx`；删除 `pet/ui/PetEgg.tsx`；`main.tsx` 按窗口 label 分支渲染；`pet/index.ts` 改为轻量出口（主窗口不再 import pet store）。
+- 交互：拖拽、悬停状态小面板、点击展开 5 个圆形按钮（照顾/商店/打工/学习/图鉴）、首次领养命名、改名 100 金币。
+- **批次二待做**：学习分学科 / 打工分工种（学科→能力→工种收益）、皮肤（纯成就解锁，需美术素材）。
+- ⚠️ 依赖真实 Tauri 环境，需 `pnpm tauri build` 后实机验证透明窗/拖拽/tooltip。typeCheck + eslint 已过；Rust `cargo check` 已过。
 
 ## v1.6.0（抢先版已发布 2026-09-29）
 

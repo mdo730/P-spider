@@ -12,6 +12,13 @@ export interface AppStateStore {
 
   systemProxyUrl: string;
   setSystemProxyUrl: (url: string) => void;
+
+  /** 宠物彩蛋是否已解锁（放在主窗口 store，避免与桌面宠物窗抢写 pet.json） */
+  petUnlocked: boolean;
+  unlockPet: () => void;
+  /** 是否启用桌面宠物（启用则随软件启动显示） */
+  petEnabled: boolean;
+  setPetEnabled: (enabled: boolean) => void;
 }
 
 export const useAppStateStore = create(
@@ -38,6 +45,10 @@ export const useAppStateStore = create(
       setSystemProxyUrl: (url) => {
         set({ systemProxyUrl: url });
       },
+      petUnlocked: false,
+      unlockPet: () => set({ petUnlocked: true }),
+      petEnabled: false,
+      setPetEnabled: (enabled) => set({ petEnabled: enabled }),
     }),
     {
       name: 'app-state',

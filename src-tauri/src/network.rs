@@ -125,12 +125,25 @@ pub async fn network_fetch(
   let body: Value = {
     match response_type.as_str() {
       // 直接返回原始 JSON（可能是对象或数组），前端按需取用
-      "json" => response.json::<Value>().await.map_err(map_reqwest_err),
+      "json" => {
+        let bytes = response.bytes().await.map_err(map_reqwest_err)?;
+        match serde_json::from_slice::<Value>(&bytes) {
+          Ok(v) => Ok(v),
+          Err(err) => {
+            // 把状态码 + 返回体前半段带进错误，便于判断是登录页 / 404 / 限流页
+            let text = String::from_utf8_lossy(&bytes);
+            let head: String = text.chars().take(300).collect();
+            Err(format!(
+              "Response is not JSON (status {status}): {err}; body[:300]={head:?}"
+            ))
+          }
+        }
+      }
       "text" => response.text().await.map_err(map_reqwest_err).map(|res| Value::String(res)),
       "binary" => {
         let bytes = response.bytes().await.map_err(map_reqwest_err)?;
         serde_json::to_value(bytes.to_vec()).map_err(|err| err.to_string())
-      },
+      }
       _ => Err("Unsupported response type".to_string())
     }
   }?;
