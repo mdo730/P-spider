@@ -97,14 +97,36 @@ const STAGE_LABEL: Record<string, string> = {
   elder: '长者',
 };
 
-function bubbleText(s: PetState): string {
-  if (isSick(s)) return '咳咳…不太舒服…';
-  if (s.satiety < LOW_THRESHOLD) return '咕…肚子饿了…';
-  if (s.cleanliness < LOW_THRESHOLD) return '身上脏脏的…';
-  if (s.mood < MOOD_SAD) return '心情有点低落…';
-  if (s.task) return s.task.type === 'work' ? '打工中！' : '学习中～';
-  if (s.mood >= 70) return '今天也要开心哦～';
-  return '……（叉腰看着你）';
+const BUBBLE_CN: Record<string, string> = {
+  sick: '咳咳…不太舒服…',
+  hungry: '咕…肚子饿了…',
+  dirty: '身上脏脏的…',
+  mood: '心情有点低落…',
+  work: '打工中！',
+  study: '学习中～',
+  happy: '今天也要开心哦～',
+  idle: '……（叉腰看着你）',
+};
+const BUBBLE_SH: Record<string, string> = {
+  sick: '咳咳…我勿适意…',
+  hungry: '咕…肚皮饿煞了…',
+  dirty: '身浪向龌龊来…',
+  mood: '心情有点点低落…',
+  work: '打工当中！',
+  study: '读书当中～',
+  happy: '今朝也要开心哦～',
+  idle: '……（叉腰看牢侬）',
+};
+
+function bubbleText(s: PetState, shanghai = false): string {
+  let key = 'idle';
+  if (isSick(s)) key = 'sick';
+  else if (s.satiety < LOW_THRESHOLD) key = 'hungry';
+  else if (s.cleanliness < LOW_THRESHOLD) key = 'dirty';
+  else if (s.mood < MOOD_SAD) key = 'mood';
+  else if (s.task) key = s.task.type === 'work' ? 'work' : 'study';
+  else if (s.mood >= 70) key = 'happy';
+  return (shanghai ? BUBBLE_SH : BUBBLE_CN)[key];
 }
 
 function BarRow({
@@ -401,7 +423,8 @@ export const PetDesktop: React.FC = () => {
       const delay = first ? 8000 : (60 + Math.random() * 240) * 1000;
       first = false;
       timeout = window.setTimeout(() => {
-        setSpeech(pickPhrase(usePetStore.getState()));
+        const st = usePetStore.getState();
+        setSpeech(pickPhrase(st, st.shanghaiOn));
         flash('jump');
         window.clearTimeout(speechTimer.current);
         speechTimer.current = window.setTimeout(() => setSpeech(null), 8000);
@@ -1039,6 +1062,14 @@ export const PetDesktop: React.FC = () => {
               onChange={(v) => pet.setPhraseOn(v)}
             />
           </div>
+          <div className="flex items-center justify-between py-0.5 text-[11px]">
+            <span>上海话</span>
+            <Switch
+              size="small"
+              checked={pet.shanghaiOn}
+              onChange={(v) => pet.setShanghaiOn(v)}
+            />
+          </div>
         </div>
       )}
       {(mood === 'happy' || mood === 'sad') && health === 'healthy' && (
@@ -1242,7 +1273,7 @@ export const PetDesktop: React.FC = () => {
       {speechEl}
       {!speech && hover && !expanded && (
         <div className="pet-bubble absolute left-[calc(50%+50px)] top-1 z-50 -translate-x-1/2 whitespace-nowrap">
-          {bubbleText(pet)}
+          {bubbleText(pet, pet.shanghaiOn)}
         </div>
       )}
 

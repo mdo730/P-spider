@@ -10,22 +10,18 @@ import { getMediaKind, isMediaFile, mapLimit } from '../utils/library';
 import { unicodeFilenamify } from '../utils/unicode';
 import { isSpectatorOn } from '../utils/spectator';
 import { HpoiMatch } from './hpoi';
-import hpoiSeedData from '../data/hpoi-matches.json';
 import { FIGMEMO_MANUFACTURER_ALIAS } from './figmemo-manufacturer-alias';
-import figmemoMetaSeedData from '../data/figmemo-meta-seed.json';
-import figmemoSiteSeedData from '../data/figmemo-site-seed.json';
 
+// 内置种子（hpoi 绑定 / 文章元数据 / 站点缓存）改为按需动态加载：
+// 只在使用 figmemo 数据时才 import，避免启动即加载。
 /** 内置文章元数据种子：postId → { imageCount }（离线补的图片数；不含用户手标标签） */
-const FIGMEMO_META_SEED = figmemoMetaSeedData as Record<
-  string,
-  { imageCount?: number }
->;
+let FIGMEMO_META_SEED: Record<string, { imageCount?: number }> = {};
 
 /** 内置站点缓存种子（文章清单/分类/封面），首启本地无缓存时用它初始化 */
-const FIGMEMO_SITE_SEED = figmemoSiteSeedData;
+let FIGMEMO_SITE_SEED: any = null;
 
 /** 内置 hpoi 绑定种子（离线批量匹配结果），postId → 紧凑快照 */
-const HPOI_SEED = hpoiSeedData as Record<
+let HPOI_SEED: Record<
   string,
   {
     itemId: number;
@@ -37,7 +33,23 @@ const HPOI_SEED = hpoiSeedData as Record<
     commentCount?: number;
     cover?: string;
   }
->;
+> = {};
+
+let seedsLoaded = false;
+async function ensureSeeds(): Promise<void> {
+  if (seedsLoaded) return;
+  seedsLoaded = true;
+  try {
+    HPOI_SEED = (await import('../data/hpoi-matches.json'))
+      .default as unknown as typeof HPOI_SEED;
+    FIGMEMO_META_SEED = (await import('../data/figmemo-meta-seed.json'))
+      .default as unknown as typeof FIGMEMO_META_SEED;
+    FIGMEMO_SITE_SEED = (await import('../data/figmemo-site-seed.json'))
+      .default;
+  } catch (err) {
+    log().warn('加载 figmemo 种子失败', err);
+  }
+}
 
 /** 从内置种子取某篇的 hpoi 快照（无则为 undefined） */
 function seedHpoi(postId: string): HpoiMatch | undefined {
@@ -263,7 +275,7 @@ async function fetchContentImages(postId: string): Promise<PlatformMedia[]> {
   const html: string = body?.content?.rendered || '';
   const urls = new Set<string>();
   const re =
-    /https:\/\/fig-memo-r18\.site\/wp-content\/uploads\/[^"'\s)]+?\.(?:jpg|jpeg|png|webp|gif)/gi;
+    /https?:\/\/[^"'\s)]+\/wp-content\/uploads\/[^"'\s)]+?\.(?:jpg|jpeg|png|webp|gif)/gi;
   for (const m of html.matchAll(re)) {
     const url = m[0];
     if (url.includes('/cache/')) continue;
@@ -325,8 +337,13 @@ export async function fetchPostImages(
     if (list.length < PER_PAGE) break;
   }
 
-  if (out.length === 0) {
-    return await fetchContentImages(postId);
+  // 正文内联图一并合并（review 等文章的附件常只有封面，图都在正文里）
+  const contentImgs = await fetchContentImages(postId);
+  const seen = new Set(out.map((m) => m.url));
+  for (const c of contentImgs) {
+    if (seen.has(c.url)) continue;
+    seen.add(c.url);
+    out.push(c);
   }
   return out;
 }
@@ -515,6 +532,7 @@ export async function setHpoiMatch(
 
 /** 读取 figmemo.jsonl 全部元数据记录 */
 export async function readMetaRecords(): Promise<FigmemoMeta[]> {
+  await ensureSeeds();
   const out: FigmemoMeta[] = [];
   try {
     const file = await metaFilePath();
@@ -562,6 +580,7 @@ export async function getHpoiPostIndex(): Promise<
   Map<number, { postId: string; title: string }>
 > {
   if (_hpoiPostIndex) return _hpoiPostIndex;
+  await ensureSeeds();
   const map = new Map<number, { postId: string; title: string }>();
   const put = (postId: string, itemId?: number, title?: string) => {
     if (itemId && !map.has(itemId))
@@ -590,6 +609,7 @@ export async function getFigmemoHpoiPostIndex(): Promise<
   Map<number, { postId: string; title: string; coverUrl?: string }[]>
 > {
   if (_figmemoHpoiIndexArr) return _figmemoHpoiIndexArr;
+  await ensureSeeds();
   const map = new Map<
     number,
     { postId: string; title: string; coverUrl?: string }[]
@@ -1200,6 +1220,7 @@ async function siteCachePath(): Promise<string> {
 }
 
 async function readSiteCache(): Promise<FigmemoSiteCache | null> {
+  await ensureSeeds();
   try {
     const file = await siteCachePath();
     if (await fs.exists(file)) {

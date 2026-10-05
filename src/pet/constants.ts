@@ -111,7 +111,7 @@ export const EDU_LEVELS = [
   '博士后',
 ];
 /** 学历由「学科总等级」换算：每 EDU_PER_SKILL 点总等级升一级学历 */
-export const EDU_PER_SKILL = 2;
+export const EDU_PER_SKILL = 3;
 
 // ---- 互动 ----
 export const PAT = {

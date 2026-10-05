@@ -28,8 +28,10 @@ import {
   Input,
   InputNumber,
   Modal,
+  Progress,
   Radio,
   Segmented,
+  Select,
   Switch,
 } from 'antd';
 import { useSettingsStore } from '../stores/settings';
@@ -69,6 +71,13 @@ import {
   exchangePixivCode,
   verifyPixivLogin,
 } from '../services/pixiv';
+import {
+  WD14_MODELS,
+  downloadModel,
+  modelReady,
+  releaseVision,
+  setupExternal,
+} from '../services/wd14';
 import { useRemoteImageSrc } from '../hooks/useRemoteImage';
 import { SIDEBAR_HIDEABLE_IDS, applySidebarOrder } from '../constants/routes';
 
@@ -94,8 +103,14 @@ const SECTION_GROUP: Record<string, string> = {
   library: 'tools',
   imageSearch: 'tools',
   dataBackup: 'tools',
+  vision: 'tools',
 };
 const groupOf = (name: string) => SECTION_GROUP[name] ?? 'general';
+
+function formatMB(bytes: number): string {
+  if (!bytes || bytes <= 0) return '0 MB';
+  return (bytes / 1048576).toFixed(1) + ' MB';
+}
 
 export const Settings: React.FC = () => {
   const { message, modal } = App.useApp();
@@ -237,6 +252,75 @@ export const Settings: React.FC = () => {
     null,
   );
   const pixivCfg = useSettingsStore((s) => s.pixiv) || {};
+  const visionCfg = useSettingsStore((s) => s.vision) || {};
+  const [modelDownloading, setModelDownloading] = useState(false);
+  const [modelDl, setModelDl] = useState<{
+    file: 'csv' | 'model';
+    downloaded: number;
+    total: number;
+  } | null>(null);
+  const [modelReadyState, setModelReadyState] = useState<boolean | null>(null);
+  const refreshModelReady = (modelId?: string) => {
+    const id = modelId || visionCfg.model || 'wd-v1-4-moat-tagger-v2';
+    modelReady(id)
+      .then(setModelReadyState)
+      .catch(() => setModelReadyState(null));
+  };
+  useEffect(() => {
+    const id = visionCfg.model || 'wd-v1-4-moat-tagger-v2';
+    modelReady(id)
+      .then(setModelReadyState)
+      .catch(() => setModelReadyState(null));
+  }, [visionCfg.model, visionCfg.modelDir]);
+  const onDownloadModel = async () => {
+    const id = visionCfg.model || 'wd-v1-4-moat-tagger-v2';
+    setModelDownloading(true);
+    setModelDl({ file: 'csv', downloaded: 0, total: 0 });
+    try {
+      await downloadModel(id, (p) => setModelDl(p));
+      await refreshModelReady(id);
+      message.success('模型下载完成');
+    } catch (err: any) {
+      message.error(`下载失败：${err?.message || err}`);
+    } finally {
+      setModelDownloading(false);
+      setModelDl(null);
+    }
+  };
+  const [extSetup, setExtSetup] = useState<{
+    step: number;
+    total: number;
+    message: string;
+  } | null>(null);
+  const [extSetupBusy, setExtSetupBusy] = useState(false);
+  const onReleaseVision = async () => {
+    try {
+      await releaseVision();
+      message.success('已释放模型 / 停止进程');
+    } catch (err: any) {
+      message.error(`释放失败：${err?.message || err}`);
+    }
+  };
+  const onSetupExternal = async () => {
+    const py = visionCfg.pythonPath || '';
+    if (!py) {
+      message.error('请先填 Python 路径（用于创建 venv）');
+      return;
+    }
+    setExtSetupBusy(true);
+    setExtSetup({ step: 0, total: 4, message: '准备中…' });
+    try {
+      const res = await setupExternal(py, (p) => setExtSetup(p));
+      await updateOne('vision', 'pythonPath', res.python);
+      await updateOne('vision', 'scriptPath', res.script);
+      message.success('依赖安装完成');
+    } catch (err: any) {
+      message.error(`安装失败：${err?.message || err}`);
+    } finally {
+      setExtSetupBusy(false);
+      setExtSetup(null);
+    }
+  };
   const pixivSelfAvatar = useRemoteImageSrc(
     pixivCfg.userId ? pixivCfg.userAvatar : undefined,
     { headers: { Referer: 'https://www.pixiv.net/' } },
@@ -1196,6 +1280,165 @@ export const Settings: React.FC = () => {
                 <span className="ml-2 text-sm text-gray-400">
                   升级/标签错乱时可用（重算自动标签、清理冗余）
                 </span>
+              </div>
+            </Section>
+            <Section title="视觉识别（WD14）" name="vision">
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 flex-wrap text-sm">
+                  <span>引擎</span>
+                  <Select
+                    style={{ width: 240 }}
+                    value={visionCfg.engine || 'builtin'}
+                    onChange={(v: string) => updateOne('vision', 'engine', v)}
+                    options={[
+                      { label: '内置（CPU，开箱即用）', value: 'builtin' },
+                      { label: '外挂 Python（GPU，进阶）', value: 'external' },
+                    ]}
+                  />
+                </div>
+                <div className="flex items-center gap-2 flex-wrap text-sm">
+                  <span>模型</span>
+                  <Select
+                    style={{ width: 300 }}
+                    value={visionCfg.model || 'wd-v1-4-moat-tagger-v2'}
+                    onChange={(v: string) => {
+                      updateOne('vision', 'model', v);
+                      refreshModelReady(v);
+                    }}
+                    options={WD14_MODELS.map((m) => ({
+                      label: `${m.label} · ${m.size}`,
+                      value: m.id,
+                    }))}
+                  />
+                  <Button
+                    type="primary"
+                    loading={modelDownloading}
+                    onClick={onDownloadModel}
+                  >
+                    下载模型
+                  </Button>
+                  {modelReadyState === true && (
+                    <span className="text-xs text-green-600">已就绪</span>
+                  )}
+                  {modelReadyState === false && (
+                    <span className="text-xs text-amber-500">未下载</span>
+                  )}
+                </div>
+                {modelDownloading && modelDl && (
+                  <div className="text-xs text-gray-500">
+                    <Progress
+                      percent={
+                        modelDl.total
+                          ? Math.round(
+                              (modelDl.downloaded / modelDl.total) * 100,
+                            )
+                          : 0
+                      }
+                      size="small"
+                    />
+                    {modelDl.file === 'model' ? '模型' : '标签'}：
+                    {formatMB(modelDl.downloaded)} /{' '}
+                    {modelDl.total ? formatMB(modelDl.total) : '…'}
+                  </div>
+                )}
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="w-24 shrink-0 text-gray-500">模型目录</span>
+                  <Input
+                    value={visionCfg.modelDir || ''}
+                    onChange={(e) =>
+                      updateOne('vision', 'modelDir', e.target.value)
+                    }
+                    placeholder="默认 <保存目录>\p-spider-wd14"
+                  />
+                </div>
+                {(visionCfg.engine || 'builtin') === 'external' && (
+                  <>
+                    <div className="flex items-center gap-2 text-sm">
+                      <span className="w-24 shrink-0 text-gray-500">
+                        Python
+                      </span>
+                      <Input
+                        value={visionCfg.pythonPath || ''}
+                        onChange={(e) =>
+                          updateOne('vision', 'pythonPath', e.target.value)
+                        }
+                        placeholder="python.exe 路径（用于创建 venv）"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap text-sm">
+                      <span className="w-24 shrink-0 text-gray-500">脚本</span>
+                      <Input
+                        value={visionCfg.scriptPath || ''}
+                        onChange={(e) =>
+                          updateOne('vision', 'scriptPath', e.target.value)
+                        }
+                        placeholder="wd14_serve.py 路径"
+                      />
+                      <Button loading={extSetupBusy} onClick={onSetupExternal}>
+                        一键安装依赖
+                      </Button>
+                    </div>
+                    {extSetup && (
+                      <div className="text-xs text-gray-500">
+                        <Progress
+                          percent={
+                            extSetup.total
+                              ? Math.round(
+                                  (extSetup.step / extSetup.total) * 100,
+                                )
+                              : 0
+                          }
+                          size="small"
+                        />
+                        ({extSetup.step}/{extSetup.total}) {extSetup.message}
+                      </div>
+                    )}
+                    <div className="flex items-center gap-2 text-sm">
+                      <span className="w-24 shrink-0 text-gray-500">
+                        CUDA 库目录
+                      </span>
+                      <Input
+                        value={visionCfg.cudaLibPath || ''}
+                        onChange={(e) =>
+                          updateOne('vision', 'cudaLibPath', e.target.value)
+                        }
+                        placeholder="ComfyUI torch\lib（可空，空则用 CPU）"
+                      />
+                    </div>
+                    <p className="text-xs text-gray-400">
+                      一键安装：写脚本 → 建 venv → pip 装
+                      onnxruntime-gpu（需网络/代理）。无 CUDA 时自动回退 CPU。
+                    </p>
+                  </>
+                )}
+                <div className="flex items-center gap-2 flex-wrap text-sm">
+                  <span>每篇取图数</span>
+                  <Select
+                    style={{ width: 120 }}
+                    value={visionCfg.imagesPerPost || '5'}
+                    onChange={(v: string) =>
+                      updateOne('vision', 'imagesPerPost', v)
+                    }
+                    options={[
+                      { label: '1 张（快）', value: '1' },
+                      { label: '5 张', value: '5' },
+                      { label: '全量', value: 'all' },
+                    ]}
+                  />
+                  <span className="text-xs text-gray-400">
+                    设置调大后，已识别的文章会按新取图数重跑
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 flex-wrap text-sm">
+                  <Button onClick={onReleaseVision}>释放模型 / 停止进程</Button>
+                  <span className="text-xs text-gray-400">
+                    内置模型空闲 5 分钟自动卸载；不点识别不占 CPU
+                  </span>
+                </div>
+                <p className="text-xs text-gray-400">
+                  内置引擎无需 Python，模型按需下载（hf-mirror）。fig-memo
+                  列表右下角 ⚡ 识别、⚙ 视觉标签筛选。
+                </p>
               </div>
             </Section>
             <Section title="moeyo（手办资讯）" name="moeyo">

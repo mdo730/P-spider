@@ -4,6 +4,7 @@ import {
   CheckOutlined,
   DownloadOutlined,
   ExportOutlined,
+  EyeOutlined,
   HeartFilled,
   HeartOutlined,
   LeftOutlined,
@@ -12,7 +13,9 @@ import {
   PlusOutlined,
   ReloadOutlined,
   RightOutlined,
+  SettingOutlined,
   TagOutlined,
+  ThunderboltOutlined,
 } from '@ant-design/icons';
 import {
   App,
@@ -22,7 +25,10 @@ import {
   Image,
   Input,
   MenuProps,
+  Modal,
   Pagination,
+  Progress,
+  Segmented,
   Select,
   Spin,
   Tag,
@@ -53,6 +59,13 @@ import {
 } from '../services/figmemo';
 import { useFigmemoFavoritesStore } from '../stores/figmemo-favorites';
 import { useFigmemoTagsStore } from '../stores/figmemo-tags';
+import {
+  effectiveItems,
+  readVisualTags,
+  setVisualOverride,
+  VisualRecord,
+} from '../services/figmemo-visual';
+import { useVisionStore } from '../stores/vision';
 import { useRouteStore } from '../stores/route';
 import { useSiteCacheStore } from '../stores/site-cache';
 import { ROUTES } from '../constants/routes';
@@ -433,8 +446,23 @@ export const FigmemoPage: React.FC = () => {
       } else {
         message.info('该文章没有可下载的图片');
       }
+      // 下载后顺带刷新：重抓远端图并更新详情展示与计数
+      // （旧记录可能只存了封面 1 张，按「下载」时一并修正）
+      const postId = selected.postId;
+      const imgs = await fetchPostImages(postId).catch(
+        () => [] as PlatformMedia[],
+      );
+      setImages(imgs);
+      setLocalImages([]);
       setSelected((s) =>
-        s ? { ...s, imageCount: n || s.imageCount, exists: n > 0 } : s,
+        s ? { ...s, imageCount: imgs.length, exists: n > 0 || s.exists } : s,
+      );
+      setItems((prev) =>
+        prev.map((it) =>
+          it.postId === postId
+            ? { ...it, imageCount: imgs.length, exists: n > 0 || it.exists }
+            : it,
+        ),
       );
       await load();
     } catch (err: any) {
@@ -583,7 +611,83 @@ export const FigmemoPage: React.FC = () => {
     [catId, makerId, yearId],
   );
 
-  const filtered = useMemo(() => {
+  // ---- WD14 视觉标签（自用） ----
+  const [visualMap, setVisualMap] = useState<Map<string, VisualRecord>>(
+    new Map(),
+  );
+  const visionRunning = useVisionStore((s) => s.running);
+  const visionProgress = useVisionStore((s) => s.progress);
+  const visionVersion = useVisionStore((s) => s.version);
+  const [visionPanelOpen, setVisionPanelOpen] = useState(false);
+  const [visualSelected, setVisualSelected] = useState<string[]>([]);
+  const [visualRule, setVisualRule] = useState<'or' | 'and'>('or');
+  useEffect(() => {
+    readVisualTags()
+      .then(setVisualMap)
+      .catch(() => undefined);
+  }, []);
+  useEffect(() => {
+    readVisualTags()
+      .then(setVisualMap)
+      .catch(() => undefined);
+  }, [visionVersion]);
+  const visualPostTags = useMemo(() => {
+    const postTags = new Map<string, Set<string>>();
+    const meta = new Map<string, { cat: string; zh: string }>();
+    for (const [postId, rec] of visualMap) {
+      const set = new Set<string>();
+      for (const it of effectiveItems(rec)) {
+        const key = `${it.cat}|${it.zh}`;
+        set.add(key);
+        if (!meta.has(key)) meta.set(key, { cat: it.cat, zh: it.zh });
+      }
+      if (set.size) postTags.set(postId, set);
+    }
+    return { postTags, meta };
+  }, [visualMap]);
+
+  const toggleVisual = (key: string) =>
+    setVisualSelected((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
+    );
+
+  // ---- 文章内：视觉标签编辑（手动覆盖层，重扫不覆盖） ----
+  const [visionEditOpen, setVisionEditOpen] = useState(false);
+  const [visionAddCat, setVisionAddCat] = useState('服装');
+  const [visionAddText, setVisionAddText] = useState('');
+  const curVisionRec = selected
+    ? visualMap.get(String(selected.postId))
+    : undefined;
+  const curVisionItems = curVisionRec ? effectiveItems(curVisionRec) : [];
+  const applyVisionEdit = async (
+    add?: { cat: string; zh: string },
+    removeKey?: string,
+  ) => {
+    if (!selected) return;
+    const postId = String(selected.postId);
+    const added = [...(curVisionRec?.added || [])];
+    let removed = [...(curVisionRec?.removed || [])];
+    if (removeKey) {
+      const ai = added.findIndex((a) => `${a.cat}|${a.zh}` === removeKey);
+      if (ai >= 0) added.splice(ai, 1);
+      if (!removed.includes(removeKey)) removed.push(removeKey);
+    }
+    if (add) {
+      const key = `${add.cat}|${add.zh}`;
+      if (!added.some((a) => `${a.cat}|${a.zh}` === key)) {
+        added.push({ ...add, raws: [] });
+      }
+      removed = removed.filter((k) => k !== key);
+    }
+    const rec = await setVisualOverride(postId, added, removed);
+    setVisualMap((m) => {
+      const n = new Map(m);
+      n.set(postId, rec);
+      return n;
+    });
+  };
+
+  const preVisualList = useMemo(() => {
     let list = items;
     if (filter.tagIds.length) {
       list = list.filter((it) =>
@@ -626,6 +730,79 @@ export const FigmemoPage: React.FC = () => {
     });
     return arr;
   }, [items, filter, index, keyword, favSet, sort, dropdownTagIds]);
+
+  const filtered = useMemo(() => {
+    if (!visualSelected.length) return preVisualList;
+    return preVisualList.filter((it) => {
+      const set = visualPostTags.postTags.get(String(it.postId));
+      if (!set) return false;
+      return visualRule === 'and'
+        ? visualSelected.every((k) => set.has(k))
+        : visualSelected.some((k) => set.has(k));
+    });
+  }, [preVisualList, visualSelected, visualRule, visualPostTags]);
+
+  // 分面计数：视觉标签数量基于「当前筛选」（不含视觉筛选本身）
+  const visualTagCounts = useMemo(() => {
+    const counts = new Map<
+      string,
+      { cat: string; zh: string; count: number }
+    >();
+    for (const it of preVisualList) {
+      const set = visualPostTags.postTags.get(String(it.postId));
+      if (!set) continue;
+      for (const key of set) {
+        const meta = visualPostTags.meta.get(key);
+        if (!meta) continue;
+        const c = counts.get(key) || { cat: meta.cat, zh: meta.zh, count: 0 };
+        c.count += 1;
+        counts.set(key, c);
+      }
+    }
+    return counts;
+  }, [preVisualList, visualPostTags]);
+
+  const visualTagGroups = useMemo(() => {
+    const order = ['体型', '服装', '姿势', '元素', '道具', '发型', '配饰'];
+    const byCat = new Map<
+      string,
+      { cat: string; zh: string; count: number }[]
+    >();
+    for (const v of visualTagCounts.values()) {
+      const arr = byCat.get(v.cat) || [];
+      arr.push(v);
+      byCat.set(v.cat, arr);
+    }
+    const rank = (c: string) => {
+      const i = order.indexOf(c);
+      return i < 0 ? 99 : i;
+    };
+    return [...byCat.entries()]
+      .sort((a, b) => rank(a[0]) - rank(b[0]))
+      .map(
+        ([cat, arr]) =>
+          [cat, arr.sort((x, y) => y.count - x.count)] as [string, typeof arr],
+      );
+  }, [visualTagCounts]);
+
+  // ---- WD14 视觉标签：识别队列 ----
+  const startVision = () => {
+    if (visionRunning) return;
+    const total = filtered.length;
+    if (total === 0) {
+      message.info('当前没有文章');
+      return;
+    }
+    Modal.confirm({
+      title: 'WD14 视觉识别',
+      content: `将识别当前筛选的 ${total} 篇（已识别的自动跳过）。识别在后台进行，可继续切标签/其它操作。`,
+      okText: '开始',
+      cancelText: '取消',
+      onOk: () => {
+        useVisionStore.getState().start(filtered);
+      },
+    });
+  };
 
   // 响应时间流「查看正文」跳转：从 pendingArticle 打开指定文章
   const pendingArticle = useRouteStore((s) => s.pendingArticle);
@@ -1055,11 +1232,102 @@ export const FigmemoPage: React.FC = () => {
               </div>
             </div>
 
+            {/* 视觉标签编辑浮窗 */}
+            <div
+              className={`absolute bottom-full right-0 mb-3 w-72 origin-bottom-right rounded-2xl bg-white/95 backdrop-blur shadow-2xl ring-1 ring-black/5 p-3 max-h-[70vh] overflow-y-auto transition-all duration-200 ease-out ${
+                visionEditOpen
+                  ? 'opacity-100 translate-y-0 scale-100'
+                  : 'pointer-events-none opacity-0 translate-y-3 scale-95'
+              }`}
+            >
+              <div className="mb-2 flex items-center text-sm font-medium">
+                视觉标签（模型识别 · 可增删）
+                <button
+                  className="ml-auto text-xs text-gray-400 transition-colors hover:text-gray-700"
+                  onClick={() => setVisionEditOpen(false)}
+                >
+                  收起
+                </button>
+              </div>
+              {curVisionItems.length === 0 ? (
+                <div className="text-xs text-gray-400">
+                  无（先点右下角 ⚡ 识别，或下面手动添加）
+                </div>
+              ) : (
+                <div className="mb-2 flex flex-wrap gap-1">
+                  {curVisionItems.map((it) => {
+                    const key = `${it.cat}|${it.zh}`;
+                    return (
+                      <span
+                        key={key}
+                        className="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-xs leading-5 text-sky-600"
+                      >
+                        <span className="text-gray-400">{it.cat}</span>
+                        {it.zh}
+                        <button
+                          type="button"
+                          title="删除该标签"
+                          className="text-sky-400 transition-colors hover:text-rose-500"
+                          onClick={() => applyVisionEdit(undefined, key)}
+                        >
+                          ×
+                        </button>
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+              <div className="flex items-center gap-1 border-t-[1px] border-gray-100 pt-2">
+                <Select
+                  size="small"
+                  style={{ width: 76 }}
+                  value={visionAddCat}
+                  onChange={setVisionAddCat}
+                  options={[
+                    '体型',
+                    '服装',
+                    '姿势',
+                    '元素',
+                    '道具',
+                    '发型',
+                    '配饰',
+                  ].map((c) => ({ label: c, value: c }))}
+                />
+                <Input
+                  size="small"
+                  placeholder="添加标签"
+                  value={visionAddText}
+                  onChange={(e) => setVisionAddText(e.target.value)}
+                  onPressEnter={() => {
+                    const v = visionAddText.trim();
+                    if (v) {
+                      applyVisionEdit({ cat: visionAddCat, zh: v });
+                      setVisionAddText('');
+                    }
+                  }}
+                />
+                <Button
+                  size="small"
+                  icon={<PlusOutlined />}
+                  onClick={() => {
+                    const v = visionAddText.trim();
+                    if (v) {
+                      applyVisionEdit({ cat: visionAddCat, zh: v });
+                      setVisionAddText('');
+                    }
+                  }}
+                />
+              </div>
+            </div>
+
             {/* 标签按钮 */}
             <button
               type="button"
               title="文章标签"
-              onClick={() => setPanelOpen((v) => !v)}
+              onClick={() => {
+                setPanelOpen((v) => !v);
+                setVisionEditOpen(false);
+              }}
               className={`group relative flex h-12 w-12 items-center justify-center rounded-full text-white shadow-lg ring-1 ring-black/5 bg-gradient-to-br from-sky-400 to-blue-600 transition-all duration-200 ease-out hover:scale-110 hover:shadow-xl active:scale-95 ${
                 panelOpen ? 'ring-2 ring-sky-300' : ''
               }`}
@@ -1071,6 +1339,26 @@ export const FigmemoPage: React.FC = () => {
                   className="figmemo-pop absolute -right-1 -top-1 flex h-[1.15rem] min-w-[1.15rem] items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-medium text-white shadow"
                 >
                   {tagTotal}
+                </span>
+              )}
+            </button>
+
+            {/* 视觉标签按钮（模型识别，可增删） */}
+            <button
+              type="button"
+              title="视觉标签（可增删）"
+              onClick={() => {
+                setVisionEditOpen((v) => !v);
+                setPanelOpen(false);
+              }}
+              className={`group relative flex h-12 w-12 items-center justify-center rounded-full text-white shadow-lg ring-1 ring-black/5 bg-gradient-to-br from-sky-400 to-cyan-500 transition-all duration-200 ease-out hover:scale-110 hover:shadow-xl active:scale-95 ${
+                visionEditOpen ? 'ring-2 ring-sky-300' : ''
+              }`}
+            >
+              <EyeOutlined className="text-lg transition-transform duration-300 group-hover:scale-110" />
+              {curVisionItems.length > 0 && (
+                <span className="figmemo-pop absolute -right-1 -top-1 flex h-[1.15rem] min-w-[1.15rem] items-center justify-center rounded-full bg-sky-600 px-1 text-[10px] font-medium text-white shadow">
+                  {curVisionItems.length}
                 </span>
               )}
             </button>
@@ -1219,6 +1507,16 @@ export const FigmemoPage: React.FC = () => {
               className="w-52"
             />
             <span className="text-sm text-gray-400">{filtered.length} 篇</span>
+            {visualSelected.length > 0 && (
+              <Tag
+                color="blue"
+                closable
+                onClose={() => setVisualSelected([])}
+                className="!m-0"
+              >
+                视觉筛选 {visualSelected.length}
+              </Tag>
+            )}
             <Select
               size="small"
               value={sort}
@@ -1240,6 +1538,83 @@ export const FigmemoPage: React.FC = () => {
               刷新
             </Button>
           </div>
+          {visionPanelOpen && (
+            <div className="mb-3 rounded-md border border-gray-100 bg-gray-50/70 p-3 text-sm">
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <span className="font-medium">视觉标签</span>
+                <Segmented
+                  size="small"
+                  value={visualRule}
+                  onChange={(v) => setVisualRule(v as 'or' | 'and')}
+                  options={[
+                    { label: '任一（并集）', value: 'or' },
+                    { label: '同时（交集）', value: 'and' },
+                  ]}
+                />
+                {visualSelected.length > 0 && (
+                  <Button size="small" onClick={() => setVisualSelected([])}>
+                    清空（{visualSelected.length}）
+                  </Button>
+                )}
+                <span className="text-xs text-gray-400">
+                  已识别 {visualMap.size} 篇
+                </span>
+                <button
+                  type="button"
+                  className="ml-auto text-xs text-gray-400 transition-colors hover:text-gray-700"
+                  onClick={() => setVisionPanelOpen(false)}
+                >
+                  收起 ▲
+                </button>
+              </div>
+              {visualTagGroups.length === 0 ? (
+                <div className="text-xs text-gray-400">
+                  还没有识别结果，先点右下角 ⚡ 识别
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  {visualTagGroups.map(([cat, tags]) => (
+                    <div key={cat} className="flex items-start gap-2">
+                      <span className="w-10 shrink-0 pt-0.5 text-xs text-gray-400">
+                        {cat}
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {tags.map((t) => {
+                          const key = `${t.cat}|${t.zh}`;
+                          const on = visualSelected.includes(key);
+                          return (
+                            <button
+                              key={key}
+                              type="button"
+                              onClick={() => toggleVisual(key)}
+                              className={
+                                'rounded-full border px-2 py-0.5 text-xs transition-colors ' +
+                                (on
+                                  ? 'border-ant-color-primary bg-ant-color-primary-bg text-ant-color-primary'
+                                  : 'border-gray-200 bg-white text-gray-600 hover:border-ant-color-primary')
+                              }
+                            >
+                              {t.zh}
+                              <span
+                                className={
+                                  'ml-1 ' +
+                                  (on
+                                    ? 'text-ant-color-primary'
+                                    : 'text-gray-400')
+                                }
+                              >
+                                {t.count}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           <div
             className="flex-1 overflow-y-auto pb-6"
             ref={listScrollRef}
@@ -1333,6 +1708,14 @@ export const FigmemoPage: React.FC = () => {
                                 <TagOutlined className="text-[10px] leading-none" />
                               </span>
                             )}
+                            {visualMap.has(String(item.postId)) && (
+                              <span
+                                title="已视觉识别"
+                                className="flex items-center justify-center w-4 h-4 rounded-full bg-violet-500 text-white shadow"
+                              >
+                                <EyeOutlined className="text-[10px] leading-none" />
+                              </span>
+                            )}
                           </div>
                         </div>
                         <div className="px-2 py-2">
@@ -1379,6 +1762,68 @@ export const FigmemoPage: React.FC = () => {
             </div>
           )}
         </section>
+      </div>
+
+      {/* WD14 视觉识别：右下角两枚悬浮圆钮 + 进度 */}
+      <div className="fixed right-5 bottom-6 z-30 flex items-center gap-3">
+        {visionProgress && (
+          <div className="flex items-center gap-3 rounded-full border border-gray-100 bg-white/95 px-3 py-2 shadow-lg">
+            <Progress
+              type="circle"
+              size={34}
+              percent={
+                visionProgress.total
+                  ? Math.round(
+                      (visionProgress.done / visionProgress.total) * 100,
+                    )
+                  : 0
+              }
+              format={() => `${visionProgress.done}`}
+            />
+            <div className="text-xs leading-tight">
+              <div className="font-medium">
+                识别中 {visionProgress.index}/{visionProgress.total}
+              </div>
+              <div className="max-w-[160px] truncate text-gray-400">
+                {visionProgress.currentTitle}
+              </div>
+            </div>
+            <Button
+              size="small"
+              danger
+              onClick={() => useVisionStore.getState().stop()}
+            >
+              停止
+            </Button>
+          </div>
+        )}
+        <button
+          type="button"
+          title={`WD14 识别当前筛选（${filtered.length} 篇）`}
+          onClick={startVision}
+          disabled={visionRunning}
+          className="flex h-12 w-12 items-center justify-center rounded-full bg-[#1677ff] text-white shadow-lg transition-transform hover:scale-105 disabled:opacity-60"
+        >
+          {visionRunning ? <LoadingOutlined /> : <ThunderboltOutlined />}
+        </button>
+        <button
+          type="button"
+          title="视觉标签筛选"
+          onClick={() => setVisionPanelOpen((v) => !v)}
+          className={
+            'relative flex h-12 w-12 items-center justify-center rounded-full shadow-lg transition-transform hover:scale-105 ' +
+            (visionPanelOpen || visualSelected.length > 0
+              ? 'bg-[#1677ff] text-white'
+              : 'border border-gray-100 bg-white text-gray-600')
+          }
+        >
+          <SettingOutlined />
+          {visualSelected.length > 0 && (
+            <span className="figmemo-pop absolute -right-1 -top-1 flex h-[1.15rem] min-w-[1.15rem] items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-medium text-white shadow">
+              {visualSelected.length}
+            </span>
+          )}
+        </button>
       </div>
     </div>
   );

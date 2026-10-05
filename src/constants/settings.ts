@@ -58,6 +58,16 @@ export const DEFAULT_SETTINGS: Settings = {
     userAccount: '',
     userAvatar: '',
   },
+  vision: {
+    engine: 'builtin',
+    model: 'wd-v1-4-moat-tagger-v2',
+    modelDir: '',
+    imagesPerPost: '5',
+    pythonPath: 'E:\\OPENCODE\\wd14-venv\\Scripts\\python.exe',
+    scriptPath: 'E:\\OPENCODE\\wd14-venv\\wd14_serve.py',
+    cudaLibPath:
+      'E:\\OPENCODE\\ainimte\\ComfyUI\\venv\\Lib\\site-packages\\torch\\lib',
+  },
 };
 
 export const CURRENT_SETTINGS_VERSION = 6;

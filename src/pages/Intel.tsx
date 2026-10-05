@@ -13,6 +13,7 @@ import {
   App,
   Avatar,
   Button,
+  Dropdown,
   Empty,
   Image,
   Input,
@@ -83,6 +84,7 @@ import {
   setHpoiCookie,
 } from '../services/hpoi-album';
 import { useRemoteImageSrc } from '../hooks/useRemoteImage';
+import { handleImageMenuKey, imageMenuItems } from '../utils/image-menu';
 import { MakerPicker, MakerOption } from '../components/figmemo/MakerPicker';
 import { hpoiFavKey, useHpoiFavoritesStore } from '../stores/hpoi-favorites';
 import { useHpoiIntelStore } from '../stores/hpoi-intel';
@@ -183,16 +185,32 @@ const HpoiImg: React.FC<{
   className?: string;
   wrapperClassName?: string;
 }> = ({ src, ...rest }) => {
+  const { message } = App.useApp();
   const s = useRemoteImageSrc(src, { headers: HPOI_IMG_HEADERS });
-  if (!s) {
-    return (
-      <div
-        className="rounded-md bg-gray-100"
-        style={{ width: rest.width, height: rest.height }}
-      />
-    );
-  }
-  return <Image src={s} {...rest} />;
+  const body = !s ? (
+    <div
+      className="rounded-md bg-gray-100"
+      style={{ width: rest.width, height: rest.height }}
+    />
+  ) : (
+    <Image src={s} {...rest} />
+  );
+  if (!src) return body;
+  const ctx = { remoteUrl: src, headers: HPOI_IMG_HEADERS };
+  return (
+    <Dropdown
+      trigger={['contextMenu']}
+      menu={{
+        items: imageMenuItems(ctx),
+        onClick: async ({ key, domEvent }) => {
+          domEvent.stopPropagation();
+          await handleImageMenuKey(key, ctx, message);
+        },
+      }}
+    >
+      {body}
+    </Dropdown>
+  );
 };
 
 /** 用户头像（防裂图，圆形） */

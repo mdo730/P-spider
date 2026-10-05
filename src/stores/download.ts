@@ -65,7 +65,8 @@ async function mergeAriaStatusToDownloadTask(
 }
 
 /**
- * 计算归档站（pawchive）帖子的保存目录：saveDirBase/创作者名/帖子标题。
+ * 计算归档站（pawchive）帖子的保存目录：saveDirBase/<创作者名>_<service>/帖子标题。
+ * 目录名加 service 后缀（如「サインこす_fanbox」），避免与 X 的显示名同名而撞进同一个文件夹。
  * 帖子含外链时目录名加 [needDL] 后缀，并幂等写入外链清单 txt（标题 + 外链）。
  * 供 prepareDownloadTask（有附件帖）与 checkArchiverSubscription（纯外链帖）复用。
  */
@@ -73,17 +74,20 @@ export async function prepareArchiverPostDir(
   post: PlatformPost,
 ): Promise<{ dir: string; hasExternalLinks: boolean }> {
   const settings = useSettingsStore.getState();
-  // 用户名绑定：同一账号改显示名不再新建文件夹
   const creator = post.creator;
-  let rawName = creator?.name || creator?.username || 'unknown';
+  // service 取自 creator.id（形如 "fanbox/11229342"）
+  const service =
+    (creator?.id || '').split('/')[0] || post.source || 'pawchive';
+  // 创作者显示名绑定（改名不新建夹），再拼 service 后缀
+  let baseName = creator?.name || creator?.username || 'unknown';
   if (creator) {
-    rawName = await pinUserFolderName(
+    baseName = await pinUserFolderName(
       post.source || 'pawchive',
       { id: creator.id, username: creator.username },
-      rawName,
+      baseName,
     );
   }
-  const creatorName = unicodeFilenamify(rawName);
+  const creatorName = unicodeFilenamify(`${baseName}_${service}`);
   let postTitle = unicodeFilenamify(post.text || post.id || 'untitled');
   const hasExternalLinks = (post.links?.length || 0) > 0;
   if (hasExternalLinks) {
@@ -255,6 +259,8 @@ export interface DownloadStore {
   syncDownloadTaskStatus: (gid: string) => Promise<void>;
   updateDownloadTask: (task: DownloadTask, now?: number) => void;
   batchUpdateDownloadTasks: (tasks: DownloadTask[]) => void;
+  /** 加入一个非 aria2（MEGA）下载任务，直接进下载管理列表 */
+  addExternalDownloadTask: (task: DownloadTask) => void;
   redownloadTask: (gid: string) => Promise<void>;
   batchRedownloadTask: (gid: string[]) => Promise<void>;
 
@@ -330,6 +336,9 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
       downloadTasks: newTasks,
     });
   },
+  addExternalDownloadTask: (task) => {
+    set({ downloadTasks: get().downloadTasks.concat(task) });
+  },
   batchCreateDownloadTask: async (paramsList) => {
     const tasks: DownloadTask[] = [];
     const settings = useSettingsStore.getState();
@@ -373,12 +382,16 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
     });
   },
   pauseDownloadTask: async (gid) => {
+    const task = get().downloadTasks.find((t) => t.gid === gid);
+    if (task?.isMega) return;
     await aria2.invoke('aria2.pause', gid);
   },
   pauseAllDownloadTask: async () => {
     await aria2.invoke('aria2.pauseAll');
   },
   unpauseDownloadTask: async (gid) => {
+    const task = get().downloadTasks.find((t) => t.gid === gid);
+    if (task?.isMega) return;
     await aria2.invoke('aria2.unpause', gid);
   },
   unpauseAllDownloadTask: async () => {
@@ -421,6 +434,13 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
     if (!oldTask) {
       throw new Error('找不到旧的下载任务');
     }
+    // MEGA 任务：移除后重新入队（后台下载，跳过已存在文件）
+    if (oldTask.isMega) {
+      await store.removeDownloadTask(oldTask.gid);
+      const { downloadMegaLink } = await import('../services/mega');
+      void downloadMegaLink(oldTask.downloadUrl, oldTask.post, oldTask.dir);
+      return;
+    }
     await store.removeDownloadTask(oldTask.gid);
     await store.createDownloadTask({
       source: oldTask.source,
@@ -436,13 +456,24 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
     }
 
     await store.batchRemoveDownloadTasks(gids);
-    await store.batchCreateDownloadTask(
-      oldTasks.map((task) => ({
-        source: task.source,
-        media: task.media,
-        post: task.post,
-      })),
-    );
+
+    const megaTasks = oldTasks.filter((t) => t.isMega);
+    const normalTasks = oldTasks.filter((t) => !t.isMega);
+    if (normalTasks.length > 0) {
+      await store.batchCreateDownloadTask(
+        normalTasks.map((task) => ({
+          source: task.source,
+          media: task.media,
+          post: task.post,
+        })),
+      );
+    }
+    if (megaTasks.length > 0) {
+      const { downloadMegaLink } = await import('../services/mega');
+      for (const t of megaTasks) {
+        void downloadMegaLink(t.downloadUrl, t.post, t.dir);
+      }
+    }
   },
   syncDownloadTaskStatus: async (gid) => {
     const { downloadTasks, updateDownloadTask, removeDownloadTask } = get();
@@ -682,6 +713,13 @@ async function runCreationTask(task: CreationTask, abortSignal: AbortSignal) {
         skipCount,
       });
       continue;
+    }
+
+    // 归档站帖内含 MEGA 网盘链接：后台串行下载到帖子目录的 mega/ 子夹
+    // 动态 import：mega 服务依赖本模块（prepareArchiverPostDir），避免静态环形依赖
+    if (source === 'pawchive') {
+      const { enqueueMegaDownloads } = await import('../services/mega');
+      enqueueMegaDownloads(filteredPosts);
     }
 
     const paramsList: CreateDownloadTaskParams[] = [];

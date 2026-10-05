@@ -39,6 +39,29 @@ const VIDEO_EXTENSIONS = new Set([
   'mpg',
 ]);
 
+/** 压缩包扩展名（本地库展示 + 右键调用本机压缩软件解压） */
+const ARCHIVE_EXTENSIONS = new Set([
+  'zip',
+  'rar',
+  '7z',
+  'tar',
+  'gz',
+  'tgz',
+  'bz2',
+  'tbz',
+  'tbz2',
+  'xz',
+  'txz',
+  'zst',
+  'lz',
+  'lzma',
+  'cab',
+  'arj',
+  'lzh',
+  'ace',
+  'iso',
+]);
+
 /** 明确是「文件」而非文件夹的扩展名：saveDirBase 下偶有散落文件，避免被当文件夹扫描 */
 const NON_FOLDER_EXTENSIONS = new Set([
   'json',
@@ -96,10 +119,25 @@ export function isMediaFile(name: string): boolean {
   return getMediaKind(name) !== null;
 }
 
+/** 本地库展示的文件类型：图片 / 视频 / 压缩包 */
+export type LibraryFileKind = LibraryMediaKind | 'archive';
+
+/** 判断本地库可展示的文件类型（媒体或压缩包） */
+export function getLibraryKind(name: string): LibraryFileKind | null {
+  const media = getMediaKind(name);
+  if (media) return media;
+  if (ARCHIVE_EXTENSIONS.has(getExtension(name))) return 'archive';
+  return null;
+}
+
+export function isLibraryFile(name: string): boolean {
+  return getLibraryKind(name) !== null;
+}
+
 export interface LibraryFile {
   name: string;
   path: string;
-  kind: LibraryMediaKind;
+  kind: LibraryFileKind;
   ext: string;
   /** 文件修改时间（毫秒），用于按日期排序 */
   mtime?: number;
@@ -129,6 +167,8 @@ export interface LibrarySubFolder extends LibraryFolderSummary {
 export interface DirectoryContent {
   /** 递归收集的全部媒体文件（平铺模式用） */
   files: LibraryFile[];
+  /** 仅「根目录直接放置」的媒体（混合文件夹：X 文件在根、Pawchive 在子文件夹时，避免根媒体被隐藏） */
+  rootFiles: LibraryFile[];
   /** 直接子文件夹（按文件夹模式用，带封面与媒体数） */
   folders: LibrarySubFolder[];
 }
@@ -162,7 +202,7 @@ function toLibraryFile(entry: FileEntry): LibraryFile {
   return {
     name,
     path: entry.path,
-    kind: getMediaKind(name) || 'image',
+    kind: getLibraryKind(name) || 'image',
     ext: getExtension(name),
   };
 }
@@ -198,7 +238,7 @@ export function clearFolderSummaryCache(): void {
  * 只是物理上保存在 saveDirBase 下，不应混入本地库（文件夹网格 / 一键缩略图 / 联网溯源）。
  * 排除点收敛在 `listRootFolders`，上述入口都会调用它。
  */
-const EXCLUDED_ROOT_FOLDERS = new Set(['fig-memo', 'moeyo']);
+const EXCLUDED_ROOT_FOLDERS = new Set(['fig-memo', 'moeyo', 'p-spider-wd14']);
 
 /** 列出 saveDirBase 下的一级文件夹（非递归；非媒体文件与 fig-memo 在此被过滤） */
 export async function listRootFolders(
@@ -274,7 +314,16 @@ export async function scanDirectory(dir: string): Promise<DirectoryContent> {
   const directDirs = entries.filter((entry) => Array.isArray(entry.children));
 
   const files = flattenLeaves(entries)
-    .filter((entry) => isMediaFile(entryName(entry)))
+    .filter((entry) => isLibraryFile(entryName(entry)))
+    .map(toLibraryFile)
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+
+  // 根目录直接放置的媒体（非子文件夹内）
+  const rootFiles = entries
+    .filter(
+      (entry) =>
+        !Array.isArray(entry.children) && isLibraryFile(entryName(entry)),
+    )
     .map(toLibraryFile)
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
 
@@ -296,5 +345,5 @@ export async function scanDirectory(dir: string): Promise<DirectoryContent> {
     })
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
 
-  return { files, folders };
+  return { files, rootFiles, folders };
 }

@@ -9,6 +9,7 @@ import { listen } from '@tauri-apps/api/event';
 import { getCurrent } from '@tauri-apps/api/window';
 import { SideBar } from './components/SideBar';
 import { UserGuide } from './components/UserGuide';
+import { Wd14TagDialog } from './components/Wd14TagDialog';
 import { ANTD_THEME, PRIMARY_COLOR_SPECTATOR } from './constants/antd-theme';
 import { useBootstrap } from './hooks/useBootstrap';
 import { useRunBackgroundTasks } from './hooks/useRunBackgroundTasks';
@@ -89,6 +90,7 @@ const AppInternal: React.FC = () => {
       </main>
 
       <UserGuide />
+      <Wd14TagDialog />
 
       <Modal
         title="关闭 P-Spider？"

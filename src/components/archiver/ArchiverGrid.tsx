@@ -7,6 +7,7 @@ import MediaType from '../../enums/MediaType';
 import { PlatformPost } from '../../platforms';
 import { useArchiverBrowseStore } from '../../stores/archiver-browse';
 import { useDownloadStore } from '../../stores/download';
+import { enqueueMegaDownloads, extractMegaLinks } from '../../services/mega';
 import { InfiniteScroll } from '../InfiniteScroll';
 import {
   GridViewItemAction,
@@ -60,25 +61,38 @@ export const ArchiverGrid: React.FC = () => {
           // 全部仅预览时下载的是缩略图，提示用户
           const allPreviewOnly =
             medias.length > 0 && medias.every((m) => m.previewOnly);
+          // 正文里的 MEGA 网盘链接（附件为 0 时唯一内容）
+          const megaLinks = extractMegaLinks(post);
 
           const actionOpen: GridViewItemAction | undefined = post.postUrl
             ? { name: '打开帖子', href: post.postUrl }
             : undefined;
 
           const commonDownload = async () => {
-            if (medias.length === 0) {
+            if (medias.length === 0 && megaLinks.length === 0) {
               message.info('该帖没有可下载的附件');
               return;
             }
             try {
-              await batchCreateDownloadTask(
-                medias.map((media) => ({
-                  source: post.source || 'pawchive',
-                  post,
-                  media,
-                })),
-              );
-              message.success(`已添加 ${medias.length} 个附件到下载队列`);
+              if (medias.length > 0) {
+                await batchCreateDownloadTask(
+                  medias.map((media) => ({
+                    source: post.source || 'pawchive',
+                    post,
+                    media,
+                  })),
+                );
+              }
+              const addedMega =
+                megaLinks.length > 0 ? enqueueMegaDownloads([post]) : 0;
+              const parts: string[] = [];
+              if (medias.length > 0) parts.push(`${medias.length} 个附件`);
+              if (addedMega > 0) parts.push(`MEGA ${addedMega} 个链接`);
+              if (parts.length === 0) {
+                message.info('该帖的 MEGA 链接已在下载队列中');
+                return;
+              }
+              message.success(`已添加 ${parts.join(' + ')} 到下载队列`);
             } catch (err: any) {
               log.error(err);
               message.error(`创建下载任务失败：${err?.message}`);
@@ -86,9 +100,12 @@ export const ArchiverGrid: React.FC = () => {
           };
 
           const actionDownload: GridViewItemAction = {
-            name: allPreviewOnly
-              ? `下载缩略图 (${medias.length})`
-              : `下载 (${medias.length})`,
+            name:
+              medias.length === 0 && megaLinks.length > 0
+                ? `下载 MEGA (${megaLinks.length})`
+                : allPreviewOnly
+                  ? `下载缩略图 (${medias.length})`
+                  : `下载 (${medias.length})`,
             onClick: commonDownload,
           };
 
@@ -117,6 +134,11 @@ export const ArchiverGrid: React.FC = () => {
                 {hasPreviewOnly && (
                   <span className="block absolute left-2 bottom-2 text-xs text-yellow-300 bg-[rgba(0,0,0,0.6)] rounded-sm px-[0.3rem] py-[0.1rem]">
                     部分仅预览
+                  </span>
+                )}
+                {megaLinks.length > 0 && (
+                  <span className="block absolute right-2 top-2 text-xs text-white bg-[rgba(217,44,44,0.85)] rounded-sm px-[0.3rem] py-[0.1rem]">
+                    MEGA
                   </span>
                 )}
                 {coverMedia?.type === MediaType.Video && (

@@ -72,11 +72,12 @@ function extractExternalLinks(
     links.add(embed.url);
   }
   if (content) {
-    const regex = /href=["'](https?:\/\/[^"'#]+)["']/gi;
+    // 保留完整 URL（含 # 片段）：MEGA 分享链接的密钥就在 #key 里，不能截断
+    const regex = /href=["'](https?:\/\/[^"']+)["']/gi;
     for (const m of content.matchAll(regex)) {
       const href = m[1];
       if (isExternalLink(href)) {
-        links.add(href.split('#')[0]);
+        links.add(href);
       }
     }
   }

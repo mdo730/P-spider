@@ -1,6 +1,28 @@
 # P-Spider 会话交接（HANDOFF）
 
-> 用途：开新会话时把本项目状态快速交接给 AI。最后更新：2026-10-03
+> 用途：开新会话时把本项目状态快速交接给 AI。最后更新：2026-10-04
+
+## v1.6.5（累积中，未提交/未发布）
+
+线上正式版仍是 v1.6.4（含「时长倍率」bug，无以下改动）。用户选择攒够一起发。
+
+- 高兴等时长倍率 bug 修复（倍率改为扣消耗前算）。
+- 上海话模式。
+- fig-memo 图片合并（附件 + 正文）去重；「下载」按钮下载后刷新列表。
+- 本地库混合文件夹隐藏根媒体修复。
+- 产业成长曲线重排。
+- pawchive 目录名改 `创作者名_service`。
+- 本地库压缩包显示 + 右键 Bandizip 解压（`utils/library/scan.ts` 加 `archive` 类型、`utils/shell.ts` 的 `extractArchive`、Rust `extract_archive`）。
+- **MEGA 公开链接下载（自研 Rust 解码，不走 aria2）**：
+  - `src-tauri/src/mega.rs`：支持 `mega.nz/folder/*`、`/file/*` 公开分享。AES-ECB 解节点键 → AES-CBC 解属性 → AES-CTR（nonce=nodeKey[16..24]）解数据。关键坑：① `a:g` 取下载地址的响应是**对象不是数组**（`api_post` 两种都兼容）；② 下载 `?n=` 要用**分享句柄**（URL 里的），而遍历节点树要用**根节点句柄**（`p` 不在节点集里的那个），两者不同；③ MEGA API 走代理可达（用应用代理设置）。
+  - 命令 `mega_download(url, out_dir, proxy_url)`（Tauri v1：JS 传 `outDir`/`proxyUrl`）。**已端到端验证**：下载 178463768 字节 zip，解出内部 mp4 SHA256 与 Node megajs 基线**完全一致**。
+  - 前端 `src/services/mega.ts`：`isMegaLink`/`extractMegaLinks`/`downloadMegaLink`（下到帖子目录 `mega/` 子夹）/`enqueueMegaDownloads`（后台串行队列、按链接去重、完成/失败发通知）。
+  - **进下载管理**：每个 MEGA 链接建一个独立 `DownloadTask`（`isMega:true`，gid=`mega:<nanoid>`），Rust 通过 `mega-progress` 事件推送进度（每 ~256KB），前端实时更新；完成/失败标记状态。下载管理里 MEGA 任务不显示暂停、不参与 aria2 轮询、缩略图为占位图标。
+  - **外链抽取修复**：`platforms/archiver.ts` 的正文 `href` 正则去掉 `#` 截断（否则 MEGA 的 `#key` 丢失）。归档站抓取帖子的下载按钮（`ArchiverGrid`）现支持纯 MEGA 帖（附件为 0 时也能下），并加 `MEGA` 角标。
+  - **重复检测**：① 前端队列按链接去重，且下载管理已有该链接任务则跳过；② Rust `download_file` 目标文件已存在且大小一致即跳过（批量重跑不重复下载）。
+  - **MEGA 账号登录：已移除**。曾实现（`a:us0` → PBKDF2-SHA512 → `a:us` → AES-ECB + RSA 裸解密取 sid），实测登录成功，但**登录后 MEGA 判定异常把账号锁了**（第三方 API + 代理 IP 触发反滥用），用户决定去掉。现回到纯匿名下载（509 靠换节点/稍后重试）。Rust 保留了 `api_url(params, sid)`（sid 恒空）与错误码翻译 `err_for`。- 未登录照常匿名。
+  - 接入：`stores/download.ts` 的 `runCreationTask`（爬虫「开始下载全部」，`source==='pawchive'` 时动态 import 避免环形依赖）+ `stores/subscription.ts` 的归档站新帖分支。
+  - 验证：`pnpm typeCheck` / `npx eslint ./src` / `pnpm build` / `cargo check` 全过。⚠️ 未桌面实测（需 `pnpm tauri build`）。
 
 ## v1.6.4（宠物彩蛋「香蕉君」）
 

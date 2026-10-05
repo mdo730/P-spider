@@ -2,6 +2,7 @@
 import {
   DeleteOutlined,
   FileOutlined,
+  FileZipOutlined,
   FolderOpenOutlined,
   LinkOutlined,
   PictureOutlined,
@@ -22,7 +23,12 @@ import {
   resolveFileTweetInfo,
 } from '../../utils/library';
 import { handleImageMenuKey, imageMenuItems } from '../../utils/image-menu';
-import { openPath, openUrl, showInFolder } from '../../utils/shell';
+import {
+  extractArchive,
+  openPath,
+  openUrl,
+  showInFolder,
+} from '../../utils/shell';
 import { ImageViewer } from './ImageViewer';
 import { LocalThumb } from './LocalThumb';
 import { TweetSidebar } from './TweetSidebar';
@@ -35,7 +41,7 @@ const EMPTY_TRACE_MAP = new Map<string, TracedRecord>();
 interface FileRef {
   path: string;
   name: string;
-  kind?: 'image' | 'video';
+  kind?: 'image' | 'video' | 'archive';
 }
 
 interface Props {
@@ -156,6 +162,31 @@ export const FileGrid: React.FC<Props> = ({
     }
   };
 
+  // 解压压缩包（优先本机 Bandizip；未装则回退默认程序打开）
+  const extractFile = async (file: FileRef, toHere: boolean) => {
+    const sep = Math.max(
+      file.path.lastIndexOf('\\'),
+      file.path.lastIndexOf('/'),
+    );
+    const dir = file.path.slice(0, sep);
+    const base = file.name.replace(/\.[^.]+$/, '');
+    const outDir = toHere ? dir : `${dir}\\${base}`;
+    const hide = message.loading('正在解压…', 0);
+    try {
+      const result = await extractArchive(file.path, outDir);
+      hide();
+      if (result === 'extracted') {
+        message.success(toHere ? '已解压到当前文件夹' : '已解压到同名文件夹');
+        onDeleted?.();
+      } else {
+        message.info('未检测到 Bandizip，已用默认压缩软件打开');
+      }
+    } catch (err: any) {
+      hide();
+      message.error(err?.message || '解压失败');
+    }
+  };
+
   const confirmDelete = (file: FileRef) => {
     modal.confirm({
       title: '删除文件？',
@@ -184,6 +215,47 @@ export const FileGrid: React.FC<Props> = ({
       ? `@${fileInfo.username}`
       : coverFolderName || undefined;
     const isVideo = file.kind === 'video';
+    const isArchive = file.kind === 'archive';
+
+    if (isArchive) {
+      return {
+        items: [
+          {
+            key: 'extractHere',
+            label: '解压到当前文件夹',
+            icon: <FolderOpenOutlined />,
+          },
+          {
+            key: 'extractSub',
+            label: '解压到「同名」文件夹',
+            icon: <FileZipOutlined />,
+          },
+          { key: 'open', label: '用压缩软件打开', icon: <FileOutlined /> },
+          { type: 'divider' },
+          {
+            key: 'reveal',
+            label: '在资源管理器中打开',
+            icon: <FolderOpenOutlined />,
+          },
+          { type: 'divider' },
+          {
+            key: 'delete',
+            label: '删除文件',
+            icon: <DeleteOutlined />,
+            danger: true,
+          },
+        ],
+        onClick: async ({ key, domEvent }) => {
+          domEvent.stopPropagation();
+          if (key === 'extractHere') return extractFile(file, true);
+          if (key === 'extractSub') return extractFile(file, false);
+          if (key === 'open') return openWithSystem(file);
+          if (key === 'reveal') return reveal(file);
+          if (key === 'delete') return confirmDelete(file);
+        },
+      };
+    }
+
     return {
       items: [
         ...(!isVideo
@@ -279,12 +351,14 @@ export const FileGrid: React.FC<Props> = ({
                           setSidebarCollapsed(false);
                           setVideoFile(file);
                         }
-                      : () => {
-                          const i = imageIndexMap.get(file.path);
-                          if (i != null) setViewerIndex(i);
-                          setSidebarCollapsed(false);
-                          setViewerOpen(true);
-                        }
+                      : file.kind === 'archive'
+                        ? () => openWithSystem(file)
+                        : () => {
+                            const i = imageIndexMap.get(file.path);
+                            if (i != null) setViewerIndex(i);
+                            setSidebarCollapsed(false);
+                            setViewerOpen(true);
+                          }
                 }
                 title={file.name}
               >
@@ -295,6 +369,13 @@ export const FileGrid: React.FC<Props> = ({
                     wrapperClassName="w-full h-full"
                     className="object-cover w-full h-full"
                   />
+                ) : file.kind === 'archive' ? (
+                  <div className="flex h-full w-full flex-col items-center justify-center gap-1 bg-gray-50">
+                    <FileZipOutlined className="text-4xl text-gray-400" />
+                    <span className="line-clamp-2 px-2 text-center text-[11px] text-gray-500">
+                      {file.name}
+                    </span>
+                  </div>
                 ) : (
                   <div className="relative w-full h-full bg-gray-900">
                     <LocalThumb

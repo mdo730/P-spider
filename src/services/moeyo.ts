@@ -10,8 +10,8 @@ import { getMediaKind, isMediaFile, mapLimit } from '../utils/library';
 import { unicodeFilenamify } from '../utils/unicode';
 import { isSpectatorOn } from '../utils/spectator';
 import { HpoiMatch } from './hpoi';
-import moeyoSiteSeedData from '../data/moeyo-site-seed.json';
-import moeyoHpoiSeedData from '../data/moeyo-hpoi.json';
+// 大 seed（moeyo-site-seed 10MB / moeyo-hpoi 7MB）改为按需动态加载：
+// 只在真正用到 moeyo 站点缓存时才 import，避免启动即加载 17MB 拖内存。
 
 let _log: ICategoriedLogger;
 
@@ -80,10 +80,10 @@ export interface MoeyoProgress {
   done: number;
 }
 
-/** 内置站点清单种子：首启/无本地缓存时初始化，避免首次进入 moeyo 卡几分钟 */
-const MOEYO_SITE_SEED = moeyoSiteSeedData as unknown as MoeyoSiteCache;
-/** 内置 hpoi 绑定种子（离线批量匹配结果）：postId → 紧凑快照 */
-const MOEYO_HPOI_SEED = moeyoHpoiSeedData as Record<
+/** 内置站点清单种子：首启/无本地缓存时初始化（懒加载） */
+let MOEYO_SITE_SEED: MoeyoSiteCache | null = null;
+/** 内置 hpoi 绑定种子（离线批量匹配结果）：postId → 紧凑快照（懒加载） */
+let MOEYO_HPOI_SEED: Record<
   string,
   {
     itemId: number;
@@ -95,7 +95,22 @@ const MOEYO_HPOI_SEED = moeyoHpoiSeedData as Record<
     commentCount?: number;
     cover?: string;
   }
->;
+> = {};
+
+let seedsLoaded = false;
+/** 按需加载大 seed（只在使用 moeyo 数据时调用一次） */
+async function ensureSeeds(): Promise<void> {
+  if (seedsLoaded) return;
+  seedsLoaded = true;
+  try {
+    MOEYO_SITE_SEED = (await import('../data/moeyo-site-seed.json'))
+      .default as unknown as MoeyoSiteCache;
+    MOEYO_HPOI_SEED = (await import('../data/moeyo-hpoi.json'))
+      .default as unknown as typeof MOEYO_HPOI_SEED;
+  } catch (err) {
+    log().warn('加载 moeyo 种子失败', err);
+  }
+}
 
 /** 从内置种子取某篇的 hpoi 快照（无则为 undefined） */
 function seedHpoi(postId: string): HpoiMatch | undefined {
@@ -1064,6 +1079,7 @@ async function siteCachePath(): Promise<string> {
  */
 function mergeSeed(obj: MoeyoSiteCache): MoeyoSiteCache {
   const seed = MOEYO_SITE_SEED;
+  if (!seed) return obj;
   const byId = new Map<string, MoeyoPost>(
     (seed.posts || []).map((p) => [String(p.id), p]),
   );
@@ -1086,6 +1102,7 @@ function mergeSeed(obj: MoeyoSiteCache): MoeyoSiteCache {
 }
 
 async function readSiteCache(): Promise<MoeyoSiteCache | null> {
+  await ensureSeeds();
   try {
     const file = await siteCachePath();
     if (await fs.exists(file)) {

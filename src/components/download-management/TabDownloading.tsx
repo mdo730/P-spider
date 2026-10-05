@@ -10,7 +10,8 @@ export const TabDownloading: React.FC = () => {
 
   const onInScreenTasksChanged = useCallback(
     (tasks: DownloadTask[]) => {
-      setAutoSyncIds(tasks.map((t) => t.gid));
+      // MEGA 任务非 aria2，不参与 tellStatus 轮询
+      setAutoSyncIds(tasks.filter((t) => !t.isMega).map((t) => t.gid));
     },
     [setAutoSyncIds],
   );

@@ -98,6 +98,8 @@ export interface PetState {
   soundOn: boolean;
   /** 随机短语开关 */
   phraseOn: boolean;
+  /** 上海话模式（短语全部用上海话） */
+  shanghaiOn: boolean;
   /** 产业：industryId -> 等级（0/不存在 = 未购买） */
   industries: Record<string, number>;
   /** 历史产业花费（资产总额 = 金币 + 该值） */

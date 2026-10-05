@@ -1,6 +1,7 @@
 /* eslint-disable react/prop-types */
 import {
   CaretRightFilled,
+  CloudDownloadOutlined,
   DeleteFilled,
   DownloadOutlined,
   FileFilled,
@@ -161,11 +162,17 @@ export const DownloadListItem: React.FC<DownloadListItemProps> = ({
         }}
         title="打开原帖页"
       >
-        <img
-          src={t.media.thumbUrl || `${t.media.url}?format=jpg&name=thumb`}
-          loading="lazy"
-          className="w-full h-full object-cover transition-transform transform hover:scale-105"
-        />
+        {t.media.thumbUrl ? (
+          <img
+            src={t.media.thumbUrl}
+            loading="lazy"
+            className="w-full h-full object-cover transition-transform transform hover:scale-105"
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center bg-gray-100">
+            <CloudDownloadOutlined className="text-4xl text-gray-400" />
+          </div>
+        )}
       </a>
       <div className="ml-4 overflow-hidden pr-4 w-full h-full">
         <p
@@ -187,21 +194,42 @@ export const DownloadListItem: React.FC<DownloadListItemProps> = ({
         </a>
         <div className="mt-2">
           <TaskActions
-            actions={R.cond([
-              [R.equals('active'), R.always([actionPause, actionDelete])],
-              [R.equals('paused'), R.always([actionUnpause, actionDelete])],
-              [R.equals('error'), R.always([actionRedownload, actionDelete])],
-              [
-                R.equals('complete'),
-                R.always([
-                  actionOpen,
-                  actionOpenDir,
-                  actionRedownload,
-                  actionDelete,
-                ]),
-              ],
-              [R.T, R.always([])],
-            ])(t.status)}
+            actions={
+              t.isMega
+                ? R.cond([
+                    [R.equals('active'), R.always([actionDelete])],
+                    [
+                      R.equals('error'),
+                      R.always([actionRedownload, actionDelete]),
+                    ],
+                    [
+                      R.equals('complete'),
+                      R.always([actionOpen, actionOpenDir, actionDelete]),
+                    ],
+                    [R.T, R.always([])],
+                  ])(t.status)
+                : R.cond([
+                    [R.equals('active'), R.always([actionPause, actionDelete])],
+                    [
+                      R.equals('paused'),
+                      R.always([actionUnpause, actionDelete]),
+                    ],
+                    [
+                      R.equals('error'),
+                      R.always([actionRedownload, actionDelete]),
+                    ],
+                    [
+                      R.equals('complete'),
+                      R.always([
+                        actionOpen,
+                        actionOpenDir,
+                        actionRedownload,
+                        actionDelete,
+                      ]),
+                    ],
+                    [R.T, R.always([])],
+                  ])(t.status)
+            }
           />
         </div>
         <div className="mt-0">

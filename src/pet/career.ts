@@ -25,9 +25,9 @@ export const SUBJECT_MAP: Record<string, Subject> = Object.fromEntries(
 /** 学科等级上限 */
 export const SKILL_MAX = 5;
 
-/** 学科从 level 升到 level+1 的学费 */
+/** 学科从 level 升到 level+1 的学费（100/150/200/250/300，单科满级 1000） */
 export function skillTuition(level: number): number {
-  return 150 * (level + 1);
+  return 100 + 50 * level;
 }
 
 export interface Job {

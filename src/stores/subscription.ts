@@ -51,6 +51,7 @@ import {
   PixivWorkType,
 } from '../services/pixiv';
 import { downloadPixivWork } from '../services/pixiv-download';
+import { enqueueMegaDownloads } from '../services/mega';
 
 /**
  * 各站点独立限流参数：X / pawchive / pixiv 是**不同站点**，可并行检测、互不占用并发槽
@@ -703,6 +704,10 @@ async function checkArchiverSubscription(
               err,
             });
           }
+        }
+        // 归档站帖内含 MEGA 网盘链接：后台串行下载到帖子目录的 mega/ 子夹
+        if (sub.source === 'pawchive') {
+          enqueueMegaDownloads(newPosts);
         }
       }
     }

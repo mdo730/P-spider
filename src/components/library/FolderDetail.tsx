@@ -94,6 +94,7 @@ export const FolderDetail: React.FC<Props> = ({
       const paths = [
         ...data.folders.map((f) => f.path),
         ...data.files.map((f) => f.path),
+        ...data.rootFiles.map((f) => f.path),
       ];
       const mtimes = await fetchMtimes(paths);
       if (seq !== loadSeq.current) return data;
@@ -105,7 +106,12 @@ export const FolderDetail: React.FC<Props> = ({
         ...file,
         mtime: mtimes[data.folders.length + index] ?? undefined,
       }));
-      setContent({ folders, files });
+      const rootFiles = data.rootFiles.map((file, index) => ({
+        ...file,
+        mtime:
+          mtimes[data.folders.length + data.files.length + index] ?? undefined,
+      }));
+      setContent({ folders, files, rootFiles });
       // 无子文件夹时只能是平铺；有子文件夹时保留用户当前选择
       if (data.folders.length === 0) {
         setViewMode('flat');
@@ -139,6 +145,10 @@ export const FolderDetail: React.FC<Props> = ({
   );
   const sortedFiles = useMemo(
     () => sortFiles(content?.files || [], fileSort),
+    [content, fileSort],
+  );
+  const sortedRootFiles = useMemo(
+    () => sortFiles(content?.rootFiles || [], fileSort),
     [content, fileSort],
   );
 
@@ -288,56 +298,78 @@ export const FolderDetail: React.FC<Props> = ({
             <Spin size="large" />
           </div>
         ) : inFolderView ? (
-          <ul
-            className="grid grid-cols-[repeat(auto-fill,minmax(9rem,10rem))] gap-3"
-            onContextMenu={(e) => e.preventDefault()}
-          >
-            {sortedFolders.map((folder) => {
-              const menuItems: MenuProps['items'] = [
-                { key: 'open', label: '打开', icon: <FolderOpenOutlined /> },
-                { key: 'reveal', label: '在资源管理器中打开' },
-                { type: 'divider' },
-                { key: 'props', label: '属性', icon: <InfoCircleOutlined /> },
-              ];
-              const onMenuClick: MenuProps['onClick'] = ({ key, domEvent }) => {
-                domEvent.stopPropagation();
-                if (key === 'open') return onOpenFolder(folder);
-                if (key === 'reveal') return revealFolder(folder);
-                if (key === 'props') return setPropsTarget(folder);
-              };
-              return (
-                <Dropdown
-                  key={folder.path}
-                  trigger={['contextMenu']}
-                  menu={{ items: menuItems, onClick: onMenuClick }}
-                >
-                  <li className="lib-card-cv bg-white rounded-md border-[1px] border-gray-100 overflow-hidden group">
-                    <button
-                      className="block w-full text-left"
-                      title={folder.name}
-                      onClick={() => onOpenFolder(folder)}
-                    >
-                      <FolderCover
-                        name={folder.name}
-                        coverPath={folder.coverPath}
-                        coverKind={folder.coverKind}
-                        wrapperClassName="w-full h-[9rem]"
-                        className="object-cover w-full h-full transition-transform group-hover:scale-105"
-                      />
-                      <div className="px-2 py-2">
-                        <p className="truncate text-sm" title={folder.name}>
-                          {folder.name}
-                        </p>
-                        <p className="text-xs text-gray-400 mt-0.5">
-                          {folder.mediaCount} 个媒体
-                        </p>
-                      </div>
-                    </button>
-                  </li>
-                </Dropdown>
-              );
-            })}
-          </ul>
+          <>
+            <ul
+              className="grid grid-cols-[repeat(auto-fill,minmax(9rem,10rem))] gap-3"
+              onContextMenu={(e) => e.preventDefault()}
+            >
+              {sortedFolders.map((folder) => {
+                const menuItems: MenuProps['items'] = [
+                  { key: 'open', label: '打开', icon: <FolderOpenOutlined /> },
+                  { key: 'reveal', label: '在资源管理器中打开' },
+                  { type: 'divider' },
+                  { key: 'props', label: '属性', icon: <InfoCircleOutlined /> },
+                ];
+                const onMenuClick: MenuProps['onClick'] = ({
+                  key,
+                  domEvent,
+                }) => {
+                  domEvent.stopPropagation();
+                  if (key === 'open') return onOpenFolder(folder);
+                  if (key === 'reveal') return revealFolder(folder);
+                  if (key === 'props') return setPropsTarget(folder);
+                };
+                return (
+                  <Dropdown
+                    key={folder.path}
+                    trigger={['contextMenu']}
+                    menu={{ items: menuItems, onClick: onMenuClick }}
+                  >
+                    <li className="lib-card-cv bg-white rounded-md border-[1px] border-gray-100 overflow-hidden group">
+                      <button
+                        className="block w-full text-left"
+                        title={folder.name}
+                        onClick={() => onOpenFolder(folder)}
+                      >
+                        <FolderCover
+                          name={folder.name}
+                          coverPath={folder.coverPath}
+                          coverKind={folder.coverKind}
+                          wrapperClassName="w-full h-[9rem]"
+                          className="object-cover w-full h-full transition-transform group-hover:scale-105"
+                        />
+                        <div className="px-2 py-2">
+                          <p className="truncate text-sm" title={folder.name}>
+                            {folder.name}
+                          </p>
+                          <p className="text-xs text-gray-400 mt-0.5">
+                            {folder.mediaCount} 个媒体
+                          </p>
+                        </div>
+                      </button>
+                    </li>
+                  </Dropdown>
+                );
+              })}
+            </ul>
+            {sortedRootFiles.length > 0 && (
+              <div className="mt-5">
+                <div className="mb-2 text-xs text-gray-400">
+                  根目录媒体（{sortedRootFiles.length}）
+                </div>
+                <FileGrid
+                  files={sortedRootFiles}
+                  selectMode={false}
+                  selected={selected}
+                  onToggle={toggle}
+                  onDeleted={() => load()}
+                  coverFolderName={rootFolderName}
+                  historyMap={historyMap}
+                  traceMap={traceMap}
+                />
+              </div>
+            )}
+          </>
         ) : content && content.files.length > 0 ? (
           <FileGrid
             files={sortedFiles}

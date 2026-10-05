@@ -98,6 +98,23 @@ export interface Settings_V3 extends Settings_V2 {
     userAccount?: string;
     userAvatar?: string;
   };
+  /** WD14 视觉标签（fig-memo 检索辅助） */
+  vision?: {
+    /** 引擎：builtin=Rust 内置 CPU（默认）；external=外挂 Python（GPU/进阶） */
+    engine?: 'builtin' | 'external';
+    /** 选中的 WD14 模型 id（builtin） */
+    model?: string;
+    /** 模型存放目录（默认 <saveDirBase>\p-spider-wd14） */
+    modelDir?: string;
+    /** 每篇取图数：1 / 5 / all */
+    imagesPerPost?: '1' | '5' | 'all';
+    /** 运行 WD14 的 python.exe 路径（external） */
+    pythonPath?: string;
+    /** wd14_serve.py 脚本路径（external） */
+    scriptPath?: string;
+    /** CUDA/cuDNN DLL 目录（external，默认复用 ComfyUI torch 的 lib） */
+    cudaLibPath?: string;
+  };
 }
 
 export type Settings = Settings_V3;

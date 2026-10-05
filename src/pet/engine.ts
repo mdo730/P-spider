@@ -113,6 +113,7 @@ export function createInitialState(now: number): PetState {
     skin: DEFAULT_SKIN,
     soundOn: true,
     phraseOn: true,
+    shanghaiOn: false,
     industries: {},
     assetSpent: 0,
     lastHuaAt: 0,
@@ -680,12 +681,13 @@ export function startWork(
   const unit = minutes / 30;
   const energyCost = Math.round(WORK.energyCost * unit);
   if (s.energy < energyCost) return fail(s, '体力不够，先歇歇');
+  // 倍率要在扣本次消耗之前算（否则扣心情会把「高兴」扣没）
+  const factor = taskDurationFactor(s);
+  const realMinutes = Math.max(1, Math.round(minutes * factor));
   s.energy -= energyCost;
   s.satiety -= Math.round(WORK.satietyCost * unit);
   s.mood -= Math.round(WORK.moodCost * unit);
   s.lastWorkAt = now;
-  const factor = taskDurationFactor(s);
-  const realMinutes = Math.max(1, Math.round(minutes * factor));
   s.task = {
     type: 'work',
     startedAt: now,
@@ -712,14 +714,14 @@ export function startStudy(
   const cost = skillTuition(level);
   if (s.energy < STUDY.energyCost) return fail(s, '体力不够，先歇歇');
   if (s.coin < cost) return fail(s, `学费不够（需要 ${cost}）`);
-  s.coin -= cost;
-  s.energy -= STUDY.energyCost;
-  s.lastStudyAt = now;
   const factor = taskDurationFactor(s);
   const realMinutes = Math.max(
     1,
     Math.round((STUDY.durationMs / 60000) * factor),
   );
+  s.coin -= cost;
+  s.energy -= STUDY.energyCost;
+  s.lastStudyAt = now;
   s.task = {
     type: 'study',
     startedAt: now,

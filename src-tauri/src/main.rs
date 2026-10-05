@@ -8,6 +8,9 @@ mod open_url;
 mod image_search;
 mod media_proxy;
 mod network;
+mod mega;
+mod wd14;
+mod wd14_infer;
 
 use tauri::{
     AppHandle, CustomMenuItem, Manager, SystemTray, SystemTrayEvent, SystemTrayMenu, WindowEvent,
@@ -43,6 +46,46 @@ fn show_main_window(app: &AppHandle) {
 #[tauri::command]
 fn set_tray_tooltip(app: AppHandle, text: String) {
     let _ = app.tray_handle().set_tooltip(&text);
+}
+
+/// 用本机压缩软件解压到指定目录：优先 Bandizip 的 bz.exe。
+/// 未找到 Bandizip 时返回 "BANDIZIP_NOT_FOUND"（前端回退用默认程序打开）。
+#[tauri::command]
+fn extract_archive(archive: String, out_dir: String) -> Result<String, String> {
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+    for var in ["ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"] {
+        if let Ok(base) = std::env::var(var) {
+            candidates.push(
+                std::path::Path::new(&base)
+                    .join("Bandizip")
+                    .join("bz.exe"),
+            );
+        }
+    }
+    candidates.push(std::path::PathBuf::from(r"C:\Program Files\Bandizip\bz.exe"));
+    candidates.push(std::path::PathBuf::from(
+        r"C:\Program Files (x86)\Bandizip\bz.exe",
+    ));
+    let Some(bz) = candidates.into_iter().find(|p| p.exists()) else {
+        return Err("BANDIZIP_NOT_FOUND".into());
+    };
+    let output = std::process::Command::new(&bz)
+        // bz.exe 要求开关在压缩包之前：switch 放前面、包名放最后
+        .arg("x")
+        .arg(format!("-o:{}", out_dir))
+        .arg("-y")
+        .arg(&archive)
+        .output()
+        .map_err(|e| format!("spawn failed: {e}"))?;
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    } else {
+        Err(format!(
+            "bz.exe 退出码 {:?}: {}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr)
+        ))
+    }
 }
 
 fn main() {
@@ -143,6 +186,16 @@ fn main() {
           network::relaunch_app,
           set_tray_tooltip,
           pet_set_hit_rects,
+          extract_archive,
+          mega::mega_download,
+          wd14::wd14_start,
+          wd14::wd14_tag,
+          wd14::wd14_stop,
+          wd14::wd14_download,
+          wd14::wd14_setup_external,
+          wd14_infer::wd14_builtin_tag,
+          wd14_infer::wd14_model_download,
+          wd14_infer::wd14_release,
           media_proxy::media_proxy_port,
           image_search::reverse_image_search,
           image_search::take_image_search_arg,

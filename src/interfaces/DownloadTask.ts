@@ -20,4 +20,6 @@ export interface DownloadTask {
   ariaRetryCountRemains: number;
   /** 订阅关联 ID（由订阅功能发起的下载） */
   subscriptionId?: string;
+  /** 非 aria2 任务（MEGA 自研下载）：暂停/继续/状态同步走独立逻辑 */
+  isMega?: boolean;
 }

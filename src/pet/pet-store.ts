@@ -30,6 +30,7 @@ export interface PetStore extends PetState {
   setSkin: (skinId: string, now?: number) => PetResult;
   setSoundOn: (on: boolean) => void;
   setPhraseOn: (on: boolean) => void;
+  setShanghaiOn: (on: boolean) => void;
   buyIndustry: (id: string, now?: number) => PetResult;
   rewardHua: (now?: number) => PetResult;
   addActivity: (type: PetActivityType, now?: number) => PetResult;
@@ -100,6 +101,7 @@ export const usePetStore = create(
       },
       setSoundOn: (on) => set({ soundOn: on }),
       setPhraseOn: (on) => set({ phraseOn: on }),
+      setShanghaiOn: (on) => set({ shanghaiOn: on }),
       buyIndustry: (id, now) => {
         const r = engine.buyIndustry(get(), id, now ?? Date.now());
         set(r.state);

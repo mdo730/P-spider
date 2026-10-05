@@ -3,9 +3,11 @@ import {
   FolderOpenOutlined,
   LinkOutlined,
   ScissorOutlined,
+  TagsOutlined,
 } from '@ant-design/icons';
 import { MenuProps } from 'antd';
 import { useSettingsStore } from '../stores/settings';
+import { useWd14PromptStore } from '../stores/wd14-prompt';
 import {
   copyImageUrlToClipboard,
   copyLocalImageToClipboard,
@@ -40,6 +42,7 @@ export const IMAGE_MENU = {
   reveal: 'img:reveal',
   post: 'img:post',
   copyPost: 'img:copy-post',
+  wd14: 'img:wd14',
 } as const;
 
 /**
@@ -63,6 +66,11 @@ export function imageMenuItems(
             key: IMAGE_MENU.split,
             label: `复制切割图像（${split.parts} 条）`,
             icon: <ScissorOutlined />,
+          },
+          {
+            key: IMAGE_MENU.wd14,
+            label: 'WD14 识别标签',
+            icon: <TagsOutlined />,
           },
         ]
       : []),
@@ -142,6 +150,10 @@ export async function handleImageMenuKey(
         await copyTextToClipboard(ctx.postUrl);
         message.success('原网页链接已复制');
       }
+      return true;
+    }
+    if (key === IMAGE_MENU.wd14) {
+      useWd14PromptStore.getState().openWith(ctx);
       return true;
     }
     return false;
