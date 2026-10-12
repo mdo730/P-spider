@@ -3,7 +3,7 @@
 // 透传 Range 请求头 → 支持边下边播 / 拖动进度。
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::thread;
 use std::time::Duration;
@@ -12,8 +12,60 @@ use percent_encoding::percent_decode_str;
 use tiny_http::{Header, Response, Server, StatusCode};
 
 static PORT: OnceLock<u16> = OnceLock::new();
+/// 本地文件服务的允许根目录（启动时由 main.rs 注入 %APPDATA%\p-spider）
+static LOCAL_ROOT: OnceLock<PathBuf> = OnceLock::new();
 
 const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36";
+
+/// 初始化本地文件服务白名单根目录（仅允许该目录下的文件被 serve_local 读取）
+pub fn init_local_root(root: PathBuf) {
+    let _ = LOCAL_ROOT.set(root);
+}
+
+/// 校验 URL：仅允许 http/https 且目标非私有/回环/链路本地地址（防 SSRF）
+fn validate_url(url: &str) -> Result<(), String> {
+    let lower = url.trim().to_ascii_lowercase();
+    if !lower.starts_with("http://") && !lower.starts_with("https://") {
+        return Err(format!("仅允许 http/https，拒绝：{url}"));
+    }
+    // 解析 host，校验是否私网地址
+    let after_scheme = if lower.starts_with("https://") {
+        &url[8..]
+    } else {
+        &url[7..]
+    };
+    let host_port = after_scheme.split(['/', '?', '#']).next().unwrap_or("");
+    let host = host_port.rsplit(':').nth(1).unwrap_or(host_port);
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    // IPv4 私网/回环检查
+    if let Ok(ip) = host.parse::<std::net::Ipv4Addr>() {
+        if ip.is_loopback() || ip.is_private() || ip.is_link_local() || ip.is_unspecified() {
+            return Err(format!("拒绝访问内网/回环地址：{host}"));
+        }
+    }
+    // 回环域名
+    let blocked_hosts = ["localhost", "metadata.google.internal"];
+    if blocked_hosts.iter().any(|b| host.eq_ignore_ascii_case(b)) {
+        return Err(format!("拒绝访问受保护主机：{host}"));
+    }
+    Ok(())
+}
+
+/// 校验本地文件路径：必须落在 LOCAL_ROOT 白名单目录内（防任意文件读）
+fn validate_local_path(path: &str) -> Result<PathBuf, String> {
+    let root = LOCAL_ROOT
+        .get()
+        .ok_or_else(|| "本地文件服务未初始化".to_string())?;
+    let canonical_root = root.canonicalize().unwrap_or_else(|_| root.clone());
+    let p = PathBuf::from(path);
+    let canonical = p
+        .canonicalize()
+        .map_err(|e| format!("路径不存在或无法解析：{e}"))?;
+    if !canonical.starts_with(&canonical_root) {
+        return Err("路径越界：仅允许应用数据目录下的媒体文件".to_string());
+    }
+    Ok(canonical)
+}
 
 /// 启动本地媒体代理（幂等），返回监听端口。
 #[tauri::command]
@@ -72,11 +124,24 @@ fn handle(req: tiny_http::Request) -> Result<(), String> {
     // 本地文件：给 WebView 的 <video> 一个支持 Range 的 http 源
     // （Tauri asset 协议不支持 Range，导致本地视频无法解码出首帧）
     if !local.is_empty() {
-        return serve_local(req, &local);
+        let safe_path = match validate_local_path(&local) {
+            Ok(p) => p,
+            Err(e) => {
+                let _ = req.respond(Response::from_string(e).with_status_code(403));
+                return Ok(());
+            }
+        };
+        return serve_local(req, &safe_path.to_string_lossy());
     }
 
     if target.is_empty() {
         let _ = req.respond(Response::from_string("missing url").with_status_code(400));
+        return Ok(());
+    }
+
+    // SSRF 防护：校验远程目标 URL
+    if let Err(e) = validate_url(&target) {
+        let _ = req.respond(Response::from_string(e).with_status_code(403));
         return Ok(());
     }
 

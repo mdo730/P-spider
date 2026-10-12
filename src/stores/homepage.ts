@@ -1,3 +1,4 @@
+import { getErrorMessage } from '../utils/error';
 import { create } from 'zustand';
 import { TwitterUser } from '../interfaces/TwitterUser';
 import { getUser, getUserMedias } from '../twitter/api';
@@ -73,7 +74,7 @@ export const useHomepageStore = create<HomepageStore>((set, get) => ({
           data: value,
         },
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       set({
         userInfo: {
           data: undefined,
@@ -138,7 +139,7 @@ export const useHomepageStore = create<HomepageStore>((set, get) => ({
           cursor,
         },
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       log.error('Failed to load post list', err);
       set({
         postList: {
@@ -147,7 +148,9 @@ export const useHomepageStore = create<HomepageStore>((set, get) => ({
           loading: false,
         },
       });
-      throw new Error(`加载图片列表失败：${err?.message || '未知原因'}`);
+      throw new Error(
+        `加载图片列表失败：${getErrorMessage(err) || '未知原因'}`,
+      );
     }
   },
   loadMorePostList: async () => {
@@ -194,7 +197,7 @@ export const useHomepageStore = create<HomepageStore>((set, get) => ({
           cursor,
         },
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       set(
         produce(state, (draft) => {
           draft.postList.loading = false;

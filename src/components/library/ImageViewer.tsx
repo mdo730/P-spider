@@ -1,4 +1,3 @@
-/* eslint-disable react/prop-types */
 import { CloseOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons';
 import { Dropdown, MenuProps, Spin } from 'antd';
 import React, { useCallback, useEffect, useRef, useState } from 'react';

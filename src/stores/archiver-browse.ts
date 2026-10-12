@@ -1,3 +1,4 @@
+import { getErrorMessage } from '../utils/error';
 import { create } from 'zustand';
 import {
   getAdapter,
@@ -184,12 +185,12 @@ export const useArchiverBrowseStore = create<ArchiverBrowseStore>(
             adapter.fetchPosts(creatorKey, undefined, 50),
           ]);
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         if (seq !== loadSeq) return;
         set({
           loading: false,
           creatorError:
-            typeof err === 'string' ? err : err?.message || '未知原因',
+            typeof err === 'string' ? err : getErrorMessage(err) || '未知原因',
         });
         return;
       }
@@ -234,11 +235,11 @@ export const useArchiverBrowseStore = create<ArchiverBrowseStore>(
               posts: s.posts.concat(withCreator(page.posts, creator)),
               cursor: page.cursor,
             };
-          } catch (err: any) {
+          } catch (err: unknown) {
             return {
               ...s,
               failed: true,
-              errorMessage: err?.message || '未知原因',
+              errorMessage: getErrorMessage(err) || '未知原因',
             };
           }
         }),

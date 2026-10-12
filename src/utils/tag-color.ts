@@ -71,3 +71,76 @@ export function tagChipActiveStyle(name: string): CSSProperties {
     borderColor: c,
   };
 }
+
+/** 视觉识别分类的**低饱和粉彩**色板（含 E08D83/E083DC/9D83E0/83B0E0 等） */
+const VISION_PALETTE = [
+  '#E08D83', // 珊瑚
+  '#E083DC', // 玫粉
+  '#9D83E0', // 紫
+  '#83B0E0', // 蓝
+  '#83E0C0', // 青绿
+  '#B0E083', // 黄绿
+  '#E0C783', // 杏黄
+  '#E0839D', // 粉
+  '#83D0E0', // 天青
+  '#C783E0', // 紫罗兰
+  '#E0A983', // 浅橙
+  '#A0A8C0', // 蓝灰
+];
+
+const VISION_CATS = [
+  '体型',
+  '服装',
+  '姿势',
+  '元素',
+  '道具',
+  '发型',
+  '头发',
+  '眼睛',
+  '表情',
+  '构图',
+  '配饰',
+  '背景',
+  '画质',
+  '角色',
+  '通用',
+  '内容',
+  'R18',
+];
+
+/** 视觉分类 → 固定粉彩色（已知类按顺序，未知类按名字 hash） */
+export function visionCatColor(cat: string): string {
+  const i = VISION_CATS.indexOf((cat || '').trim());
+  if (i >= 0) return VISION_PALETTE[i % VISION_PALETTE.length];
+  return VISION_PALETTE[hashString(cat || '') % VISION_PALETTE.length];
+}
+
+/** 视觉分类胶囊（淡底 + 同色描边 + 深字） */
+export function visionCatChipStyle(cat: string): CSSProperties {
+  const c = visionCatColor(cat);
+  return {
+    color: '#3f3f46',
+    backgroundColor: rgba(c, 0.16),
+    borderColor: rgba(c, 0.5),
+  };
+}
+
+/** 视觉分类胶囊·选中（同色实底） */
+export function visionCatChipActiveStyle(cat: string): CSSProperties {
+  const c = visionCatColor(cat);
+  return {
+    color: '#ffffff',
+    backgroundColor: c,
+    borderColor: c,
+  };
+}
+
+/** 视觉分类胶囊·深色底（用于深色背景，如右侧推文条） */
+export function visionCatChipStyleDark(cat: string): CSSProperties {
+  const c = visionCatColor(cat);
+  return {
+    color: '#e5e7eb',
+    backgroundColor: rgba(c, 0.24),
+    borderColor: rgba(c, 0.6),
+  };
+}

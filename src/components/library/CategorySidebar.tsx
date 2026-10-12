@@ -1,4 +1,4 @@
-/* eslint-disable react/prop-types */
+import { getErrorMessage } from '../../utils/error';
 import {
   AppstoreOutlined,
   DeleteOutlined,
@@ -56,8 +56,8 @@ export const CategorySidebar: React.FC<Props> = ({
         renameCategory(editModal.category.id, nameInput);
       }
       setEditModal(null);
-    } catch (err: any) {
-      message.error(err?.message || '操作失败');
+    } catch (err: unknown) {
+      message.error(getErrorMessage(err) || '操作失败');
     }
   };
 

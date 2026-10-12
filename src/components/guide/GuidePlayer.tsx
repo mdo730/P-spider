@@ -1,4 +1,3 @@
-/* eslint-disable react/prop-types */
 import { Button } from 'antd';
 import React, { useEffect, useState } from 'react';
 import { useGuidePlayerStore } from '../../stores/guide-player';

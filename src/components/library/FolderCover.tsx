@@ -15,48 +15,44 @@ interface Props {
 }
 
 /** 文件夹封面：图片走缩略图缓存，视频/无媒体降级为占位图标 */
-export const FolderCover: React.FC<Props> = ({
-  name,
-  coverPath,
-  coverKind,
-  className,
-  wrapperClassName,
-}) => {
-  const wrapper = wrapperClassName || 'w-full h-full';
+export const FolderCover: React.FC<Props> = React.memo(
+  ({ name, coverPath, coverKind, className, wrapperClassName }) => {
+    const wrapper = wrapperClassName || 'w-full h-full';
 
-  if (coverPath && coverKind === 'image') {
-    return (
-      <LocalThumb
-        filePath={coverPath}
-        alt={name}
-        className={className}
-        wrapperClassName={wrapper}
-      />
-    );
-  }
-
-  if (coverPath && coverKind === 'video') {
-    // 视频封面：走 ffmpeg 首帧缩略图（与本地库视频一致）
-    return (
-      <div className={`relative ${wrapper}`}>
+    if (coverPath && coverKind === 'image') {
+      return (
         <LocalThumb
-          kind="video"
           filePath={coverPath}
           alt={name}
           className={className}
           wrapperClassName={wrapper}
         />
-        <PlayCircleFilled className="absolute right-1 bottom-1 text-xl text-white/90 drop-shadow" />
+      );
+    }
+
+    if (coverPath && coverKind === 'video') {
+      // 视频封面：走 ffmpeg 首帧缩略图（与本地库视频一致）
+      return (
+        <div className={`relative ${wrapper}`}>
+          <LocalThumb
+            kind="video"
+            filePath={coverPath}
+            alt={name}
+            className={className}
+            wrapperClassName={wrapper}
+          />
+          <PlayCircleFilled className="absolute right-1 bottom-1 text-xl text-white/90 drop-shadow" />
+        </div>
+      );
+    }
+
+    return (
+      <div
+        className={`flex flex-col items-center justify-center bg-gray-100 text-gray-400 ${wrapper}`}
+      >
+        <FolderFilled className="text-4xl" />
+        <span className="mt-1 text-xs">无媒体</span>
       </div>
     );
-  }
-
-  return (
-    <div
-      className={`flex flex-col items-center justify-center bg-gray-100 text-gray-400 ${wrapper}`}
-    >
-      <FolderFilled className="text-4xl" />
-      <span className="mt-1 text-xs">无媒体</span>
-    </div>
-  );
-};
+  },
+);

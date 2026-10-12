@@ -24,6 +24,8 @@ export interface Settings_V2 {
     saveDirBase: string;
     dirTemplate: string;
     fileNameTemplate: string;
+    /** 归档站（pawchive 系）附件文件名模板；空则保留原始文件名。支持通用变量（%MEDIA_INDEX%/%TITLE%/%FILE_NAME%/%EXT% 等） */
+    pawchiveFileNameTemplate?: string;
     sameFileSkip: boolean;
     /** GIF(animated_gif) 下载后自动用 ffmpeg 转成真实 .gif（需系统装有 ffmpeg；默认关闭） */
     gifToRealGif?: boolean;

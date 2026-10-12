@@ -1,4 +1,3 @@
-/* eslint-disable react/prop-types */
 import React from 'react';
 import { resolveVariables } from '../../utils/file-name-template';
 import { EXAMPLE_FILE_NAME_TEMPLATE_DATA } from '../../constants/file-name-template';

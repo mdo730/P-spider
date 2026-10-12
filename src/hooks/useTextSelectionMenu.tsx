@@ -1,3 +1,4 @@
+import { getErrorMessage } from '../utils/error';
 import {
   CopyOutlined,
   LinkOutlined,
@@ -114,8 +115,8 @@ export function useTextSelectionMenu(): {
             } else if (key === 'openLink' && anchor) {
               openUrl(anchor);
             }
-          } catch (err: any) {
-            message.error(err?.message || '操作失败');
+          } catch (err: unknown) {
+            message.error(getErrorMessage(err) || '操作失败');
           }
           setState(null);
         }}

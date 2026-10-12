@@ -1,6 +1,6 @@
 [package]
 name = "p-spider"
-version = "1.7.0"
+version = "1.8.0"
 description = "A spider for P"
 authors = ["you"]
 license = ""
@@ -34,6 +34,10 @@ percent-encoding = "2"
 image = { version = "0.24", default-features = false, features = ["jpeg", "png", "webp", "gif", "bmp"] }
 # WD14 视觉标签：Rust 内置 onnxruntime（CPU）直接推理，免 Python
 ort = { version = "2.0.0-rc.13", features = ["download-binaries"] }
+# hpoi 离线索引：SQLite（首次从 JSON 建库，之后按需查询，JS 不再常驻 77MB）
+rusqlite = { version = "0.31", features = ["bundled"] }
+# hpoi 归一化（NFKC 等），与前端 normHpoi 对齐
+unicode-normalization = "0.1"
 # 用户数据备份：导出/导入 zip（仅 deflate，避免引入 bzip2/zstd 等 C 依赖）
 zip = { version = "0.6", default-features = false, features = ["deflate"] }
 

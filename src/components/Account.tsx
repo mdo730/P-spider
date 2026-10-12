@@ -1,4 +1,3 @@
-/* eslint-disable react/prop-types */
 import { App, Avatar, Form, Input, Modal } from 'antd';
 import React, { useEffect, useState } from 'react';
 import { useAppStateStore } from '../stores/app-state';
@@ -27,25 +26,31 @@ export const Account: React.FC = () => {
   const iconOnly = useSettingsStore((s) => s.sidebar?.iconOnly === true);
 
   useEffect(() => {
+    let alive = true;
     (async () => {
       if (!cookieString) {
-        setAccountInfo(null);
+        if (alive) setAccountInfo(null);
       } else {
-        setLoading(true);
+        if (alive) setLoading(true);
         try {
-          const accountInfo = await getAccountInfo(cookieString);
-          setAccountInfo(accountInfo);
-        } catch (err: any) {
-          message.error('获取账号信息失败，请检查 Cookie 或代理配置是否正确');
-          log.error(err);
+          const info = await getAccountInfo(cookieString);
+          if (alive) setAccountInfo(info);
+        } catch (err: unknown) {
+          if (alive) {
+            message.error('获取账号信息失败，请检查 Cookie 或代理配置是否正确');
+            log.error(err);
+          }
         } finally {
-          setLoading(false);
+          if (alive) setLoading(false);
         }
       }
     })();
+    return () => {
+      alive = false;
+    };
   }, [cookieString]);
 
-  const onFormFinished = async (values: any) => {
+  const onFormFinished = async (values: Record<string, string>) => {
     setModalLoading(true);
     const newCookieString = stringifyCookie(values);
 
@@ -54,7 +59,7 @@ export const Account: React.FC = () => {
       setAccountInfo(accountInfo);
       setModalOpen(false);
       setCookieString(newCookieString);
-    } catch (err: any) {
+    } catch (err: unknown) {
       log.error(err);
       message.error('无法登录，请检查 Cookie 或代理配置是否正确');
     } finally {

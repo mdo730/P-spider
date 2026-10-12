@@ -74,42 +74,66 @@ pub fn forward_pixiv_arg(url: &str) {
   }
 }
 
+/// 请求已运行实例把主窗口显示到前台（二次启动无参数时用，避免开出第二个窗口）
+pub fn forward_show() {
+  if let Ok(mut s) = TcpStream::connect("127.0.0.1:6803") {
+    let _ = s.write_all(b"SHOW\n");
+  }
+}
+
 /// 已运行实例收到、待前端处理的搜图请求队列
 static PENDING: Mutex<Vec<String>> = Mutex::new(Vec::new());
 /// 已运行实例收到、待前端处理的 pixiv 授权回跳队列
 static PENDING_PIXIV: Mutex<Vec<String>> = Mutex::new(Vec::new());
+/// 已运行实例收到、待前端处理的「聚焦主窗口」请求（二次启动无参数时触发）
+static PENDING_SHOW: Mutex<bool> = Mutex::new(false);
 
-/// 启动单实例控制监听（固定端口 6803）；返回是否为主实例
-pub fn start_control_listener() -> bool {
-  match TcpListener::bind("127.0.0.1:6803") {
-    Ok(listener) => {
-      thread::spawn(move || {
-        for stream in listener.incoming().flatten() {
-          let mut line = String::new();
-          if BufReader::new(&stream).read_line(&mut line).is_ok() {
-            let p = line.trim();
-            if p.is_empty() {
-              continue;
-            }
-            // 前缀区分：PIXA=像素授权回跳，IMGS（或旧格式无前缀）=以图搜图
-            if let Some(rest) = p.strip_prefix("PIXA\t") {
-              if let Ok(mut q) = PENDING_PIXIV.lock() {
-                q.push(rest.to_string());
-              }
-            } else if let Some(rest) = p.strip_prefix("IMGS\t") {
-              if let Ok(mut q) = PENDING.lock() {
-                q.push(rest.to_string());
-              }
-            } else if let Ok(mut q) = PENDING.lock() {
-              q.push(p.to_string());
-            }
-          }
-        }
-      });
-      true
+/// 启动单实例控制监听（固定端口 6803）；返回是否为主实例。
+/// `retries`：端口被占用时的重试次数（每次间隔 150ms）。用于兼容 `app.restart()`
+/// 「先启动新进程、旧进程随后才退出」的竞态——此时短暂占用会很快释放，重试即可接管。
+pub fn start_control_listener(retries: u32) -> bool {
+  let mut bound: Option<TcpListener> = None;
+  for attempt in 0..=retries {
+    match TcpListener::bind("127.0.0.1:6803") {
+      Ok(listener) => {
+        bound = Some(listener);
+        break;
+      }
+      Err(_) if attempt < retries => thread::sleep(Duration::from_millis(150)),
+      Err(_) => break,
     }
-    Err(_) => false,
   }
+  let Some(listener) = bound else {
+    return false;
+  };
+  thread::spawn(move || {
+    for stream in listener.incoming().flatten() {
+      let mut line = String::new();
+      if BufReader::new(&stream).read_line(&mut line).is_ok() {
+        let p = line.trim();
+        if p.is_empty() {
+          continue;
+        }
+        // 前缀区分：PIXA=像素授权回跳，IMGS=以图搜图，SHOW=聚焦主窗口
+        if let Some(rest) = p.strip_prefix("PIXA\t") {
+          if let Ok(mut q) = PENDING_PIXIV.lock() {
+            q.push(rest.to_string());
+          }
+        } else if let Some(rest) = p.strip_prefix("IMGS\t") {
+          if let Ok(mut q) = PENDING.lock() {
+            q.push(rest.to_string());
+          }
+        } else if p == "SHOW" {
+          if let Ok(mut f) = PENDING_SHOW.lock() {
+            *f = true;
+          }
+        } else if let Ok(mut q) = PENDING.lock() {
+          q.push(p.to_string());
+        }
+      }
+    }
+  });
+  true
 }
 
 #[tauri::command]
@@ -126,6 +150,15 @@ pub fn take_pending_pixiv_auth() -> Option<String> {
     .lock()
     .ok()
     .and_then(|mut q| (!q.is_empty()).then(|| q.remove(0)))
+}
+
+/// 取出「聚焦主窗口」请求（有则置回 false）
+#[tauri::command]
+pub fn take_pending_show() -> bool {
+  PENDING_SHOW
+    .lock()
+    .map(|mut f| std::mem::take(&mut *f))
+    .unwrap_or(false)
 }
 
 /// 注册/移除 `pixiv://` 协议处理（HKCU，免管理员），用于浏览器登录后自动回传 code。
@@ -265,7 +298,9 @@ fn get_public_url(input: &str, proxy: &str) -> Result<(String, String), String> 
     .send()
     .map_err(|e| format!("上传到 Yandex 失败：{e}"))?;
   let v: Value = resp.json().map_err(|e| format!("Yandex 返回异常：{e}"))?;
-  let p = &v["blocks"][0]["params"];
+  let blocks = v["blocks"].as_array().ok_or_else(|| "Yandex 返回格式异常（blocks 非数组）".to_string())?;
+  let first = blocks.first().ok_or_else(|| "Yandex 返回 blocks 为空".to_string())?;
+  let p = &first["params"];
   let pubu = p["originalImageUrl"]
     .as_str()
     .or_else(|| p["imageUrl"].as_str())

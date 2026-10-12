@@ -1,10 +1,19 @@
-import { fs, path } from '@tauri-apps/api';
+import { invoke } from '@tauri-apps/api';
 import { convertFileSrc } from '@tauri-apps/api/tauri';
+import { fs, path } from '@tauri-apps/api';
 import MediaType from '../enums/MediaType';
 import { PlatformSource } from '../platforms';
 import { buildPostUrl, buildUserUrl } from '../twitter/url';
 import { onTaskCompleted } from './download';
 import { cacheThumbFromUrl } from '../utils/thumbnail';
+
+/**
+ * 下载历史（改为 Rust + SQLite）。
+ *
+ * `downloads.jsonl`（可能几十 MB / 14 万条）首次由 Rust 建成 `history.db`，
+ * 之后本地库按**路径**查、时间流按**时间**查，**JS 不再常驻全部记录**。
+ * 新增下载仍追加写 jsonl（备份），同时入库。
+ */
 
 let _log: ICategoriedLogger;
 
@@ -15,124 +24,76 @@ function log() {
 }
 
 export interface DownloadHistoryRecord {
-  /** 推文 id */
   postId: string;
-  /** 推文发布时间（ISO 字符串），用于时间流排序 */
   tweetTime: string;
-  /** 推文全文 */
   fullText?: string;
-  /** 推文用户名（screenName） */
   username?: string;
-  /** 推文用户昵称 */
   displayName?: string;
-  /** 推文用户头像 URL */
   avatar?: string;
-  /** 媒体类型 */
   mediaType: MediaType;
-  /** 媒体原始 URL（视频为封面图） */
   mediaUrl?: string;
-  /** 视频/GIF 可播放地址（转贴等未下载媒体的远程 mp4） */
   videoUrl?: string;
-  /** 本地保存完整路径 */
   filePath: string;
-  /** 本地文件是否仍存在（分组时探测；用于本地文件被删后的兜底） */
   existsLocal?: boolean;
-  /** 本地文件名 */
   fileName: string;
-  /** 下载完成时间戳 */
   downloadedAt: number;
-  /** 来源：subscription=订阅自动下载，manual=手动下载 */
   source: 'subscription' | 'manual';
-  /** 来源平台（twitter/pawchive/figmemo/moeyo/pixiv），用于还原原帖链接 */
   platform?: PlatformSource;
-  /** 帖子详情页 URL */
   postUrl?: string;
-  /** 作者稳定 id（pixiv 作者主页链接用；新下载起写入） */
   userId?: string;
 }
 
-async function getHistoryFilePath(): Promise<string> {
-  const dir = await path.appDataDir();
-  if (!(await fs.exists(dir))) {
-    await fs.createDir(dir, { recursive: true });
-  }
-  return await path.join(dir, 'downloads.jsonl');
-}
-
-/** 追加一条下载历史记录到 jsonl */
+/** 追加一条下载历史（Rust：入 SQLite + 追加 jsonl） */
 export async function appendDownloadHistory(
   record: DownloadHistoryRecord,
 ): Promise<void> {
   try {
-    const filePath = await getHistoryFilePath();
-    await fs.writeTextFile(filePath, JSON.stringify(record) + '\n', {
-      append: true,
-    });
-    // 有新记录 → 直接并进缓存（避免下次又整文件重解析 300ms+）
-    if (_historyCache) {
-      _historyCache.unshift(record);
-      if (_historyMapCache && record.filePath) {
-        _historyMapCache.set(normalizePath(record.filePath), record);
-      }
-    } else {
-      invalidateHistoryCache();
-    }
+    await invoke('hist_append', { record });
   } catch (err) {
     log().error('Failed to append download history', err);
   }
 }
 
-/**
- * 解析结果内存缓存：downloads.jsonl 可能有几十 MB（十万条记录），
- * 每次都重读重解析会让本地库/时间流卡顿。appendDownloadHistory 写入后失效。
- */
-let _historyCache: DownloadHistoryRecord[] | null = null;
-let _historyLoading: Promise<DownloadHistoryRecord[]> | null = null;
-
-/** 清掉历史缓存（写入新记录后调用） */
-function invalidateHistoryCache(): void {
-  _historyCache = null;
-  _historyMapCache = null;
+/** 路径归一化（统一分隔符 + 小写），用于本地文件 → 历史记录的匹配 */
+export function normalizePath(p: string): string {
+  return p.replace(/\//g, '\\').toLowerCase();
 }
 
-/** 读取全部历史记录（新→旧）；结果带内存缓存，不要就地修改返回的数组 */
-export async function readDownloadHistory(): Promise<DownloadHistoryRecord[]> {
-  if (_historyCache) return _historyCache;
-  if (_historyLoading) return _historyLoading;
-  _historyLoading = (async () => {
-    const list = await readDownloadHistoryUncached();
-    _historyCache = list;
-    _historyLoading = null;
-    return list;
-  })();
-  return _historyLoading;
-}
-
-async function readDownloadHistoryUncached(): Promise<DownloadHistoryRecord[]> {
+/** 按文件路径批量取下载历史（本地库关联原推文用） */
+export async function getHistoryByPaths(
+  paths: string[],
+): Promise<Map<string, DownloadHistoryRecord>> {
+  const out = new Map<string, DownloadHistoryRecord>();
+  if (paths.length === 0) return out;
   try {
-    const filePath = await getHistoryFilePath();
-    if (!(await fs.exists(filePath))) {
-      return [];
+    const records = await invoke<DownloadHistoryRecord[]>('hist_by_paths', {
+      paths,
+    });
+    for (const r of records) {
+      if (r.filePath) out.set(normalizePath(r.filePath), r);
     }
-    const text = await fs.readTextFile(filePath);
-    const lines = text.split('\n').filter((l) => l.trim());
-    const records: DownloadHistoryRecord[] = [];
-    for (const line of lines) {
-      try {
-        const r = JSON.parse(line) as DownloadHistoryRecord;
-        if (r && r.postId && r.filePath) {
-          records.push(r);
-        }
-      } catch (err) {
-        log().warn('Skip invalid history line', err);
-      }
-    }
-    // 按推文时间倒序（新→旧）
-    return records.sort((a, b) => (b.tweetTime > a.tweetTime ? 1 : -1));
   } catch (err) {
-    log().error('Failed to read download history', err);
-    return [];
+    log().warn('读取下载历史（按路径）失败', err);
   }
+  return out;
+}
+
+/** 本地库顶层文件夹：一级段 → 平台（覆盖结构启发式） */
+export async function getPlatformSegments(
+  prefix: string,
+): Promise<Map<string, PlatformSource>> {
+  const out = new Map<string, PlatformSource>();
+  try {
+    const rows = await invoke<{ seg: string; platform: string }[]>(
+      'hist_platform_segments',
+      { prefix },
+    );
+    for (const { seg, platform } of rows)
+      out.set(seg, platform as PlatformSource);
+  } catch (err) {
+    log().warn('读取平台段失败', err);
+  }
+  return out;
 }
 
 export interface TimelineGroup {
@@ -142,41 +103,38 @@ export interface TimelineGroup {
   username?: string;
   displayName?: string;
   records: DownloadHistoryRecord[];
-  /** 'note' = 未下载的新记事（fig-memo/moeyo）；'retweet' = 订阅用户转贴（仅展示，不下载） */
   kind?: 'download' | 'note' | 'retweet';
-  /** 记事标题 */
   title?: string;
-  /** 跳转 app 内正文的目标页 id（figmemo / moeyo） */
   articlePage?: string;
-  /** 记事来源显示名（fig-memo / moeyo） */
   sourceLabel?: string;
-  /** 转贴：转推者 screenName（显示「转推自 @x」） */
   retweetedBy?: string;
-  /** 转贴：转推者数量（>1 显示「等 N 人」） */
   retweetedByCount?: number;
-  /** 头像 URL（下载条目来自推文；转贴为原作者头像；记事用平台图标，留空） */
   avatar?: string;
-  /** 记事所属分类名（fig-memo/moeyo），用于时间流标注（低饱和固定色） */
   categories?: string[];
-  /** feed 条目（X/Pawchive/pixiv）命中的**本地库标签**名（最多展示最靠前 3 个） */
   libraryTags?: string[];
-  /** 筛选令牌：本地库标签 + '转贴' + 'fig-memo'/'moeyo'（时间流胶囊筛选用） */
   filterTokens?: string[];
 }
 
 /**
  * 获取近 N 天的下载历史，按推文分组，返回新→旧顺序的分组列表。
+ * 只查数据库里这段时间的记录（不再全量读内存）。
  */
 export async function getTimelineGroups(
   rangeDays = 7,
 ): Promise<TimelineGroup[]> {
-  const all = await readDownloadHistory();
-  const startTime = Date.now() - rangeDays * 24 * 60 * 60 * 1000;
-
-  const recentAll = all.filter((r) => {
-    const t = new Date(r.tweetTime).getTime();
-    return !Number.isNaN(t) && t >= startTime;
-  });
+  const sinceIso = new Date(
+    Date.now() - rangeDays * 24 * 60 * 60 * 1000,
+  ).toISOString();
+  let recentAll: DownloadHistoryRecord[] = [];
+  try {
+    recentAll = await invoke<DownloadHistoryRecord[]>('hist_recent', {
+      sinceIso,
+      limit: 0,
+    });
+  } catch (err) {
+    log().error('Failed to read download history', err);
+    return [];
+  }
   // 探测本地文件是否仍存在（被删除后用于兜底：走远程/原推，而不是本地路径）
   const recent = await Promise.all(
     recentAll.map(async (r) => {
@@ -214,7 +172,6 @@ export async function getTimelineGroups(
 /** 生成媒体缩略图 URL（推特走 CDN 缩略图参数；其它平台原图即缩略图） */
 export function getMediaThumbUrl(record: DownloadHistoryRecord): string {
   if (record.mediaUrl) {
-    // 仅推特 CDN 支持 ?format=jpg&name=thumb；fig-memo/pawchive 的 mediaUrl 已是图本身
     if (!record.platform || record.platform === 'twitter') {
       return `${record.mediaUrl}?format=jpg&name=thumb`;
     }
@@ -233,36 +190,12 @@ export function getMediaThumbUrl(record: DownloadHistoryRecord): string {
 /** 生成媒体原图 URL（用于点开大图预览） */
 export function getMediaOriginalUrl(record: DownloadHistoryRecord): string {
   if (record.mediaUrl) {
-    // 原始 URL 不带缩略图参数即为原图
     return record.mediaUrl;
   }
   return getMediaThumbUrl(record);
 }
 
-/** 路径归一化（统一分隔符 + 小写），用于本地文件 → 历史记录的匹配 */
-export function normalizePath(p: string): string {
-  return p.replace(/\//g, '\\').toLowerCase();
-}
-
-let _historyMapCache: Map<string, DownloadHistoryRecord> | null = null;
-
-/** 读取全部历史并建立「文件路径 → 记录」索引（用于本地库关联原推文）；结果带缓存 */
-export async function getDownloadHistoryMap(): Promise<
-  Map<string, DownloadHistoryRecord>
-> {
-  if (_historyMapCache) return _historyMapCache;
-  const all = await readDownloadHistory();
-  const map = new Map<string, DownloadHistoryRecord>();
-  for (const record of all) {
-    if (record.filePath) {
-      map.set(normalizePath(record.filePath), record);
-    }
-  }
-  _historyMapCache = map;
-  return map;
-}
-
-/** 由历史记录还原帖子原网页 URL（旧记录无 postUrl 时按 twitter 拼接，无法还原则 undefined） */
+/** 由历史记录还原帖子原网页 URL（旧记录无 postUrl 时按 twitter 拼接） */
 export function resolvePostUrl(
   record: DownloadHistoryRecord,
 ): string | undefined {
@@ -274,7 +207,6 @@ export function resolvePostUrl(
   return undefined;
 }
 
-/** 本地库「文件 → 推文」统一信息（不同来源拼合后的结果） */
 export interface FileTweetInfo {
   displayName?: string;
   username?: string;
@@ -282,9 +214,7 @@ export interface FileTweetInfo {
   time?: string;
   url?: string;
   text?: string;
-  /** 来源平台（决定作者主页链接怎么拼、头像要不要 Referer） */
   platform?: PlatformSource;
-  /** 作者主页 URL（按平台拼；拿不到则不显示可点） */
   profileUrl?: string;
 }
 
@@ -333,8 +263,6 @@ onTaskCompleted.listen((task) => {
   void (async () => {
     try {
       const filePath = await path.join(task.dir, task.fileName);
-      // 视频/动图：顺手把**在线封面**写进缩略图缓存
-      // （本地库浏览就秒开，不必现场解码视频取帧——那个很慢）
       const type = task.media?.type;
       if (
         (type === MediaType.Video || type === MediaType.Gif) &&
@@ -357,7 +285,6 @@ onTaskCompleted.listen((task) => {
         userId: task.post?.creator?.id || undefined,
         mediaType: task.media?.type || MediaType.Photo,
         mediaUrl: task.media?.url,
-        // 视频/GIF 记录下载直链，便于本地文件删除后仍能经代理流式播放
         videoUrl:
           task.media?.type === MediaType.Video ||
           task.media?.type === MediaType.Gif

@@ -1,4 +1,3 @@
-/* eslint-disable react/prop-types */
 import { useUnmountedRef } from 'ahooks';
 import React, { useCallback, useEffect, useRef } from 'react';
 

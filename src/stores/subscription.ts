@@ -1,3 +1,4 @@
+import { getErrorMessage } from '../utils/error';
 import { nanoid } from 'nanoid';
 import * as R from 'ramda';
 import dayjs from 'dayjs';
@@ -35,7 +36,7 @@ import {
   useDownloadStore,
 } from './download';
 import { createTauriFileStorage } from './persist/tauri-file-storage';
-import { mapLimit } from '../utils/library';
+import { mapLimit } from '../utils/library/scan';
 import { delay } from '../utils';
 import { isSpectatorOn } from '../utils/spectator';
 import {
@@ -76,6 +77,18 @@ async function checkSubscriptionsThrottled(
 ): Promise<void> {
   if (checking) return;
   checking = true;
+  const initProg: SubscriptionCheckProgress = {
+    running: true,
+    total: subs.length,
+    done: 0,
+    current: '',
+    newCount: 0,
+  };
+  const setProg = (patch: Partial<SubscriptionCheckProgress>) =>
+    useSubscriptionStore.setState((st) => ({
+      checkProgress: { ...(st.checkProgress || initProg), ...patch },
+    }));
+  setProg(initProg);
   try {
     // 按平台分组，各站点并行、各自限流
     const groups = new Map<string, Subscription[]>();
@@ -85,12 +98,16 @@ async function checkSubscriptionsThrottled(
       if (arr) arr.push(s);
       else groups.set(key, [s]);
     }
+    let done = 0;
+    let newCount = 0;
     await Promise.all(
       [...groups.entries()].map(([source, list]) => {
         const cfg = SOURCE_THROTTLE[source] ?? DEFAULT_THROTTLE;
         return mapLimit(list, cfg.limit, async (sub) => {
+          setProg({ current: sub.displayName || sub.username || sub.id });
           try {
-            await checkSubscription(sub);
+            const r = await checkSubscription(sub);
+            newCount += r?.downloaded || 0;
           } catch (err) {
             log().error('Subscription check failed', {
               id: sub.id,
@@ -98,12 +115,15 @@ async function checkSubscriptionsThrottled(
               err,
             });
           }
+          done += 1;
+          setProg({ done, newCount });
           await delay(cfg.gapMs);
         });
       }),
     );
   } finally {
     checking = false;
+    useSubscriptionStore.setState({ checkProgress: null });
   }
 }
 
@@ -138,8 +158,18 @@ export function retweetModeOf(
   return s.retweetMode ?? (s.includeRetweets === true ? 'include' : 'off');
 }
 
+export interface SubscriptionCheckProgress {
+  running: boolean;
+  total: number;
+  done: number;
+  current: string;
+  newCount: number;
+}
+
 export interface SubscriptionStore {
   subscriptions: Subscription[];
+  /** 检查进度（时间流刷新时展示：x/y · 当前订阅 · 新增数）；空闲为 null */
+  checkProgress: SubscriptionCheckProgress | null;
   /** 新增订阅；若同平台+同用户名已存在则改为**更新**其选项（返回 updated） */
   addSubscription: (
     params: CreateSubscriptionParams,
@@ -154,9 +184,10 @@ export interface SubscriptionStore {
 }
 
 export const useSubscriptionStore = create(
-  persist<SubscriptionStore>(
+  persist<SubscriptionStore, [], [], { subscriptions: Subscription[] }>(
     (set, get) => ({
       subscriptions: [],
+      checkProgress: null,
       addSubscription: async ({
         username,
         intervalMin,
@@ -365,6 +396,14 @@ export const useSubscriptionStore = create(
       name: 'subscriptions',
       version: 7,
       storage: createTauriFileStorage(),
+      // 只把订阅本体写盘。checkProgress 是临时进度状态，若把它也持久化，
+      // 启动时调度器一旦早于异步水合 setState，就会连带把「尚未读到订阅」的空
+      // subscriptions 覆盖到文件（曾导致每次重启/装新版后丢订阅）。
+      partialize: (state) => ({ subscriptions: state.subscriptions }),
+      // 等水合完成再启动调度循环，避免首次写盘早于读取 subscriptions.json。
+      onRehydrateStorage: () => () => {
+        scheduleSubscriptions();
+      },
       migrate(state: any) {
         state.subscriptions = (state.subscriptions || []).map((s: any) => {
           const dailyStats: Record<string, { count: number; bytes: number }> =
@@ -535,13 +574,13 @@ async function checkTwitterSubscription(
     });
 
     return { downloaded };
-  } catch (err: any) {
+  } catch (err: unknown) {
     log().error('Subscription check failed', { id: sub.id, err });
     update({
       status: 'error',
       // 关键：失败也要记时间，否则调度器每秒都判定「从未检查过」而无限重试
       lastCheckedAt: Date.now(),
-      errorMessage: err?.message || '未知原因',
+      errorMessage: getErrorMessage(err) || '未知原因',
     });
     return { downloaded: 0 };
   }
@@ -697,7 +736,7 @@ async function checkArchiverSubscription(
         for (const post of linkOnlyPosts) {
           try {
             await prepareArchiverPostDir(post);
-          } catch (err: any) {
+          } catch (err: unknown) {
             log().error('Failed to write external links file', {
               id: sub.id,
               postId: post.id,
@@ -723,12 +762,12 @@ async function checkArchiverSubscription(
     });
 
     return { downloaded };
-  } catch (err: any) {
+  } catch (err: unknown) {
     log().error('Pawchive subscription check failed', { id: sub.id, err });
     update({
       status: 'error',
       lastCheckedAt: Date.now(),
-      errorMessage: err?.message || '未知原因',
+      errorMessage: getErrorMessage(err) || '未知原因',
     });
     return { downloaded: 0 };
   }
@@ -845,12 +884,12 @@ async function checkPixivSubscription(
     });
 
     return { downloaded };
-  } catch (err: any) {
+  } catch (err: unknown) {
     log().error('pixiv subscription check failed', { id: sub.id, err });
     update({
       status: 'error',
       lastCheckedAt: Date.now(),
-      errorMessage: err?.message || '未知原因',
+      errorMessage: getErrorMessage(err) || '未知原因',
     });
     return { downloaded: 0 };
   }
@@ -930,4 +969,5 @@ onTaskCompleted.listen((task) => {
   });
 });
 
-scheduleSubscriptions();
+// 注意：调度循环不在这里启动，改由 persist 的 onRehydrateStorage 在水合完成后启动
+// （见上方 useSubscriptionStore 配置），避免早于读取 subscriptions.json 就写盘清空订阅。

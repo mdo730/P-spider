@@ -1,4 +1,4 @@
-/* eslint-disable react/prop-types */
+import { getErrorMessage } from '../../utils/error';
 import { LoadingOutlined } from '@ant-design/icons';
 import { App } from 'antd';
 import * as R from 'ramda';
@@ -93,9 +93,9 @@ export const ArchiverGrid: React.FC = () => {
                 return;
               }
               message.success(`已添加 ${parts.join(' + ')} 到下载队列`);
-            } catch (err: any) {
+            } catch (err: unknown) {
               log.error(err);
-              message.error(`创建下载任务失败：${err?.message}`);
+              message.error(`创建下载任务失败：${getErrorMessage(err)}`);
             }
           };
 

@@ -1,4 +1,3 @@
-/* eslint-disable react/prop-types */
 import { Descriptions, Modal, Spin, Tag } from 'antd';
 import React, { useEffect, useState } from 'react';
 import { useLibraryStore } from '../../stores/library';

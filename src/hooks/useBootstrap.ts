@@ -1,3 +1,4 @@
+import { getErrorMessage } from '../utils/error';
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api';
 import {
@@ -96,9 +97,9 @@ export function useBootstrap() {
         try {
           log.info(`Boot ${item.name}`);
           await item.fn();
-        } catch (err: any) {
+        } catch (err: unknown) {
           log.error(`UI Boot error name=${item.name}`, err);
-          setError(typeof err === 'string' ? err : err?.message);
+          setError(typeof err === 'string' ? err : getErrorMessage(err));
           return;
         }
       }

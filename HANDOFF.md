@@ -1,6 +1,53 @@
 # P-Spider 会话交接（HANDOFF）
 
-> 用途：开新会话时把本项目状态快速交接给 AI。最后更新：2026-10-04
+> 用途：开新会话时把本项目状态快速交接给 AI。最后更新：2026-10-05
+
+## 归档站文件名 + 平铺排序（1.7.1，未提交/未发布）
+
+**归档站（pawchive）文件名模板**：`Settings.download.pawchiveFileNameTemplate`（默认 `%MEDIA_INDEX,w=2%_%TITLE%%EXT%`）；设置 →「下载」新增独立输入项（复用 `FileNameTemplateInput`/`VariablePicker`）。`constants/file-name-template.ts` 新增变量 `%TITLE%`（帖子标题）、`%FILE_NAME%`（原文件名去扩展名），`%MEDIA_INDEX%` 支持 `w=2` 补零。`stores/download.ts` 归档分支改用它（空则保留原名）。`platforms/archiver.ts` 的 `toPlatformPost` 改为**封面(`file`)在前 → `attachments` 原顺序**（正确顺序），并 `export` 供回溯复用。
+
+**回溯改名（联网，独立按钮）**：设置 →「工具与数据」→「本地库」→「回溯归档站文件名（联网）」（与 X 溯源分开）。`services/archiver-rename.ts` + `stores/archiver-rename.ts`：读全部下载历史(`hist_recent` 1970→now)筛 `platform==='pawchive'` → 按 `postUrl` 分组 → `fetchPawchivePost`（`platforms/pawchive.ts` 新增）拉原帖 → 用 `mediaUrl`/`fileName` basename 匹配附件 → `resolveVariables(模板)` 生成新名 → `fs.renameFile`。改名后同步：① 下载历史路径（新 Rust `hist_db::hist_rename_path`，已在 `main.rs` 注册）；② WD14 视觉标签索引键（`library-visual.ts` 新增 `renameLibraryVisualKeys`）。仅 pawchive，依赖历史里有 postUrl/mediaUrl。
+
+**平铺排序**：`utils/library/sort.ts` 新增 `FileSortKey='doc-order'`（选项「按帖子顺序（文件夹→时间→正文）」，放首位）；`FolderDetail` 默认 `fileSort='doc-order'`，用 historyMap 的 `tweetTime` 排序「文件夹连续 → 帖子时间新→旧 → 文件名数字前缀」。X/pixiv 无子文件夹时等价按文件名数值排。
+
+验证：typeCheck / eslint / cargo check / build / tauri build 全过。⚠️ 未桌面实测。
+
+## 丢订阅修复（1.7.2，已打包）
+
+**现象**：重启 / 装新版后订阅被清空（`%APPDATA%\p-spider\subscriptions.json` 变成空 `{"subscriptions":[],"checkProgress":null}`）。
+
+**根因**：`stores/subscription.ts` 的 `persist` 未做 `partialize`（连临时状态 `checkProgress` 一起写盘），且文件末尾**模块加载即调用** `scheduleSubscriptions()`（每秒调度，会 `setState`）。启动时该 `setState` 早于 persist 的**异步文件水合**，persist 便把「尚未读到订阅」的空 `subscriptions:[]` 写回 `subscriptions.json`（87 字节的小写入常快过读取 75KB 文件）→ 订阅被覆盖清空。装新版时首启较慢（DB 重建等），水合更晚 → 更容易中招。
+
+**修复**：
+- `persist` 加 `partialize: (state)=>({ subscriptions: state.subscriptions })`，只持久化订阅本体。
+- 调度循环改到 `onRehydrateStorage` 回调里启动（读到订阅后再跑）；删除文件末尾的 `scheduleSubscriptions();`。
+
+验证：`pnpm typeCheck` / `npx eslint ./src` / `pnpm build` 全过。已 `pnpm tauri build` 并同步绿色版。
+
+## 单实例转发损坏修复（1.7.2，已打包）
+
+**现象**：P-Spider 已在运行，资源管理器右键「以图搜图」仍会弹出一个新实例。
+
+**根因（已实测定位）**：不是「转发失效」——运行实例持有 6803 时，右键进程会正常转发并退出。真正的漏洞是**运行实例丢了 6803 监听**：二次**无参数**启动（典型来源 Tauri `app.restart()`：先 spawn 新进程、旧进程随后才退出）时新进程 bind 失败，旧进程退出后新进程永远不再持有端口；此后每次右键的新进程都能 bind 成功 → 弹出新实例。附带漏洞：无参数二次启动会直接开第二个窗口。
+
+**修复**：
+- `image_search.rs`：`start_control_listener(retries)` 支持端口占用重试（150ms×N）；新增 `SHOW` 命令通道 + `take_pending_show`。
+- `main.rs`：带参数只试一次（占用即转发并退出）；**无参数重试 10 次**（吃掉 restart 竞态），仍失败则转发 `SHOW` 请已有实例聚焦主窗口后退出（不再开第二个窗口）；新增命令 `show_main_window_cmd`。
+- 前端：`hooks/background-tasks/useSingleInstanceFocus.ts`（挂到 `useRunBackgroundTasks`）轮询 `take_pending_show` → `show_main_window_cmd`。
+
+**排序**：`doc-order`（按帖子顺序·时间 新→旧）/ `doc-order-asc`（旧→新）两方向已实现；缺 `tweetTime` 的组兜底也按方向反转，保证两选项结果不同。**默认排序按平台**（`getPlatformSegments` 取一级创作者文件夹的平台，键需小写）：pawchive → `doc-order`；X / pixiv（含平台未知）→ `name-desc`（名称 Z→A）。切换一级文件夹时重设，二级子文件夹不重置以保留用户选择。
+
+验证：`pnpm typeCheck` / `npx eslint ./src` / `pnpm build` / `cargo check` 全过。已 `pnpm tauri build`（**1.7.2**），产物同步绿色版 `E:\OPENCODE\P-Spider 绿色版\`（`P-Spider.exe` + `P-Spider_1.7.2_x64-setup.exe`）。
+
+## 本地库视觉标签（1.7.1，未提交/未发布）
+
+把 fig-memo 的 WD14 视觉标签能力复用到**本地库**：给本地图片批量识别 → 按「视觉标签」筛选/清理杂图（未做西煲迁移）。
+
+- **抽公共核心** `src/services/vision-core.ts`（`VisualRecord`/`effectiveItems`/`isDone`/`makeRecord`/`VisionProgress`/`IMAGE_EXT`/`DEFAULT_MODEL`）；`figmemo-visual.ts` 改为复用并 re-export（fig-memo 行为不变）。记录结构里 `postId` 字段复用作**键**：fig-memo 是文章 id，本地库是**文件绝对路径**。
+- **新增** `services/library-visual.ts`：索引 `appDataDir/library-visual-tags.jsonl`（键=文件路径）；`readLibraryVisualTags` / `runLibraryVision`（每张图一条记录，k=1，无下载，单张失败不中断整批）/ `setLibraryVisualOverride`（手动增删覆盖层）/ `collectImagesUnderFolders`（递归收集文件夹图片）。`stores/library-vision.ts`：全局后台运行状态（`useLibraryVisionStore`）。
+- **词表加一类「内容」**（`data/wd14-tag-map.json` 主 map）：食物/蛋糕/冰淇淋/水果/饮品/杯子/碗/盘子、英文文字/水印/签名/标志/作者名/对话框、写实/照片写实/照片背景、无人物、拼图/梗图——用来分辨游戏截图/无意义截图/食物等杂图。`tag-color.ts` 的 `VISION_CATS` 加 `内容`；`Figmemo.tsx` 分组顺序数组追加 `内容`。因主 map 共用，fig-memo 新识别也会带上「内容」标签（旧索引不重跑）。
+- **UI**：`FolderDetail`（当前文件夹）加「识别」⚡（识别本文件夹递归全部图片）+「视觉筛选」⚙（分类胶囊+计数+并/交集，按视觉标签过滤文件）+ 右下角后台进度；`FileGrid` 卡片加紫色眼角标 + 右键「编辑视觉标签」；`components/library/VisualTagEditor.tsx` 增删标签。`FolderGrid`（库根）加「识别」（当前分类列表）与多选「识别所选」+ 进度。设置里现有的「视觉识别」引擎/模型直接复用。
+- 验证：`pnpm typeCheck` / `npx eslint ./src` / `pnpm build` 全过。⚠️ 未桌面实测（需 `pnpm tauri build`）。
 
 ## v1.6.5（累积中，未提交/未发布）
 

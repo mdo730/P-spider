@@ -19,7 +19,7 @@ export function usePollSystemProxyUrl() {
         if (!unmountedRef.current && newUrl !== url) {
           setUrl(newUrl);
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         log.error('Get system proxy failed', err);
       }
 

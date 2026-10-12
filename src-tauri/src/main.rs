@@ -11,6 +11,9 @@ mod network;
 mod mega;
 mod wd14;
 mod wd14_infer;
+mod hpoi_db;
+mod hist_db;
+mod storage;
 
 use tauri::{
     AppHandle, CustomMenuItem, Manager, SystemTray, SystemTrayEvent, SystemTrayMenu, WindowEvent,
@@ -42,10 +45,22 @@ fn show_main_window(app: &AppHandle) {
     }
 }
 
+/// 前端收到二次启动的「聚焦」请求时调用
+#[tauri::command]
+fn show_main_window_cmd(app: AppHandle) {
+    show_main_window(&app);
+}
+
 /// 设置系统托盘悬停提示（桌面宠物窗用来显示宠物现状）
 #[tauri::command]
 fn set_tray_tooltip(app: AppHandle, text: String) {
     let _ = app.tray_handle().set_tooltip(&text);
+}
+
+/// 文件大小（字节）；不存在返回 0。用于「存在但为 0 字节（下载失败）」判定。
+#[tauri::command]
+fn file_size(path: String) -> u64 {
+    std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0)
 }
 
 /// 用本机压缩软件解压到指定目录：优先 Bandizip 的 bz.exe。
@@ -91,8 +106,13 @@ fn extract_archive(archive: String, out_dir: String) -> Result<String, String> {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     image_search::capture_cli_args(&args);
-    // 单实例：非主实例且带 --image-search → 把路径转给已运行实例后直接退出（不新开窗口）
-    let primary = image_search::start_control_listener();
+    // 单实例：固定端口 6803 作为「主实例」凭据。
+    //  - 带参数（右键以图搜图 / pixiv 回跳）：只试一次，占用即转发给已运行实例后退出。
+    //  - 不带参数：多试几次，兼容 app.restart()「先起新进程、旧进程随后退出」的竞态；
+    //    若仍占用，说明已有实例在跑 → 请它聚焦主窗口后退出，避免开出第二个窗口/实例。
+    let has_arg =
+        image_search::current_arg().is_some() || image_search::current_pixiv_arg().is_some();
+    let primary = image_search::start_control_listener(if has_arg { 0 } else { 10 });
     if !primary {
         if let Some(u) = image_search::current_pixiv_arg() {
             image_search::forward_pixiv_arg(&u);
@@ -102,6 +122,8 @@ fn main() {
             image_search::forward_arg(&p);
             std::process::exit(0);
         }
+        image_search::forward_show();
+        std::process::exit(0);
     }
 
     let show_item = CustomMenuItem::new("show", "显示窗口");
@@ -117,6 +139,12 @@ fn main() {
         .setup(|app| {
             // 桌面宠物窗点击穿透：轮询光标，命中「可交互矩形」时才接收鼠标事件
             let handle = app.handle();
+            // 注入本地媒体代理的文件服务白名单根目录（%APPDATA%\p-spider）
+            if let Some(data_dir) = app.path_resolver().app_data_dir() {
+                let root = data_dir.join("p-spider");
+                let _ = std::fs::create_dir_all(&root);
+                media_proxy::init_local_root(root);
+            }
             std::thread::spawn(move || {
                 let mut last: Option<bool> = None;
                 loop {
@@ -185,8 +213,10 @@ fn main() {
           network::quit_app,
           network::relaunch_app,
           set_tray_tooltip,
+          show_main_window_cmd,
           pet_set_hit_rects,
           extract_archive,
+          file_size,
           mega::mega_download,
           wd14::wd14_start,
           wd14::wd14_tag,
@@ -196,12 +226,30 @@ fn main() {
           wd14_infer::wd14_builtin_tag,
           wd14_infer::wd14_model_download,
           wd14_infer::wd14_release,
+          hpoi_db::hpoi_search,
+          hpoi_db::hpoi_list_by_ref,
+          hpoi_db::hpoi_entity_names,
+          hpoi_db::hpoi_entity_info,
+          hpoi_db::hpoi_hits_by_ids,
+          hpoi_db::hpoi_hobby_refs,
+          hpoi_db::hpoi_hobby_refs_batch,
+          hpoi_db::hpoi_counts,
+          hpoi_db::hpoi_db_reset,
+          hist_db::hist_append,
+          hist_db::hist_recent,
+          hist_db::hist_by_paths,
+          hist_db::hist_rename_path,
+          hist_db::hist_platform_segments,
+          storage::storage_usage,
+          storage::clear_storage,
+          storage::cleanup_logs,
           media_proxy::media_proxy_port,
           image_search::reverse_image_search,
           image_search::take_image_search_arg,
           image_search::take_pending_image_search,
           image_search::take_pixiv_auth_arg,
           image_search::take_pending_pixiv_auth,
+          image_search::take_pending_show,
           image_search::set_pixiv_auth_scheme,
           image_search::set_image_search_explorer_menu,
           backup::export_user_backup,

@@ -1,4 +1,4 @@
-/* eslint-disable react/prop-types */
+import { getErrorMessage } from '../utils/error';
 import { Avatar, Button, Input, Space, App } from 'antd';
 import React from 'react';
 import { PageHeader } from '../components/PageHeader';
@@ -26,9 +26,9 @@ export const Archiver: React.FC = () => {
     try {
       await load(kw);
       addSearchHistory(kw);
-    } catch (err: any) {
+    } catch (err: unknown) {
       log.error(err);
-      message.error(err?.message || '加载失败，请检查 ID 格式');
+      message.error(getErrorMessage(err) || '加载失败，请检查 ID 格式');
     }
   };
 

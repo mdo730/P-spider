@@ -1,4 +1,3 @@
-/* eslint-disable react/prop-types */
 import React, { useEffect } from 'react';
 import { useDownloadStore } from '../../stores/download';
 import clsx from 'clsx';

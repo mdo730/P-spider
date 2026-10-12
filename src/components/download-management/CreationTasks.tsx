@@ -1,4 +1,3 @@
-/* eslint-disable react/prop-types */
 import React from 'react';
 import { useDownloadStore } from '../../stores/download';
 import { Avatar, Button, Tooltip } from 'antd';

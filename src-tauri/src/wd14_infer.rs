@@ -87,8 +87,18 @@ impl Wd14Model {
       .map_err(|e| e.to_string())?
       .commit_from_file(model_path)
       .map_err(|e| format!("加载模型失败：{e}"))?;
-    let input_name = session.inputs()[0].name().to_string();
-    let output_name = session.outputs()[0].name().to_string();
+    let input_name = session
+      .inputs()
+      .first()
+      .ok_or_else(|| "模型无输入节点".to_string())?
+      .name()
+      .to_string();
+    let output_name = session
+      .outputs()
+      .first()
+      .ok_or_else(|| "模型无输出节点".to_string())?
+      .name()
+      .to_string();
     Ok(Self {
       session,
       input_name,
@@ -208,7 +218,10 @@ pub async fn wd14_builtin_tag(
       b.last_used = std::time::Instant::now();
     }
     ensure_reaper();
-    let model = &mut guard.as_mut().unwrap().model;
+    let model = match guard.as_mut() {
+      Some(b) => &mut b.model,
+      None => return Err("模型未加载".to_string()),
+    };
     let mut out = Vec::with_capacity(paths.len());
     for path in paths {
       match model.tag(Path::new(&path), 0.35, 0.85) {

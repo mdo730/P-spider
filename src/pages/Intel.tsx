@@ -1,4 +1,4 @@
-/* eslint-disable react/prop-types */
+import { getErrorMessage } from '../utils/error';
 import {
   ArrowLeftOutlined,
   DownloadOutlined,
@@ -276,8 +276,8 @@ const HpoiDetailView: React.FC<{
       setCommentText('');
       setComments(await fetchHpoiComments(detail.nodeId));
       message.success('已发表');
-    } catch (err: any) {
-      message.error(err?.message || '发表失败');
+    } catch (err: unknown) {
+      message.error(getErrorMessage(err) || '发表失败');
     } finally {
       setPosting(false);
     }
@@ -841,8 +841,8 @@ const DownloadFloat: React.FC<{
           const n = await downloadHpoiImages(title, getImages());
           if (n > 0) message.success(`已加入下载队列（${n} 张）`);
           else message.info('没有可下载的图片');
-        } catch (err: any) {
-          message.error(err?.message || '加入下载队列失败');
+        } catch (err: unknown) {
+          message.error(getErrorMessage(err) || '加入下载队列失败');
         } finally {
           setBusy(false);
         }
@@ -972,7 +972,7 @@ export const IntelPage: React.FC = () => {
       for (const kind of SEARCH_KIND_ORDER) {
         const ids = byKind.get(kind);
         if (!ids || ids.length === 0) continue;
-        out.push({ kind, hits: getHpoiHitsByIds(kind, ids) });
+        out.push({ kind, hits: await getHpoiHitsByIds(kind, ids) });
       }
       if (alive) {
         setFavData(out);
@@ -1006,8 +1006,8 @@ export const IntelPage: React.FC = () => {
       cacheCursor = page.lastTime;
       setItems(page.items);
       setCursor(page.lastTime);
-    } catch (err: any) {
-      message.error(err?.message || '加载 hpoi 情报失败');
+    } catch (err: unknown) {
+      message.error(getErrorMessage(err) || '加载 hpoi 情报失败');
     } finally {
       setLoading(false);
     }
@@ -1075,8 +1075,8 @@ export const IntelPage: React.FC = () => {
       cacheCursor = page.lastTime;
       setItems(merged);
       setCursor(page.lastTime);
-    } catch (err: any) {
-      message.error(err?.message || '加载更多失败');
+    } catch (err: unknown) {
+      message.error(getErrorMessage(err) || '加载更多失败');
     } finally {
       setLoadingMore(false);
     }
@@ -1094,8 +1094,8 @@ export const IntelPage: React.FC = () => {
       try {
         const d = await fetchHpoiIntelDetail(item.itemId);
         setDetail(d);
-      } catch (err: any) {
-        message.error(err?.message || '加载词条失败');
+      } catch (err: unknown) {
+        message.error(getErrorMessage(err) || '加载词条失败');
       } finally {
         setDetailLoading(false);
       }
@@ -1154,8 +1154,8 @@ export const IntelPage: React.FC = () => {
         setAlbums(merged);
         setAlbumPage(nextPage);
         setAlbumHasMore(added > 0);
-      } catch (err: any) {
-        message.error(err?.message || '加载 hpoi 相册失败');
+      } catch (err: unknown) {
+        message.error(getErrorMessage(err) || '加载 hpoi 相册失败');
         setAlbumHasMore(false);
       } finally {
         setAlbumLoading(false);
@@ -1275,8 +1275,8 @@ export const IntelPage: React.FC = () => {
       setEntityLoading(true);
       try {
         setEntityCards(await fetchEntityHobbies(type, id));
-      } catch (err: any) {
-        message.error(err?.message || '加载实体页失败');
+      } catch (err: unknown) {
+        message.error(getErrorMessage(err) || '加载实体页失败');
       } finally {
         setEntityLoading(false);
       }
@@ -1294,8 +1294,8 @@ export const IntelPage: React.FC = () => {
       setProducts(prods);
       setProductPage(1);
       setSeriesCards(series);
-    } catch (err: any) {
-      message.error(err?.message || '加载厂商页失败');
+    } catch (err: unknown) {
+      message.error(getErrorMessage(err) || '加载厂商页失败');
     } finally {
       setProductsLoading(false);
       setSeriesLoading(false);
@@ -1481,8 +1481,8 @@ export const IntelPage: React.FC = () => {
       });
       setProductPage(next);
       if (list.length === 0) message.info('没有更多了');
-    } catch (err: any) {
-      message.error(err?.message || '加载更多失败');
+    } catch (err: unknown) {
+      message.error(getErrorMessage(err) || '加载更多失败');
     } finally {
       setProductsLoading(false);
     }
@@ -1494,8 +1494,8 @@ export const IntelPage: React.FC = () => {
     try {
       setProducts(await fetchProducts(companyFilterId, category, order, 1));
       setProductPage(1);
-    } catch (err: any) {
-      message.error(err?.message || '加载产品失败');
+    } catch (err: unknown) {
+      message.error(getErrorMessage(err) || '加载产品失败');
     } finally {
       setProductsLoading(false);
     }
@@ -1578,8 +1578,8 @@ export const IntelPage: React.FC = () => {
       }
       setSearchFallback(fallback);
       setSearchHits(hits);
-    } catch (err: any) {
-      message.error(err?.message || '搜索失败');
+    } catch (err: unknown) {
+      message.error(getErrorMessage(err) || '搜索失败');
       setSearchHits([]);
     } finally {
       setSearching(false);
@@ -1609,8 +1609,8 @@ export const IntelPage: React.FC = () => {
       const d = await fetchAlbumDetail(album.itemId);
       setAlbumDetail(d);
       setAlbumPics(d.pics);
-    } catch (err: any) {
-      message.error(err?.message || '加载相册失败');
+    } catch (err: unknown) {
+      message.error(getErrorMessage(err) || '加载相册失败');
     } finally {
       setPicsLoading(false);
     }

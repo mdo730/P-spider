@@ -32,7 +32,7 @@
       },
       "shell": {
         "all": true,
-        "open": ".*",
+        "open": "^https?://",
         "scope": [
           {
             "name": "explorer",
@@ -82,7 +82,7 @@
       "iconPath": "icons/icon.ico"
     },
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; img-src 'self' data: blob: https: http:; media-src 'self' data: blob: https: http:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost https: http: ws: wss:; font-src 'self' data:"
     },
     "windows": [
       {

@@ -1,3 +1,4 @@
+import { getErrorMessage } from '../utils/error';
 import { invoke } from '@tauri-apps/api';
 import { Response } from '../interfaces/Response';
 import { RequestOptions } from '../interfaces/RequestOptions';
@@ -8,6 +9,7 @@ import { delay } from '../utils';
 
 const MAX_RETRY_COUNT = 16;
 const MAX_RETRY_DELAY = 16000;
+const INITIAL_RETRY_DELAY = 100;
 
 let log: ICategoriedLogger;
 
@@ -35,8 +37,8 @@ export async function request(options: RequestOptions) {
     : '';
   const maxRetry = options.maxRetry ?? MAX_RETRY_COUNT;
   let remainingRetryCount = maxRetry;
-  let retryDelay = 100;
-  let lastErr: any;
+  let retryDelay = INITIAL_RETRY_DELAY;
+  let lastErr: unknown;
 
   while (remainingRetryCount > 0) {
     try {
@@ -49,10 +51,10 @@ export async function request(options: RequestOptions) {
         R.defaultTo({}, options.headers),
         options.responseType,
       );
-    } catch (err: any) {
+    } catch (err: unknown) {
       lastErr = err;
       // 响应体不是 JSON（如站点返回 HTML/空体/被墙页）→ 重试无意义，立即失败，避免长时间退避卡住
-      const msg = String(err?.message ?? err);
+      const msg = String(getErrorMessage(err) ?? err);
       if (
         /decoding response body|expected value|invalid type|EOF while parsing|key must be a string/i.test(
           msg,
@@ -74,8 +76,9 @@ export async function request(options: RequestOptions) {
     }
   }
 
+  const msg = lastErr instanceof Error ? lastErr.message : String(lastErr);
   log.error('Max retry count reached, last error:', lastErr);
-  throw lastErr;
+  throw new Error(msg);
 }
 
 let reqIdGlobal = 0;

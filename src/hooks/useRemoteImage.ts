@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { request } from '../ipc/network';
+import { BlobCache } from '../utils/blob-cache';
 
-const blobCache = new Map<string, string>();
+const blobCache = new BlobCache();
 
 interface RemoteImageOptions {
   /** 绕过代理直连（如 hpoi 等国内站点） */

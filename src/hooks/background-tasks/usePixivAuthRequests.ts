@@ -1,3 +1,4 @@
+import { getErrorMessage } from '../../utils/error';
 import { invoke } from '@tauri-apps/api';
 import { App } from 'antd';
 import { useEffect } from 'react';
@@ -22,9 +23,9 @@ export function usePixivAuthRequests() {
         void invoke('set_pixiv_auth_scheme', { enabled: false }).catch(
           () => undefined,
         );
-      } catch (err: any) {
+      } catch (err: unknown) {
         if (!alive) return;
-        message.error(err?.message || 'pixiv 登录失败');
+        message.error(getErrorMessage(err) || 'pixiv 登录失败');
       }
     };
     const tick = async () => {

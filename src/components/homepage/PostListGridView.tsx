@@ -1,4 +1,4 @@
-/* eslint-disable react/prop-types */
+import { getErrorMessage } from '../../utils/error';
 import { LoadingOutlined } from '@ant-design/icons';
 import { App } from 'antd';
 import dayjs from 'dayjs';
@@ -55,8 +55,8 @@ export const PostListGridView: React.FC = () => {
       } else {
         await state.loadMorePostList();
       }
-    } catch (err: any) {
-      message.error(err.message);
+    } catch (err: unknown) {
+      message.error(getErrorMessage(err));
     }
 
     state = useHomepageStore.getState();
@@ -104,9 +104,9 @@ export const PostListGridView: React.FC = () => {
                 media: toPlatformMedia(media),
               });
               message.success('已添加到下载队列');
-            } catch (err: any) {
+            } catch (err: unknown) {
               log.error(err);
-              message.error(`创建下载任务失败：${err?.message}`);
+              message.error(`创建下载任务失败：${getErrorMessage(err)}`);
             }
           }
 

@@ -1,4 +1,4 @@
-/* eslint-disable react/prop-types */
+import { getErrorMessage } from '../utils/error';
 import {
   ArrowLeftOutlined,
   CheckOutlined,
@@ -262,9 +262,9 @@ export const MoeyoPage: React.FC = () => {
       try {
         setItems(await refreshSitePosts());
         lastRefreshAt = Date.now();
-      } catch (err: any) {
+      } catch (err: unknown) {
         log.error(err);
-        if (!shown) message.error(err?.message || '读取文章列表失败');
+        if (!shown) message.error(getErrorMessage(err) || '读取文章列表失败');
       } finally {
         setLoading(false);
       }
@@ -335,9 +335,9 @@ export const MoeyoPage: React.FC = () => {
           count,
         ).catch(() => undefined);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       log.error(err);
-      message.error(err?.message || '读取文章详情失败');
+      message.error(getErrorMessage(err) || '读取文章详情失败');
     } finally {
       setDetailLoading(false);
     }
@@ -357,8 +357,8 @@ export const MoeyoPage: React.FC = () => {
         s ? { ...s, imageCount: n || s.imageCount, exists: n > 0 } : s,
       );
       await load();
-    } catch (err: any) {
-      message.error(err?.message || '保存失败');
+    } catch (err: unknown) {
+      message.error(getErrorMessage(err) || '保存失败');
     } finally {
       setSaving(false);
     }
@@ -381,8 +381,8 @@ export const MoeyoPage: React.FC = () => {
     );
     try {
       await setHpoiMatch(selected, hpoi);
-    } catch (err: any) {
-      message.error(err?.message || 'hpoi 关联保存失败');
+    } catch (err: unknown) {
+      message.error(getErrorMessage(err) || 'hpoi 关联保存失败');
     }
   };
 
@@ -633,8 +633,8 @@ export const MoeyoPage: React.FC = () => {
         } else if (key === 'openImg' && media.url) {
           await openUrl(media.url);
         }
-      } catch (err: any) {
-        message.error(err?.message || '操作失败');
+      } catch (err: unknown) {
+        message.error(getErrorMessage(err) || '操作失败');
       }
     },
   });

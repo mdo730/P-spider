@@ -1,4 +1,4 @@
-/* eslint-disable react/prop-types */
+import { getErrorMessage } from '../../utils/error';
 import {
   App,
   Button,
@@ -114,9 +114,9 @@ export const ArchiverDownloadController: React.FC = () => {
           `已订阅 ${creator.name || creator.username}，将每 ${intervalMin} 分钟检查一次新帖并自动下载`,
         );
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       log.error(err);
-      message.error(`订阅失败：${err?.message || '未知原因'}`);
+      message.error(`订阅失败：${getErrorMessage(err) || '未知原因'}`);
     } finally {
       setSubscribing(false);
     }
@@ -141,9 +141,9 @@ export const ArchiverDownloadController: React.FC = () => {
           ? `已切换 ${creator.name || creator.username} 为观察（只进时间流）`
           : `已观察 ${creator.name || creator.username}（只进时间流，不下载）`,
       );
-    } catch (err: any) {
+    } catch (err: unknown) {
       log.error(err);
-      message.error(`观察失败：${err?.message || '未知原因'}`);
+      message.error(`观察失败：${getErrorMessage(err) || '未知原因'}`);
     } finally {
       setSubscribing(false);
     }

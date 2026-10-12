@@ -1,3 +1,4 @@
+import { getErrorMessage } from '../utils/error';
 import dayjs from 'dayjs';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
@@ -18,7 +19,7 @@ let _log: ICategoriedLogger;
 
 function log() {
   if (_log) return _log;
-  _log = window.log.category('FIG');
+  _log = window.log.category('MOE');
   return _log;
 }
 
@@ -98,9 +99,9 @@ export const useMoeyoStore = create(
           try {
             const newest = await fetchNewestPostDate();
             set({ baselineDate: newest });
-          } catch (err: any) {
+          } catch (err: unknown) {
             log().error('moeyo 初始化基线失败', err);
-            set({ lastError: err?.message || '初始化失败' });
+            set({ lastError: getErrorMessage(err) || '初始化失败' });
           }
         }
       },
@@ -132,12 +133,12 @@ export const useMoeyoStore = create(
             baselineDate: newest ?? get().baselineDate,
           });
           return result;
-        } catch (err: any) {
+        } catch (err: unknown) {
           log().error('moeyo 建库失败', err);
           set({
             running: false,
             progress: null,
-            lastError: err?.message || '建库失败',
+            lastError: getErrorMessage(err) || '建库失败',
           });
         }
       },
@@ -167,13 +168,13 @@ export const useMoeyoStore = create(
             lastCheckedAt: Date.now(),
             baselineDate: res.newestDate ?? get().baselineDate,
           });
-        } catch (err: any) {
+        } catch (err: unknown) {
           log().error('moeyo 追新失败', err);
           set({
             running: false,
             progress: null,
             lastCheckedAt: Date.now(),
-            lastError: err?.message || '检查失败',
+            lastError: getErrorMessage(err) || '检查失败',
           });
         }
       },

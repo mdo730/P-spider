@@ -1,4 +1,3 @@
-/* eslint-disable react/prop-types */
 import { CloseOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons';
 import React, { useEffect } from 'react';
 import ReactDOM from 'react-dom';

@@ -1,3 +1,4 @@
+import { getErrorMessage } from '../utils/error';
 import { create } from 'zustand';
 import {
   ThumbCacheProgress,
@@ -39,13 +40,13 @@ export const useThumbCacheStore = create<ThumbCacheStore>((set, get) => ({
         set({ progress, phase: progress.phase });
       }, controller.signal);
       set({ running: false, phase: 'idle', progress: null, result });
-    } catch (err: any) {
+    } catch (err: unknown) {
       log.error('生成缩略图缓存失败', err);
       set({
         running: false,
         phase: 'idle',
         progress: null,
-        error: err?.message || '生成失败',
+        error: getErrorMessage(err) || '生成失败',
       });
     } finally {
       controller = null;

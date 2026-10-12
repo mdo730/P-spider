@@ -108,11 +108,36 @@ export const REPLACER_MAP: Record<
     replacer: R.path(['media', 'height']),
   },
   MEDIA_INDEX: {
-    desc: '资源索引',
+    desc: '资源索引（帖子内顺序，从 1 起）',
+    params: [
+      {
+        name: 'w',
+        desc: '补零宽度（如 w=2 → 01、02）',
+        default: '0',
+      },
+    ],
+    replacer: (data, params) => {
+      const idx =
+        (data.post.medias?.findIndex((m) => m.id === data.media.id) ?? -1) + 1;
+      const width = Number(params?.w) || 0;
+      const s = String(idx);
+      return width > 0 ? s.padStart(width, '0') : s;
+    },
+  },
+  /** 帖子标题（归档站为标题；X/pixiv 通常为空） */
+  TITLE: {
+    desc: '帖子标题（归档站）',
     replacer: (data) =>
-      (
-        data.post.medias!.findIndex((media) => media.id === data.media.id) + 1
-      ).toString(),
+      data.post.text || data.media.fileName || data.media.id || '',
+  },
+  /** 原始文件名（不含扩展名；归档站附件保留的大多为随机名） */
+  FILE_NAME: {
+    desc: '原始文件名（不含扩展名）',
+    replacer: (data) => {
+      const n = data.media.fileName || '';
+      const i = n.lastIndexOf('.');
+      return i > 0 ? n.slice(0, i) : n;
+    },
   },
   CONTENT: {
     desc: '推文内容',

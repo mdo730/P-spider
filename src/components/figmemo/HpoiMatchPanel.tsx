@@ -1,4 +1,4 @@
-/* eslint-disable react/prop-types */
+import { getErrorMessage } from '../../utils/error';
 import { Button, Input, Spin, Tag, App } from 'antd';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -69,12 +69,12 @@ export const HpoiMatchPanel: React.FC<{
         const match = await fetchHpoiItemById(itemId);
         onConfirm(match);
         message.success(`已关联 hpoi：${match.nameCN}`);
-      } catch (e: any) {
+      } catch (e: unknown) {
         if (fallback) {
           onConfirm(candidateToMatch(fallback));
           message.success(`已关联 hpoi：${fallback.nameCN}`);
         } else {
-          message.error(e?.message || '解析 hpoi 词条失败');
+          message.error(getErrorMessage(e) || '解析 hpoi 词条失败');
         }
       } finally {
         setSaving(false);
@@ -91,7 +91,7 @@ export const HpoiMatchPanel: React.FC<{
       const info = (parse || parseFigmemoFields)(item.title, htmlRef.current);
       findHpoiCandidates(info, 2, 1, exclude)
         .then(setCands)
-        .catch((e: any) => setErr(e?.message || '查询失败'))
+        .catch((e: any) => setErr(getErrorMessage(e) || '查询失败'))
         .finally(() => setLoading(false));
     },
     [item.title, parse],

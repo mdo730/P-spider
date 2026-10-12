@@ -1,3 +1,4 @@
+import { getErrorMessage } from '../utils/error';
 import { fs, path } from '@tauri-apps/api';
 import { useAppStateStore } from '../stores/app-state';
 import { useSettingsStore } from '../stores/settings';
@@ -11,66 +12,23 @@ import {
   visionStop,
   visionTag,
 } from './wd14';
+import {
+  DEFAULT_MODEL,
+  IMAGE_EXT,
+  isDone,
+  makeRecord,
+  VISUAL_MAP_VERSION,
+  VisualRecord,
+  VisionProgress,
+} from './vision-core';
+
+export type { VisualRecord, VisionProgress };
+export { effectiveItems, VISUAL_MAP_VERSION } from './vision-core';
 
 /**
  * fig-memo 视觉标签：给文章取图 → WD14 打标 → 受控词表归类 → 存索引。
  * （自用功能；索引文件 figmemo-visual-tags.jsonl）
  */
-
-export const VISUAL_MAP_VERSION = 1;
-const ENGINE = 'wd14-moat-v2';
-
-export interface VisualRecord {
-  postId: string;
-  /** 自动识别结果（WD14） */
-  items: VisionTagItem[];
-  unknown: string[];
-  /** 实际使用图片数 */
-  images: number;
-  /** 当时使用的取图数上限（1/5/60），用于设置调大后自动重跑 */
-  k: number;
-  engine: string;
-  mapVersion: number;
-  updatedAt: number;
-  /** 打标失败的图片（便于排查） */
-  errors?: string[];
-  /** 手动补充的标签（重扫不覆盖） */
-  added?: VisionTagItem[];
-  /** 手动删除的标签 key（cat|zh；重扫不覆盖） */
-  removed?: string[];
-}
-
-function tagKey(it: { cat: string; zh: string }): string {
-  return `${it.cat}|${it.zh}`;
-}
-
-/** 有效视觉标签 = (auto − removed) ∪ added */
-export function effectiveItems(rec: VisualRecord): VisionTagItem[] {
-  const removed = new Set(rec.removed || []);
-  const map = new Map<string, VisionTagItem>();
-  for (const it of rec.items) {
-    const key = tagKey(it);
-    if (removed.has(key)) continue;
-    map.set(key, it);
-  }
-  for (const it of rec.added || []) {
-    map.set(tagKey(it), it);
-  }
-  return [...map.values()];
-}
-
-/**
- * 是否已成功识别：
- * - 无图（images=0）→ 完成；
- * - 有图但零标签 → 失败，重试；
- * - 已识别的取图数 k 需 ≥ 当前设置（设置调大则重跑）。
- */
-function isDone(rec: VisualRecord | undefined, k: number): boolean {
-  if (!rec) return false;
-  if (rec.images === 0) return true;
-  if (rec.items.length + rec.unknown.length === 0) return false;
-  return (rec.k || 0) >= k;
-}
 
 let log: ICategoriedLogger;
 function logger() {
@@ -82,9 +40,9 @@ async function visualTagsPath(): Promise<string> {
   return await path.join(await path.appDataDir(), 'figmemo-visual-tags.jsonl');
 }
 
-/** 读取索引（postId → 记录，后写覆盖前写） */
+/** 读取索引（postId → 记录，后写覆盖前写；内置基礎种子兜底，本地记录优先） */
 export async function readVisualTags(): Promise<Map<string, VisualRecord>> {
-  const map = new Map<string, VisualRecord>();
+  const map = new Map(await visualSeed());
   try {
     const file = await visualTagsPath();
     if (!(await fs.exists(file))) return map;
@@ -105,14 +63,42 @@ export async function readVisualTags(): Promise<Map<string, VisualRecord>> {
   return map;
 }
 
+/** 内置基础种子（懒加载）：5 张 + swinv2 v3 的基线，用户可用更好模型/更多张数重跑升级 */
+let _seedMap: Map<string, VisualRecord> | null = null;
+async function visualSeed(): Promise<Map<string, VisualRecord>> {
+  if (_seedMap) return _seedMap;
+  const map = new Map<string, VisualRecord>();
+  try {
+    const j = (await import('../data/figmemo-visual-seed.json'))
+      .default as unknown as Record<
+      string,
+      { items: [string, string][]; k: number; engine: string }
+    >;
+    for (const [postId, s] of Object.entries(j)) {
+      map.set(postId, {
+        postId,
+        items: s.items.map(([cat, zh]) => ({ cat, zh, raws: [] })),
+        unknown: [],
+        images: 1,
+        k: s.k || 5,
+        engine: s.engine || DEFAULT_MODEL,
+        mapVersion: VISUAL_MAP_VERSION,
+        updatedAt: 0,
+      });
+    }
+  } catch (err) {
+    logger().warn('加载视觉标签种子失败', err);
+  }
+  _seedMap = map;
+  return map;
+}
+
 async function appendVisualRecord(rec: VisualRecord): Promise<void> {
   const file = await visualTagsPath();
   await fs.writeTextFile(file, JSON.stringify(rec) + '\n', { append: true });
 }
 
 // ---------- 取图 ----------
-
-const IMAGE_EXT = /\.(jpe?g|png|webp|bmp|gif)$/i;
 
 function proxyAndAppState() {
   const settings = useSettingsStore.getState();
@@ -180,19 +166,36 @@ async function invokeDownload(
   });
 }
 
+/** WD14 临时图缓存根目录（appCacheDir/wd14） */
+async function imageCacheRoot(): Promise<string> {
+  return await path.join(await path.appCacheDir(), 'wd14');
+}
+
+/** 清空整个临时图缓存（每轮识别前调用） */
+async function clearImageCache(): Promise<void> {
+  try {
+    await fs.removeDir(await imageCacheRoot(), { recursive: true });
+  } catch {
+    // 不存在/占用忽略
+  }
+}
+
+/** 删掉某篇的临时图缓存（识别完即释放，避免占 C 盘） */
+async function removePostImageCache(postId: string): Promise<void> {
+  try {
+    await fs.removeDir(await path.join(await imageCacheRoot(), postId), {
+      recursive: true,
+    });
+  } catch {
+    // ignore
+  }
+}
+
 // ---------- 跑批 ----------
 
 let stopRequested = false;
 export function requestVisionStop(): void {
   stopRequested = true;
-}
-
-export interface VisionProgress {
-  done: number;
-  total: number;
-  currentTitle: string;
-  /** 当前是第几篇（1-based） */
-  index: number;
 }
 
 /**
@@ -207,13 +210,13 @@ export async function runVisionForItems(
   const seen = existing || (await readVisualTags());
   stopRequested = false;
   const k = imagesPerPost();
-  const todo = items.filter((it) => !isDone(seen.get(it.postId), k));
+  const vision = useSettingsStore.getState().vision || {};
+  const modelId = vision.model || DEFAULT_MODEL;
+  const todo = items.filter((it) => !isDone(seen.get(it.postId), k, modelId));
   const total = todo.length;
   if (total === 0) return 0;
 
-  const vision = useSettingsStore.getState().vision || {};
   const useBuiltin = (vision.engine || 'builtin') === 'builtin';
-  const modelId = vision.model || 'wd-v1-4-moat-tagger-v2';
   if (useBuiltin) {
     if (!(await modelReady(modelId))) {
       throw new Error(
@@ -224,6 +227,7 @@ export async function runVisionForItems(
     await visionStart();
   }
 
+  await clearImageCache(); // 清掉上轮遗留的临时图
   let done = 0;
   try {
     for (let i = 0; i < todo.length; i++) {
@@ -250,6 +254,7 @@ export async function runVisionForItems(
               undefined,
               prev?.added,
               prev?.removed,
+              modelId,
             ),
           );
           done++;
@@ -285,44 +290,36 @@ export async function runVisionForItems(
             errors,
             prev?.added,
             prev?.removed,
+            modelId,
           ),
         );
         done++;
-      } catch (err) {
+      } catch (err: unknown) {
         logger().error('视觉识别失败', { postId: item.postId, err });
-        onProgress({ done, total, index: i + 1, currentTitle: item.title });
-        throw err;
+        // 单篇失败：记一条带 errors 的记录（可重试），**不中断整批**
+        await appendVisualRecord(
+          makeRecord(
+            item.postId,
+            [],
+            [],
+            0,
+            k,
+            [String(getErrorMessage(err) || err)],
+            prev?.added,
+            prev?.removed,
+            modelId,
+          ),
+        );
+        done++;
+      } finally {
+        // 识别完即删该篇临时图（本地已下载的没有临时图，忽略）
+        await removePostImageCache(item.postId);
       }
     }
   } finally {
     if (!useBuiltin) await visionStop();
   }
   return done;
-}
-
-function makeRecord(
-  postId: string,
-  items: VisionTagItem[],
-  unknown: string[],
-  images: number,
-  k: number,
-  errors?: string[],
-  added?: VisionTagItem[],
-  removed?: string[],
-): VisualRecord {
-  return {
-    postId,
-    items,
-    unknown: [...new Set(unknown)].slice(0, 200),
-    images,
-    k,
-    engine: ENGINE,
-    mapVersion: VISUAL_MAP_VERSION,
-    updatedAt: Date.now(),
-    ...(errors && errors.length ? { errors: errors.slice(0, 10) } : {}),
-    ...(added && added.length ? { added } : {}),
-    ...(removed && removed.length ? { removed } : {}),
-  };
 }
 
 /** 更新某篇的手动覆盖（added/removed），保留 auto；重扫不会再碰这些 */
@@ -342,6 +339,7 @@ export async function setVisualOverride(
     prev?.errors,
     added,
     removed,
+    prev?.engine,
   );
   await appendVisualRecord(rec);
   return rec;

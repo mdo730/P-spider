@@ -1,4 +1,5 @@
-/* eslint-disable react/prop-types */
+import { getErrorMessage } from '../utils/error';
+import { LeftOutlined, RightOutlined } from '@ant-design/icons';
 import { App, Breadcrumb, Button, Empty } from 'antd';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { PageHeader } from '../components/PageHeader';
@@ -31,6 +32,7 @@ export const LibraryPage: React.FC = () => {
   const [keyword, setKeyword] = useState('');
   const [opened, setOpened] = useState<LibraryRootFolder | null>(null);
   const [subStack, setSubStack] = useState<LibrarySubFolder[]>([]);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const loadFolders = useCallback(
     async (refresh = false) => {
@@ -49,10 +51,10 @@ export const LibraryPage: React.FC = () => {
             mtime: mtimes[index] ?? undefined,
           })),
         );
-      } catch (err: any) {
+      } catch (err: unknown) {
         log.error(err);
         message.error(
-          err?.message || '读取保存目录失败，请检查设置中的保存路径',
+          getErrorMessage(err) || '读取保存目录失败，请检查设置中的保存路径',
         );
         setRootFolders([]);
       } finally {
@@ -153,12 +155,23 @@ export const LibraryPage: React.FC = () => {
           description="尚未设置保存目录，请先到「设置 → 下载」中设置保存路径"
         />
       ) : (
-        <div className="flex-1 min-h-0 flex gap-4 pb-4">
-          <CategorySidebar
-            selectedId={selectedId}
-            onSelect={handleSelectCategory}
-            counts={counts}
-          />
+        <div className="flex-1 min-h-0 flex gap-2 pb-4">
+          {!sidebarCollapsed && (
+            <CategorySidebar
+              selectedId={selectedId}
+              onSelect={handleSelectCategory}
+              counts={counts}
+            />
+          )}
+          <button
+            type="button"
+            aria-label={sidebarCollapsed ? '展开标签树' : '折叠标签树'}
+            title={sidebarCollapsed ? '展开标签树' : '折叠标签树'}
+            onClick={() => setSidebarCollapsed((v) => !v)}
+            className="flex w-7 shrink-0 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-400 transition-colors hover:text-gray-800"
+          >
+            {sidebarCollapsed ? <RightOutlined /> : <LeftOutlined />}
+          </button>
           <section
             className="flex-1 min-w-0 flex flex-col"
             aria-label="本地库内容"

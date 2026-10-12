@@ -1,9 +1,13 @@
-/* eslint-disable react/prop-types */
 import { App, Button, Checkbox, Modal, Spin } from 'antd';
 import { CopyOutlined } from '@ant-design/icons';
 import React, { useEffect, useMemo, useState } from 'react';
 import { groupPromptTags, PromptTag, tagImageSource } from '../services/wd14';
 import { useWd14PromptStore } from '../stores/wd14-prompt';
+import {
+  visionCatChipActiveStyle,
+  visionCatChipStyle,
+  visionCatColor,
+} from '../utils/tag-color';
 import { copyTextToClipboard } from '../utils/clipboard';
 
 /**
@@ -109,7 +113,12 @@ export const Wd14TagDialog: React.FC = () => {
                   className="mb-1.5 flex cursor-pointer select-none items-center gap-2"
                   onClick={() => toggleGroup(g.tags)}
                 >
-                  <span className="text-sm font-medium">{g.cat}</span>
+                  <span
+                    className="text-sm font-medium"
+                    style={{ color: visionCatColor(g.cat) }}
+                  >
+                    {g.cat}
+                  </span>
                   <span className="text-xs text-gray-400">{g.tags.length}</span>
                   <Checkbox
                     className="ml-auto"
@@ -131,18 +140,16 @@ export const Wd14TagDialog: React.FC = () => {
                         key={t.en}
                         type="button"
                         onClick={() => toggleTag(t.en)}
-                        className={
-                          'rounded-full border px-2 py-0.5 text-xs leading-5 transition-colors ' +
-                          (on
-                            ? 'border-sky-500 bg-sky-500 text-white'
-                            : 'border-gray-200 bg-white text-gray-600 hover:border-sky-400')
+                        className="rounded-full border px-2 py-0.5 text-xs leading-5 transition-colors"
+                        style={
+                          on
+                            ? visionCatChipActiveStyle(g.cat)
+                            : visionCatChipStyle(g.cat)
                         }
                         title={t.en}
                       >
                         {t.zh ? `${t.zh} ` : ''}
-                        <span className={on ? 'text-sky-100' : 'text-gray-400'}>
-                          {t.en}
-                        </span>
+                        <span className="opacity-70">{t.en}</span>
                       </button>
                     );
                   })}

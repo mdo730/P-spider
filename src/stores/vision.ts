@@ -40,7 +40,7 @@ export const useVisionStore = create<VisionStore>((set, get) => ({
       try {
         const existing = await readVisualTags();
         await runVisionForItems(items, (p) => set({ progress: p }), existing);
-      } catch (err: any) {
+      } catch (err: unknown) {
         log().error('视觉识别失败', err);
       } finally {
         set((s) => ({

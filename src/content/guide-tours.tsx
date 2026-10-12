@@ -1,4 +1,3 @@
-/* eslint-disable react/prop-types */
 import React from 'react';
 import { MockCard, MockFrame, MockRow, Spot } from '../components/guide/MockUI';
 import pixivR18Img from '../assets/guide/pixiv-r18.png';
@@ -523,6 +522,145 @@ const FigmemoWithTreeMock: React.FC<{ target?: 'tree' }> = ({ target }) => (
   </div>
 );
 
+/** 假「本地库」页：文件夹网格 + 识别/视觉筛选 + 紫色眼角标 + 筛选浮窗 */
+const LibraryVisualMock: React.FC<{ target?: 'recognize' | 'panel' }> = ({
+  target,
+}) => (
+  <div className="relative flex h-full flex-col gap-2">
+    <div className="flex items-center gap-1.5 text-[10px]">
+      <div className="flex-1 rounded border border-gray-200 bg-white px-2 py-1 text-gray-400">
+        筛选文件夹名
+      </div>
+      <div className="rounded border border-gray-200 bg-white px-1.5 py-1 text-gray-500">
+        多选
+      </div>
+      {spot(
+        <div className="rounded bg-ant-color-primary px-1.5 py-1 text-white">
+          识别
+        </div>,
+        target === 'recognize',
+      )}
+      <div className="rounded border border-ant-color-primary px-1.5 py-1 text-ant-color-primary">
+        视觉筛选
+      </div>
+    </div>
+    <div className="grid grid-cols-4 gap-1.5">
+      {['作者A', '作者B', '作者C', '作者D', '作者E', '作者F'].map((n, i) => (
+        <div
+          key={n}
+          className="relative overflow-hidden rounded border border-gray-200 bg-white"
+        >
+          <div className="aspect-[4/3] bg-gray-200/70" />
+          {i % 3 === 0 && (
+            <div className="absolute right-0.5 top-0.5 h-3 w-3 rounded-full bg-violet-500" />
+          )}
+          <div className="truncate px-1 py-0.5 text-[9px] text-gray-500">
+            {n}
+          </div>
+        </div>
+      ))}
+    </div>
+    {target === 'panel' && (
+      <div className="absolute bottom-0 left-0 w-44 rounded border border-gray-200 bg-white p-1.5 shadow-lg">
+        <div className="mb-1 flex items-center gap-1 text-[9px] font-medium text-gray-600">
+          视觉标签 <span className="ml-auto text-gray-400">折叠 ▾ ✕</span>
+        </div>
+        <div className="flex flex-wrap gap-1">
+          {['泳衣', '渔网袜', '全身', '注重脚部', '食物', '裸体'].map((t) => (
+            <span
+              key={t}
+              className={`rounded-full border px-1.5 py-0.5 text-[9px] ${
+                t === '渔网袜'
+                  ? 'border-transparent bg-[#9D83E0] text-white'
+                  : 'text-gray-500'
+              }`}
+            >
+              {t}
+            </span>
+          ))}
+        </div>
+      </div>
+    )}
+  </div>
+);
+
+/** 假「本地库」库根视觉筛选结果（平铺命中图片 + 分页） */
+const LibraryMediaMock: React.FC = () => (
+  <div className="flex h-full flex-col gap-2">
+    <div className="flex items-center gap-2 text-[10px] text-gray-500">
+      <span>本地库 · 命中 128 张图</span>
+      <span className="rounded bg-ant-color-primary px-1.5 py-0.5 text-[9px] text-white">
+        视觉筛选 1
+      </span>
+    </div>
+    <div className="grid grid-cols-6 gap-1.5">
+      {Array.from({ length: 24 }).map((_, i) => (
+        <div key={i} className="aspect-square rounded bg-gray-200/70" />
+      ))}
+    </div>
+    <div className="flex items-center justify-center gap-1 text-[9px] text-gray-400">
+      <span>‹</span>
+      <span className="rounded bg-ant-color-primary px-1 text-white">1</span>
+      <span>2</span>
+      <span>3</span>
+      <span>›</span>
+    </div>
+  </div>
+);
+
+/** 假「本地库图片详情」右侧信息条：下半为视觉标签（点即跳转 / 可删） */
+const LibraryDetailMock: React.FC = () => (
+  <div className="relative flex h-full gap-2">
+    <div className="flex-1 rounded bg-gray-200/70" />
+    <div className="flex w-28 shrink-0 flex-col gap-1.5 rounded border border-gray-200 bg-[#16181c] p-1.5 text-white">
+      <div className="flex items-center gap-1">
+        <div className="h-5 w-5 rounded-full bg-white/25" />
+        <div className="h-1.5 w-12 rounded bg-white/30" />
+      </div>
+      <div className="h-1.5 w-full rounded bg-white/15" />
+      <div className="h-1.5 w-4/5 rounded bg-white/15" />
+      <div className="mt-auto border-t border-white/10 pt-1.5">
+        <div className="mb-1 text-[9px] font-medium text-gray-300">
+          视觉标签（点即跳转筛选）
+        </div>
+        <div className="flex flex-wrap gap-1">
+          {['渔网袜', '全身', 'R18'].map((t) => (
+            <span
+              key={t}
+              className="rounded-full border border-white/20 bg-white/10 px-1.5 py-0.5 text-[9px]"
+            >
+              {t} ×
+            </span>
+          ))}
+        </div>
+      </div>
+    </div>
+  </div>
+);
+
+/** 假「本地库」左栏标签树折叠按钮 */
+const LibraryTreeMock: React.FC = () => (
+  <div className="flex h-full gap-1">
+    <div className="flex w-5 items-center justify-center rounded border border-gray-200 bg-white text-[10px] text-gray-400">
+      ‹
+    </div>
+    <div className="w-20 shrink-0 space-y-1 rounded border border-gray-200 bg-white p-1.5">
+      <div className="rounded bg-ant-color-primary px-1.5 py-0.5 text-[10px] text-white">
+        全部
+      </div>
+      {['未打标签', '真人cos', '模型'].map((t) => (
+        <div
+          key={t}
+          className="truncate rounded px-1.5 py-0.5 text-[10px] text-gray-500"
+        >
+          {t}
+        </div>
+      ))}
+    </div>
+    <div className="min-w-0 flex-1 rounded border border-dashed border-gray-200" />
+  </div>
+);
+
 /** 4. 时间流章节 */
 const timelineTour: GuideStep[] = [
   {
@@ -609,8 +747,8 @@ const downloadTour: GuideStep[] = [
   },
   {
     id: 'library',
-    title: '本地库',
-    desc: '设置 →「工具与数据」→ 本地库：一键生成 / 清除缩略图缓存；「重新溯源本地库（联网）」在源推文被删时按文件名找回作者 / 链接；「批量生成视频封面」用系统 ffmpeg 取首帧。',
+    title: '本地库：浏览与维护',
+    desc: '左侧栏「本地库」浏览保存目录里的已下载内容（文件网格 120/页、文件夹网格 60/页）。设置 →「工具与数据」→ 本地库 可一键生成 / 清除缩略图缓存、重新溯源（联网找回作者 / 链接）、批量生成视频封面。',
     render: () => (
       <MockFrame
         activeSidebar="设置"
@@ -623,6 +761,44 @@ const downloadTour: GuideStep[] = [
           </MockCard>
         }
       />
+    ),
+  },
+  {
+    id: 'library-recognize',
+    title: '本地库：视觉识别',
+    desc: '右上「识别」给当前文件夹的图片跑 WD14 视觉识别；多选文件夹后按钮变「识别所选」，库根「识别」则识别当前分类。识别在后台进行、有进度可停；识别过的文件夹 / 图片会带紫色眼睛角标。',
+    render: () => (
+      <MockFrame
+        activeSidebar="本地库"
+        content={<LibraryVisualMock target="recognize" />}
+      />
+    ),
+  },
+  {
+    id: 'library-filter',
+    title: '视觉筛选浮窗',
+    desc: '「视觉筛选」弹出浮窗（可拖动、可折叠、位置会记忆），按分类胶囊筛选，多选为并集 / 交集。换过词表想重识别时，右键文件夹「清除视觉标签」或多选「清除视觉」即可。',
+    render: () => (
+      <MockFrame
+        activeSidebar="本地库"
+        content={<LibraryVisualMock target="panel" />}
+      />
+    ),
+  },
+  {
+    id: 'library-media',
+    title: '库根筛选：直接出图',
+    desc: '在库根用视觉筛选时，不再只筛文件夹，而是把当前范围内所有命中的图片直接平铺出来（跨文件夹聚合、分页），方便批量查看与清理。',
+    render: () => (
+      <MockFrame activeSidebar="本地库" content={<LibraryMediaMock />} />
+    ),
+  },
+  {
+    id: 'library-detail',
+    title: '图片详情：标签管理 / 快捷跳转',
+    desc: '在文件夹里点图看大图，右侧信息条下半就是该图的视觉标签：点标签直接跳转筛选本目录、点 × 删除、也能手动加；图片右键还有「编辑视觉标签」。',
+    render: () => (
+      <MockFrame activeSidebar="本地库" content={<LibraryDetailMock />} />
     ),
   },
 ];
@@ -663,6 +839,14 @@ const figmemoTour: GuideStep[] = [
         activeSidebar="fig-memo"
         content={<FigmemoWithTreeMock target="tree" />}
       />
+    ),
+  },
+  {
+    id: 'visual',
+    title: '视觉标签',
+    desc: '右下角 ⚡ 对当前筛选的文章跑 WD14 视觉识别（后台运行、可停），⚙ 打开「视觉筛选」浮窗（可拖动 / 折叠）按视觉标签筛文章；识别过的文章卡片带紫色眼角标。',
+    render: () => (
+      <MockFrame activeSidebar="fig-memo" content={<ArticleGridMock />} />
     ),
   },
   {
@@ -752,6 +936,14 @@ const sidebarTour: GuideStep[] = [
           </MockCard>
         }
       />
+    ),
+  },
+  {
+    id: 'tree-collapse',
+    title: '折叠标签树',
+    desc: '本地库左栏的标签树可折叠：标签树与内容之间的竖条按钮，点 ‹ 折叠、点 › 展开，把浏览区让得更宽。',
+    render: () => (
+      <MockFrame activeSidebar="本地库" content={<LibraryTreeMock />} />
     ),
   },
   {

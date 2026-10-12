@@ -1,4 +1,4 @@
-/* eslint-disable react/prop-types */
+import { getErrorMessage } from '../utils/error';
 import {
   App,
   Avatar,
@@ -172,8 +172,8 @@ export const SubscriptionPage: React.FC = () => {
     try {
       await checkAll();
       message.success('所有订阅已检查完毕');
-    } catch (err: any) {
-      message.error(`检查失败：${err?.message || '未知原因'}`);
+    } catch (err: unknown) {
+      message.error(`检查失败：${getErrorMessage(err) || '未知原因'}`);
     } finally {
       setCheckingAll(false);
     }
@@ -385,7 +385,7 @@ const SubscriptionItem: React.FC<SubscriptionItemProps> = ({
               title={`${sub.username}（站内打开）`}
               onClick={() =>
                 openSubInApp(sub).catch((err: any) =>
-                  message.error(err?.message || '站内打开失败'),
+                  message.error(getErrorMessage(err) || '站内打开失败'),
                 )
               }
             >
@@ -640,7 +640,7 @@ const SubscriptionCompact: React.FC<{
           onClick={(e) => {
             e.stopPropagation();
             openSubInApp(sub).catch((err: any) =>
-              message.error(err?.message || '站内打开失败'),
+              message.error(getErrorMessage(err) || '站内打开失败'),
             );
           }}
         >

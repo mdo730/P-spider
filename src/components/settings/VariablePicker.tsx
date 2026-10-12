@@ -1,4 +1,3 @@
-/* eslint-disable react/prop-types */
 import React from 'react';
 import { clipboard } from '@tauri-apps/api';
 import { Button, Tooltip, App } from 'antd';

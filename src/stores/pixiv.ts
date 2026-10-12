@@ -1,3 +1,4 @@
+import { getErrorMessage } from '../utils/error';
 import { create } from 'zustand';
 import dayjs, { Dayjs } from 'dayjs';
 import {
@@ -107,9 +108,9 @@ export const usePixivStore = create<PixivStore>((set) => ({
         loading: false,
         hasMore: page.cursors.illust !== null || page.cursors.manga !== null,
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (mySeq !== seq) return;
-      const message = err?.message || '加载失败';
+      const message = getErrorMessage(err) || '加载失败';
       set({
         userInfo: { loading: false, data: undefined },
         works: [],
@@ -145,9 +146,12 @@ export const usePixivStore = create<PixivStore>((set) => ({
           hasMore: page.cursors.illust !== null || page.cursors.manga !== null,
         };
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (mySeq === seq) {
-        set({ loadingMore: false, error: err?.message || '加载更多失败' });
+        set({
+          loadingMore: false,
+          error: getErrorMessage(err) || '加载更多失败',
+        });
       }
       throw err;
     }

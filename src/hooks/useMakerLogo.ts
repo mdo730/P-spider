@@ -2,9 +2,10 @@ import { fs, path } from '@tauri-apps/api';
 import { useEffect, useState } from 'react';
 import { request } from '../ipc/network';
 import { makerLogoSource } from '../services/maker-logo';
+import { BlobCache } from '../utils/blob-cache';
 
 const LOGO_SIZE = 64;
-const memCache = new Map<string, string>();
+const memCache = new BlobCache(800);
 
 let _log: ICategoriedLogger;
 

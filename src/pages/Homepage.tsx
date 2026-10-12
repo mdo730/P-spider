@@ -1,4 +1,3 @@
-/* eslint-disable react/prop-types */
 import { Avatar, Button, Input, Space, App } from 'antd';
 import React, { useRef } from 'react';
 import { PageHeader } from '../components/PageHeader';
@@ -48,7 +47,7 @@ export const Homepage: React.FC = () => {
     try {
       await loadUser(sn);
       addSearchHistory(sn);
-    } catch (err: any) {
+    } catch (err: unknown) {
       log.error(err);
       message.error('加载失败，请检查用户名 / 链接是否正确');
     }

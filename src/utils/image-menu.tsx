@@ -1,3 +1,4 @@
+import { getErrorMessage } from '../utils/error';
 import {
   CopyOutlined,
   FolderOpenOutlined,
@@ -157,8 +158,8 @@ export async function handleImageMenuKey(
       return true;
     }
     return false;
-  } catch (err: any) {
-    message.error(err?.message || '操作失败');
+  } catch (err: unknown) {
+    message.error(getErrorMessage(err) || '操作失败');
     return true;
   }
 }

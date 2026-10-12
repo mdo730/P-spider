@@ -1,4 +1,4 @@
-/* eslint-disable react/prop-types */
+import { getErrorMessage } from '../utils/error';
 import React, { useEffect, useState } from 'react';
 import { invoke, dialog, fs } from '@tauri-apps/api';
 import clsx from 'clsx';
@@ -43,6 +43,7 @@ import { useSubscriptionStore } from '../stores/subscription';
 import { clearThumbCache, getThumbCacheStats } from '../utils/thumbnail';
 import { LibraryFolderStats, formatBytes } from '../utils/library';
 import { useLibraryTraceStore } from '../stores/library-trace';
+import { useArchiverRenameStore } from '../stores/archiver-rename';
 import { useVideoCoverCacheStore } from '../stores/library-video-cover-cache';
 import { useThumbCacheStore } from '../stores/library-thumb-cache';
 import { useFigmemoStore } from '../stores/figmemo';
@@ -78,6 +79,13 @@ import {
   releaseVision,
   setupExternal,
 } from '../services/wd14';
+import {
+  clearStorage,
+  formatStorage,
+  getStorageUsage,
+  StorageUsage,
+  storageTotal,
+} from '../services/storage';
 import { useRemoteImageSrc } from '../hooks/useRemoteImage';
 import { SIDEBAR_HIDEABLE_IDS, applySidebarOrder } from '../constants/routes';
 
@@ -103,6 +111,7 @@ const SECTION_GROUP: Record<string, string> = {
   library: 'tools',
   imageSearch: 'tools',
   dataBackup: 'tools',
+  storage: 'tools',
   vision: 'tools',
 };
 const groupOf = (name: string) => SECTION_GROUP[name] ?? 'general';
@@ -121,6 +130,7 @@ export const Settings: React.FC = () => {
   const [rebuildingTags, setRebuildingTags] = useState(false);
   const [cacheStats, setCacheStats] = useState<LibraryFolderStats | null>(null);
   const trace = useLibraryTraceStore();
+  const archiverRename = useArchiverRenameStore();
   const videoCover = useVideoCoverCacheStore();
   const thumbCache = useThumbCacheStore();
   const figmemo = useFigmemoStore();
@@ -145,8 +155,8 @@ export const Settings: React.FC = () => {
       await hpoiAuth.login(hpoiAccount.trim(), hpoiPassword, hpoiUseEmail);
       setHpoiPassword('');
       message.success('hpoi 登录成功');
-    } catch (err: any) {
-      message.error(err?.message || 'hpoi 登录失败');
+    } catch (err: unknown) {
+      message.error(getErrorMessage(err) || 'hpoi 登录失败');
     } finally {
       setHpoiLogging(false);
     }
@@ -166,8 +176,8 @@ export const Settings: React.FC = () => {
       if (!files) return;
       await refreshHpoiIndexMeta();
       message.success(`已导入 hpoi 索引（${files.length} 个文件）`);
-    } catch (err: any) {
-      message.error(err?.message || '导入 hpoi 索引失败');
+    } catch (err: unknown) {
+      message.error(getErrorMessage(err) || '导入 hpoi 索引失败');
     } finally {
       setHpoiIndexImporting(false);
     }
@@ -192,8 +202,8 @@ export const Settings: React.FC = () => {
             : '已是最新，没有新词条',
         );
       }
-    } catch (err: any) {
-      message.error(err?.message || '增量更新失败');
+    } catch (err: unknown) {
+      message.error(getErrorMessage(err) || '增量更新失败');
     } finally {
       setHpoiSyncing(false);
     }
@@ -238,8 +248,8 @@ export const Settings: React.FC = () => {
       message.success(
         checked ? '已添加到资源管理器右键' : '已从资源管理器右键移除',
       );
-    } catch (err: any) {
-      message.error(err?.message || '设置失败');
+    } catch (err: unknown) {
+      message.error(getErrorMessage(err) || '设置失败');
     }
   };
   const moeyoTimelineSetting = useSettingsStore(
@@ -261,27 +271,27 @@ export const Settings: React.FC = () => {
   } | null>(null);
   const [modelReadyState, setModelReadyState] = useState<boolean | null>(null);
   const refreshModelReady = (modelId?: string) => {
-    const id = modelId || visionCfg.model || 'wd-v1-4-moat-tagger-v2';
+    const id = modelId || visionCfg.model || 'wd-swinv2-tagger-v3';
     modelReady(id)
       .then(setModelReadyState)
       .catch(() => setModelReadyState(null));
   };
   useEffect(() => {
-    const id = visionCfg.model || 'wd-v1-4-moat-tagger-v2';
+    const id = visionCfg.model || 'wd-swinv2-tagger-v3';
     modelReady(id)
       .then(setModelReadyState)
       .catch(() => setModelReadyState(null));
   }, [visionCfg.model, visionCfg.modelDir]);
   const onDownloadModel = async () => {
-    const id = visionCfg.model || 'wd-v1-4-moat-tagger-v2';
+    const id = visionCfg.model || 'wd-swinv2-tagger-v3';
     setModelDownloading(true);
     setModelDl({ file: 'csv', downloaded: 0, total: 0 });
     try {
       await downloadModel(id, (p) => setModelDl(p));
       await refreshModelReady(id);
       message.success('模型下载完成');
-    } catch (err: any) {
-      message.error(`下载失败：${err?.message || err}`);
+    } catch (err: unknown) {
+      message.error(`下载失败：${getErrorMessage(err) || err}`);
     } finally {
       setModelDownloading(false);
       setModelDl(null);
@@ -297,8 +307,31 @@ export const Settings: React.FC = () => {
     try {
       await releaseVision();
       message.success('已释放模型 / 停止进程');
-    } catch (err: any) {
-      message.error(`释放失败：${err?.message || err}`);
+    } catch (err: unknown) {
+      message.error(`释放失败：${getErrorMessage(err) || err}`);
+    }
+  };
+
+  const [storageUsage, setStorageUsage] = useState<StorageUsage | null>(null);
+  const refreshStorageUsage = () => {
+    getStorageUsage()
+      .then(setStorageUsage)
+      .catch(() => setStorageUsage(null));
+  };
+  useEffect(() => {
+    refreshStorageUsage();
+  }, []);
+  const [clearingStorage, setClearingStorage] = useState(false);
+  const onClearStorage = async () => {
+    setClearingStorage(true);
+    try {
+      const freed = await clearStorage();
+      message.success(`已清理 ${formatStorage(freed)}`);
+      refreshStorageUsage();
+    } catch (err: unknown) {
+      message.error(`清理失败：${getErrorMessage(err) || err}`);
+    } finally {
+      setClearingStorage(false);
     }
   };
   const onSetupExternal = async () => {
@@ -314,8 +347,8 @@ export const Settings: React.FC = () => {
       await updateOne('vision', 'pythonPath', res.python);
       await updateOne('vision', 'scriptPath', res.script);
       message.success('依赖安装完成');
-    } catch (err: any) {
-      message.error(`安装失败：${err?.message || err}`);
+    } catch (err: unknown) {
+      message.error(`安装失败：${getErrorMessage(err) || err}`);
     } finally {
       setExtSetupBusy(false);
       setExtSetup(null);
@@ -342,8 +375,8 @@ export const Settings: React.FC = () => {
       message.info(
         '已打开登录页；登录完成后会自动回到 P-Spider 完成登录（若没自动回，可把地址栏整段粘到右侧）',
       );
-    } catch (err: any) {
-      message.error(err?.message || '打开登录页失败');
+    } catch (err: unknown) {
+      message.error(getErrorMessage(err) || '打开登录页失败');
     }
   };
   const onPixivComplete = async () => {
@@ -357,8 +390,8 @@ export const Settings: React.FC = () => {
       setPixivToken(useSettingsStore.getState().pixiv?.refreshToken || '');
       setPixivCode('');
       message.success(`pixiv 登录成功：${u.name}（@${u.account}）`);
-    } catch (err: any) {
-      message.error(err?.message || 'pixiv 登录失败');
+    } catch (err: unknown) {
+      message.error(getErrorMessage(err) || 'pixiv 登录失败');
     } finally {
       setPixivLoginBusy(false);
     }
@@ -369,8 +402,8 @@ export const Settings: React.FC = () => {
       await updateOne('pixiv', 'refreshToken', pixivToken.trim());
       const u = await verifyPixivLogin();
       message.success(`pixiv 登录成功：${u.name}（@${u.account}）`);
-    } catch (err: any) {
-      message.error(err?.message || 'pixiv 校验失败');
+    } catch (err: unknown) {
+      message.error(getErrorMessage(err) || 'pixiv 校验失败');
     } finally {
       setPixivBusy(false);
     }
@@ -488,6 +521,24 @@ export const Settings: React.FC = () => {
     return '将已下载的老文件按文件名回溯推文信息（仅 X，需登录；已删除的推文无法找回）';
   })();
 
+  const archiverRenameStatusText = (() => {
+    if (archiverRename.error) return `失败：${archiverRename.error}`;
+    if (archiverRename.running && archiverRename.progress) {
+      const p = archiverRename.progress;
+      const label = p.phase === 'fetching' ? '拉取帖子' : '改名';
+      return `${label} ${p.posts}/${p.totalPosts}（已改名 ${p.renamed}，跳过 ${p.skipped}，失败 ${p.failed}）${
+        p.current ? ` · ${p.current}` : ''
+      }`;
+    }
+    if (archiverRename.result) {
+      const r = archiverRename.result;
+      return `${r.aborted ? '已中止，' : '完成：'}改名 ${r.renamed} 个 / ${r.posts} 个帖子${
+        r.skipped ? `，跳过 ${r.skipped}` : ''
+      }${r.failed ? `，失败 ${r.failed}` : ''}`;
+    }
+    return '按「归档站文件名模板」给已下载的归档站文件改名（还原封面→附件顺序，仅 Pawchive）';
+  })();
+
   const videoCoverStatusText = (() => {
     if (videoCover.error) return `失败：${videoCover.error}`;
     if (videoCover.phase !== 'idle' && videoCover.progress) {
@@ -547,8 +598,8 @@ export const Settings: React.FC = () => {
       const content = await fs.readTextFile(String(filePath));
       const { added, skipped } = importSubscriptions(content);
       message.success(`导入完成：新增 ${added} 个，跳过 ${skipped} 个`);
-    } catch (err: any) {
-      message.error(`导入失败：${err?.message || '未知原因'}`);
+    } catch (err: unknown) {
+      message.error(`导入失败：${getErrorMessage(err) || '未知原因'}`);
     }
   };
 
@@ -557,8 +608,8 @@ export const Settings: React.FC = () => {
     try {
       const dest = await exportUserBackup();
       if (dest) message.success('用户数据已导出');
-    } catch (err: any) {
-      message.error(`导出失败：${err?.message || '未知原因'}`);
+    } catch (err: unknown) {
+      message.error(`导出失败：${getErrorMessage(err) || '未知原因'}`);
     } finally {
       setBackupBusy(false);
     }
@@ -576,8 +627,8 @@ export const Settings: React.FC = () => {
         cancelText: '稍后手动重启',
         onOk: () => invoke('relaunch_app'),
       });
-    } catch (err: any) {
-      message.error(`导入失败：${err?.message || '未知原因'}`);
+    } catch (err: unknown) {
+      message.error(`导入失败：${getErrorMessage(err) || '未知原因'}`);
     } finally {
       setBackupBusy(false);
     }
@@ -664,6 +715,27 @@ export const Settings: React.FC = () => {
                     .messages({
                       'string.empty': '请填写保存文件名模板',
                     })
+                    .validate(value).error?.message;
+                }}
+              >
+                <FileNameTemplateInput />
+              </Item>
+              <Item
+                settingKey="pawchiveFileNameTemplate"
+                label="归档站文件名模板"
+                description="适用于 Pawchive 等归档站：按原帖附件顺序编号（如 %MEDIA_INDEX,w=2%_%TITLE%%EXT%）。留空则保留原始文件名。"
+                validator={(value) => {
+                  return Joi.string()
+                    .pattern(
+                      // eslint-disable-next-line
+                      /^[^\\\/:\*\"<>\|]+$/,
+                    )
+                    .message(
+                      '文件名有误，文件名不能包含以下字符：? * / \\ < > : " |',
+                    )
+                    .$.pattern(/^\s+$/, { invert: true })
+                    .message('文件名不能为纯空格！')
+                    .allow('')
                     .validate(value).error?.message;
                 }}
               >
@@ -787,8 +859,10 @@ export const Settings: React.FC = () => {
                       await clearThumbCache();
                       message.success('缩略图缓存已清除');
                       refreshCacheStats();
-                    } catch (err: any) {
-                      message.error(`清除失败：${err?.message || '未知原因'}`);
+                    } catch (err: unknown) {
+                      message.error(
+                        `清除失败：${getErrorMessage(err) || '未知原因'}`,
+                      );
                     }
                   }}
                 >
@@ -829,6 +903,24 @@ export const Settings: React.FC = () => {
                   </Button>
                   <span className="text-sm text-gray-500">
                     {traceStatusText}
+                  </span>
+                </div>
+                <div className="mt-3 flex items-center gap-3">
+                  <Button
+                    type="primary"
+                    loading={archiverRename.running}
+                    onClick={() =>
+                      archiverRename.running
+                        ? archiverRename.cancel()
+                        : archiverRename.start()
+                    }
+                  >
+                    {archiverRename.running
+                      ? '取消回溯'
+                      : '回溯归档站文件名（联网）'}
+                  </Button>
+                  <span className="text-sm text-gray-500">
+                    {archiverRenameStatusText}
                   </span>
                 </div>
                 <div className="mt-3 flex items-center gap-3">
@@ -1264,9 +1356,9 @@ export const Settings: React.FC = () => {
                           message.success(
                             `重建完成，清理了 ${removed} 个冗余标签`,
                           );
-                        } catch (err: any) {
+                        } catch (err: unknown) {
                           message.error(
-                            `重建失败：${err?.message || '未知原因'}`,
+                            `重建失败：${getErrorMessage(err) || '未知原因'}`,
                           );
                         } finally {
                           setRebuildingTags(false);
@@ -1300,7 +1392,7 @@ export const Settings: React.FC = () => {
                   <span>模型</span>
                   <Select
                     style={{ width: 300 }}
-                    value={visionCfg.model || 'wd-v1-4-moat-tagger-v2'}
+                    value={visionCfg.model || 'wd-swinv2-tagger-v3'}
                     onChange={(v: string) => {
                       updateOne('vision', 'model', v);
                       refreshModelReady(v);
@@ -1438,6 +1530,47 @@ export const Settings: React.FC = () => {
                 <p className="text-xs text-gray-400">
                   内置引擎无需 Python，模型按需下载（hf-mirror）。fig-memo
                   列表右下角 ⚡ 识别、⚙ 视觉标签筛选。
+                </p>
+              </div>
+            </Section>
+            <Section title="存储清理" name="storage">
+              <div className="space-y-2">
+                <div className="text-sm text-gray-500">
+                  缓存占用：
+                  {formatStorage(
+                    storageTotal(
+                      storageUsage || {
+                        logs: 0,
+                        thumb: 0,
+                        wd14: 0,
+                        split: 0,
+                        backups: 0,
+                      },
+                    ),
+                  )}
+                </div>
+                {storageUsage && (
+                  <div className="text-xs text-gray-400">
+                    日志 {formatStorage(storageUsage.logs)} · 缩略图{' '}
+                    {formatStorage(storageUsage.thumb)} · WD14 临时图{' '}
+                    {formatStorage(storageUsage.wd14)} · 旧备份{' '}
+                    {formatStorage(storageUsage.backups)}
+                  </div>
+                )}
+                <div className="flex items-center gap-2">
+                  <Button
+                    danger
+                    loading={clearingStorage}
+                    onClick={onClearStorage}
+                  >
+                    清理缓存
+                  </Button>
+                  <Button onClick={refreshStorageUsage}>刷新占用</Button>
+                </div>
+                <p className="text-xs text-gray-400">
+                  清理：日志、缩略图缓存、WD14
+                  临时图、图片切割临时、旧备份文件（.bak-*/
+                  .pre-import）。不影响已下载数据。
                 </p>
               </div>
             </Section>

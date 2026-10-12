@@ -1,3 +1,4 @@
+import { getErrorMessage } from '../utils/error';
 import { fs, invoke, notification, path } from '@tauri-apps/api';
 import { listen } from '@tauri-apps/api/event';
 import { nanoid } from 'nanoid';
@@ -133,11 +134,11 @@ export async function downloadMegaLink(
       fileName: res.root || 'MEGA',
       updatedAt: Date.now(),
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
     useDownloadStore.getState().updateDownloadTask({
       ...baseTask,
       status: AriaStatus.Error,
-      error: typeof err === 'string' ? err : err?.message || '未知原因',
+      error: typeof err === 'string' ? err : getErrorMessage(err) || '未知原因',
       updatedAt: Date.now(),
     });
     throw err;
@@ -193,11 +194,11 @@ async function drain(): Promise<void> {
         title: 'MEGA 下载完成',
         body: `${job.post.text || job.post.id}`,
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       log().error('MEGA 下载失败', { postId: job.post.id, url: job.url, err });
       notification.sendNotification({
         title: 'MEGA 下载失败',
-        body: `${job.post.text || job.post.id}：${err?.message || err}`,
+        body: `${job.post.text || job.post.id}：${getErrorMessage(err) || err}`,
       });
     } finally {
       inflight.delete(job.url);

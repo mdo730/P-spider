@@ -65,88 +65,83 @@ function observeOnce(el: Element, cb: VisibleCb): () => void {
  * 注意：preview 模式下**始终挂载 antd Image**（缩略图未就绪时用占位层覆盖），
  * 以保证 PreviewGroup 的注册顺序与文件顺序一致（右侧信息条按 index 取文件）。
  */
-export const LocalThumb: React.FC<Props> = ({
-  filePath,
-  alt,
-  className,
-  wrapperClassName,
-  preview,
-  kind = 'image',
-}) => {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [visible, setVisible] = useState(false);
-  const [src, setSrc] = useState<string>();
+export const LocalThumb: React.FC<Props> = React.memo(
+  ({ filePath, alt, className, wrapperClassName, preview, kind = 'image' }) => {
+    const containerRef = useRef<HTMLDivElement>(null);
+    const [visible, setVisible] = useState(false);
+    const [src, setSrc] = useState<string>();
 
-  useEffect(() => {
-    setSrc(undefined);
-    setVisible(false);
-    if (!filePath) return;
-    const el = containerRef.current;
-    if (!el) return;
-    return observeOnce(el, () => setVisible(true));
-  }, [filePath]);
+    useEffect(() => {
+      setSrc(undefined);
+      setVisible(false);
+      if (!filePath) return;
+      const el = containerRef.current;
+      if (!el) return;
+      return observeOnce(el, () => setVisible(true));
+    }, [filePath]);
 
-  useEffect(() => {
-    if (!filePath || !visible) return;
-    let cancelled = false;
-    (async () => {
-      const cached = await getCachedThumbUrl(filePath);
-      if (cancelled) return;
-      if (cached) {
-        setSrc(cached);
-        return;
-      }
-      const generated =
-        kind === 'video'
-          ? // 视频走 Rust ffmpeg 取帧（约 0.15s/个，写缓存）
-            await generateVideoThumbUrl(filePath)
-          : await generateImageThumbUrl(filePath);
-      if (cancelled) return;
-      // 视频无缩略图时不回退原文件（<img> 放不了视频），交给外层占位/播放按钮
-      setSrc(
-        generated || (kind === 'video' ? undefined : toAssetUrl(filePath)),
-      );
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [filePath, visible, kind]);
+    useEffect(() => {
+      if (!filePath || !visible) return;
+      let cancelled = false;
+      (async () => {
+        const cached = await getCachedThumbUrl(filePath);
+        if (cancelled) return;
+        if (cached) {
+          setSrc(cached);
+          return;
+        }
+        const generated =
+          kind === 'video'
+            ? // 视频走 Rust ffmpeg 取帧（约 0.15s/个，写缓存）
+              await generateVideoThumbUrl(filePath)
+            : await generateImageThumbUrl(filePath);
+        if (cancelled) return;
+        // 视频无缩略图时不回退原文件（<img> 放不了视频），交给外层占位/播放按钮
+        setSrc(
+          generated || (kind === 'video' ? undefined : toAssetUrl(filePath)),
+        );
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }, [filePath, visible, kind]);
 
-  const placeholder = (
-    <div
-      className={`flex items-center justify-center bg-gray-100 text-gray-400 ${
-        wrapperClassName || 'w-full h-full'
-      }`}
-    >
-      {filePath ? <LoadingOutlined /> : '无图'}
-    </div>
-  );
+    const placeholder = (
+      <div
+        className={`flex items-center justify-center bg-gray-100 text-gray-400 ${
+          wrapperClassName || 'w-full h-full'
+        }`}
+      >
+        {filePath ? <LoadingOutlined /> : '无图'}
+      </div>
+    );
 
-  return (
-    <div ref={containerRef} className={wrapperClassName || 'w-full h-full'}>
-      {preview ? (
-        <div className="relative w-full h-full">
-          <Image
-            src={src}
-            alt={alt}
-            className={className}
-            wrapperClassName="w-full h-full"
-            preview={{
-              src: filePath ? toAssetUrl(filePath) : undefined,
-              mask: <EyeOutlined />,
-            }}
-          />
-          {!src && (
-            <div className="absolute inset-0 flex items-center justify-center bg-gray-100 text-gray-400">
-              {filePath ? <LoadingOutlined /> : '无图'}
-            </div>
-          )}
-        </div>
-      ) : src ? (
-        <img src={src} alt={alt} loading="lazy" className={className} />
-      ) : (
-        placeholder
-      )}
-    </div>
-  );
-};
+    return (
+      <div ref={containerRef} className={wrapperClassName || 'w-full h-full'}>
+        {preview ? (
+          <div className="relative w-full h-full">
+            <Image
+              src={src}
+              alt={alt}
+              className={className}
+              wrapperClassName="w-full h-full"
+              preview={{
+                src: filePath ? toAssetUrl(filePath) : undefined,
+                mask: <EyeOutlined />,
+              }}
+            />
+            {!src && (
+              <div className="absolute inset-0 flex items-center justify-center bg-gray-100 text-gray-400">
+                {filePath ? <LoadingOutlined /> : '无图'}
+              </div>
+            )}
+          </div>
+        ) : src ? (
+          <img src={src} alt={alt} loading="lazy" className={className} />
+        ) : (
+          placeholder
+        )}
+      </div>
+    );
+  },
+);

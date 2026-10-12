@@ -18,18 +18,20 @@ export function useAriaBinding() {
   /**
    * 任务状态事件同步
    */
-  const { syncDownloadTaskStatus } = useDownloadStore((state) => ({
-    syncDownloadTaskStatus: state.syncDownloadTaskStatus,
-  }));
+  const syncDownloadTaskStatus = useDownloadStore(
+    (state) => state.syncDownloadTaskStatus,
+  );
   useEffect(() => {
     async function onAria2StatusChanged(gid: string) {
       await syncDownloadTaskStatus(gid);
     }
 
-    aria2.onDownloadComplete.listen(onAria2StatusChanged);
-    aria2.onDownloadError.listen(onAria2StatusChanged);
-    aria2.onDownloadPause.listen(onAria2StatusChanged);
-    aria2.onDownloadStart.listen(onAria2StatusChanged);
-    aria2.onDownloadStop.listen(onAria2StatusChanged);
+    const unlisten: (() => void)[] = [];
+    unlisten.push(aria2.onDownloadComplete.listen(onAria2StatusChanged));
+    unlisten.push(aria2.onDownloadError.listen(onAria2StatusChanged));
+    unlisten.push(aria2.onDownloadPause.listen(onAria2StatusChanged));
+    unlisten.push(aria2.onDownloadStart.listen(onAria2StatusChanged));
+    unlisten.push(aria2.onDownloadStop.listen(onAria2StatusChanged));
+    return () => unlisten.forEach((fn) => fn());
   }, []);
 }

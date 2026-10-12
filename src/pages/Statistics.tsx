@@ -1,4 +1,3 @@
-/* eslint-disable react/prop-types */
 import { Empty, Select, Table, Tooltip } from 'antd';
 import clsx from 'clsx';
 import dayjs from 'dayjs';

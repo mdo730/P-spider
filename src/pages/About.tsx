@@ -1,4 +1,4 @@
-/* eslint-disable react/prop-types */
+import { getErrorMessage } from '../utils/error';
 import React, { useState } from 'react';
 import { PageHeader } from '../components/PageHeader';
 import Logo from '../../src-tauri/icons/128x128.png';
@@ -36,8 +36,10 @@ export const About: React.FC = () => {
       const file = await path.join(dir, 'pet.json');
       if (await fs.exists(file)) await fs.removeFile(file);
       message('宠物数据已删除', { title: '香蕉君' });
-    } catch (err: any) {
-      message(err?.message || '删除失败，请稍后再试', { title: '删除失败' });
+    } catch (err: unknown) {
+      message(getErrorMessage(err) || '删除失败，请稍后再试', {
+        title: '删除失败',
+      });
     }
   };
   const hasUpdate = useUpdateStore((s) => s.hasUpdate);
@@ -52,9 +54,9 @@ export const About: React.FC = () => {
           title: '软件已是最新版本',
         });
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       log.error(err);
-      message(err?.message || '无法获取最新更新，请稍后再试', {
+      message(getErrorMessage(err) || '无法获取最新更新，请稍后再试', {
         title: '获取更新错误',
       });
     } finally {

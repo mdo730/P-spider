@@ -1,0 +1,16 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "watcher": {
+    "ignore": [
+      "**/node_modules/**",
+      "node_modules",
+      "src-tauri/target",
+      "**/target/**",
+      "**/dist/**",
+      "dist",
+      "**/*.log",
+      "hpoi-seed",
+      "**/hpoi-seed/**"
+    ]
+  }
+}

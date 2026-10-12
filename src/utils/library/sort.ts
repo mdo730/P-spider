@@ -65,6 +65,8 @@ export function sortFolders<
 }
 
 export type FileSortKey =
+  | 'doc-order'
+  | 'doc-order-asc'
   | 'name-asc'
   | 'name-desc'
   | 'mtime-desc'
@@ -72,6 +74,8 @@ export type FileSortKey =
   | 'type';
 
 export const FILE_SORT_OPTIONS: { label: string; value: FileSortKey }[] = [
+  { label: '按帖子顺序（时间 新→旧）', value: 'doc-order' },
+  { label: '按帖子顺序（时间 旧→新）', value: 'doc-order-asc' },
   { label: '名称 A→Z', value: 'name-asc' },
   { label: '名称 Z→A', value: 'name-desc' },
   { label: '日期 新→旧', value: 'mtime-desc' },

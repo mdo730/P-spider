@@ -1,4 +1,3 @@
-/* eslint-disable react/prop-types */
 import clsx from 'clsx';
 import React, { useEffect } from 'react';
 import { applySidebarOrder } from '../constants/routes';

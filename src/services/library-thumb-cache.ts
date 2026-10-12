@@ -7,7 +7,7 @@ import {
   getCachedThumbUrl,
 } from '../utils/thumbnail';
 import {
-  getDownloadHistoryMap,
+  getHistoryByPaths,
   getMediaThumbUrl,
   normalizePath,
 } from '../stores/download-history';
@@ -139,8 +139,6 @@ export async function runVideoCoverCache(
   };
   onProgress({ ...progress });
 
-  const historyMap = await getDownloadHistoryMap();
-
   // 阶段一：扫描所有视频
   const videos: string[] = [];
   const rootFolders = await listRootFolders(saveDirBase);
@@ -176,7 +174,7 @@ export async function runVideoCoverCache(
       generated += 1;
     } else {
       // 没 ffmpeg / 取帧失败 → 回退在线封面
-      const rec = historyMap.get(normalizePath(p));
+      const rec = (await getHistoryByPaths([p])).get(normalizePath(p));
       const url = rec ? getMediaThumbUrl(rec) : undefined;
       if (await cacheThumbFromUrl(p, url)) generated += 1;
       else failed += 1;

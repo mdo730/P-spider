@@ -1,3 +1,4 @@
+import { getErrorMessage } from '../utils/error';
 import { create } from 'zustand';
 import {
   ThumbCacheProgress,
@@ -40,13 +41,13 @@ export const useVideoCoverCacheStore = create<VideoCoverCacheStore>(
           set({ progress, phase: progress.phase });
         }, controller.signal);
         set({ running: false, phase: 'idle', progress: null, result });
-      } catch (err: any) {
+      } catch (err: unknown) {
         log.error('溯源本地库封面失败', err);
         set({
           running: false,
           phase: 'idle',
           progress: null,
-          error: err?.message || '生成失败',
+          error: getErrorMessage(err) || '生成失败',
         });
       } finally {
         controller = null;

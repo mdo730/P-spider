@@ -1,4 +1,3 @@
-/* eslint-disable react/prop-types */
 import React from 'react';
 import { DownloadTask } from '../../interfaces/DownloadTask';
 import * as R from 'ramda';
@@ -8,7 +7,7 @@ export interface StatusTextProps {
   task: DownloadTask;
 }
 
-export const StatusText: React.FC<StatusTextProps> = ({ task }) => {
+export const StatusText: React.FC<StatusTextProps> = React.memo(({ task }) => {
   const [text, className] = R.cond<[DownloadTask], string[]>([
     [R.propEq('waiting', 'status'), R.always(['🟡等待中', 'text-gray-500'])],
     [R.propEq('active', 'status'), R.always(['▶︎下载中', ''])],
@@ -26,4 +25,4 @@ export const StatusText: React.FC<StatusTextProps> = ({ task }) => {
       {text}
     </span>
   );
-};
+});

@@ -1,0 +1,76 @@
+{
+  "state": {
+    "version": 1,
+    "adopted": true,
+    "name": "测试蕉",
+    "satiety": 100,
+    "cleanliness": 100,
+    "mood": 100,
+    "health": 100,
+    "energy": 100,
+    "exp": 99999,
+    "affinity": 500,
+    "coin": 999999,
+    "skills": {
+      "code": 5,
+      "art": 5,
+      "lang": 5,
+      "music": 5,
+      "sport": 5
+    },
+    "skin": "classic",
+    "sickSince": 0,
+    "buffer": {
+      "satiety": 0,
+      "mood": 0
+    },
+    "task": null,
+    "lastTickAt": 1791007054781,
+    "lastFedAt": 0,
+    "lastPatAt": 0,
+    "lastCleanAt": 0,
+    "lastPlayAt": 0,
+    "lastWorkAt": 0,
+    "lastStudyAt": 0,
+    "lastSickAt": 0,
+    "inventory": {
+      "banana": 99,
+      "bread": 99,
+      "snack": 99,
+      "cake": 99,
+      "soap": 99,
+      "spa": 99,
+      "pill": 99,
+      "elixir": 99
+    },
+    "toys": {
+      "wand": 99,
+      "ball": 99
+    },
+    "collection": [
+      "banana",
+      "bread",
+      "snack",
+      "cake",
+      "soap",
+      "spa",
+      "wand",
+      "ball",
+      "pill",
+      "elixir"
+    ],
+    "stats": {
+      "downloads": 9999,
+      "searches": 9999,
+      "browses": 9999,
+      "pats": 9999,
+      "feeds": 9999,
+      "cleans": 9999,
+      "plays": 9999,
+      "heals": 9999,
+      "works": 9999,
+      "studies": 9999
+    }
+  },
+  "version": 1
+}

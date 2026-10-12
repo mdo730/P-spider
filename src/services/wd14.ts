@@ -178,8 +178,8 @@ export async function visionStop(): Promise<void> {
 
 /** 可选的 WD14 模型（来自 SmilingWolf；默认 MoAT v2） */
 export const WD14_MODELS: { id: string; label: string; size: string }[] = [
-  { id: 'wd-v1-4-moat-tagger-v2', label: 'MoAT v2（推荐）', size: '~311MB' },
-  { id: 'wd-swinv2-tagger-v3', label: 'SwinV2 v3', size: '~350MB' },
+  { id: 'wd-v1-4-moat-tagger-v2', label: 'MoAT v2', size: '~311MB' },
+  { id: 'wd-swinv2-tagger-v3', label: 'SwinV2 v3（推荐）', size: '~350MB' },
   { id: 'wd-convnext-tagger-v3', label: 'ConvNeXt v3', size: '~400MB' },
   { id: 'wd-vit-tagger-v3', label: 'ViT v3', size: '~350MB' },
   {
@@ -436,7 +436,7 @@ export async function tagImageSource(src: {
   }
   const v = useSettingsStore.getState().vision || {};
   if ((v.engine || 'builtin') === 'builtin') {
-    const modelId = v.model || 'wd-v1-4-moat-tagger-v2';
+    const modelId = v.model || 'wd-swinv2-tagger-v3';
     if (!(await modelReady(modelId))) {
       throw new Error('模型未下载（设置 → 工具与数据 → 视觉识别）');
     }

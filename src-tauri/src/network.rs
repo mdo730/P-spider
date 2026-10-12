@@ -46,6 +46,33 @@ pub async fn network_fetch(
     // reqwest 默认挑 IPv4 会一直等超时。这里把解析结果 IPv6 排在前面，
     // 失败再回退 IPv4（顺序尝试）。
     if let Ok(parsed) = reqwest::Url::parse(&url) {
+      // SSRF 防护：非代理模式下拒绝私网/回环/链路本地地址
+      if !enable_proxy || proxy_url.is_empty() {
+        let scheme = parsed.scheme();
+        if scheme != "http" && scheme != "https" {
+          return Err(format!("拒绝非 http(s) 协议：{url}"));
+        }
+        if let Some(host) = parsed.host_str() {
+          let host = host.trim_start_matches('[').trim_end_matches(']');
+          let blocked_hosts = ["localhost", "metadata.google.internal"];
+          if blocked_hosts.iter().any(|b| host.eq_ignore_ascii_case(b)) {
+            return Err(format!("拒绝访问受保护主机：{host}"));
+          }
+          if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+            let is_private = match ip {
+              std::net::IpAddr::V4(v4) => {
+                v4.is_loopback() || v4.is_private() || v4.is_link_local() || v4.is_unspecified()
+              }
+              std::net::IpAddr::V6(v6) => {
+                v6.is_loopback() || v6.is_unspecified() || v6.is_multicast()
+              }
+            };
+            if is_private {
+              return Err(format!("拒绝访问内网地址：{host}"));
+            }
+          }
+        }
+      }
       if let Some(host) = parsed.host_str() {
         let port = parsed.port_or_known_default().unwrap_or(443);
         if let Ok(addrs) = (host, port).to_socket_addrs() {

@@ -1,6 +1,10 @@
 import { request } from '../ipc/network';
-import { createArchiverAdapter } from './archiver';
-import { PlatformCreator } from './types';
+import {
+  ArchiverAdapterConfig,
+  createArchiverAdapter,
+  toPlatformPost,
+} from './archiver';
+import { PlatformCreator, PlatformPost } from './types';
 
 /** Pawchive 平台标识 */
 export const PAWCHIVE_SOURCE = 'pawchive';
@@ -58,7 +62,7 @@ async function resolvePawchiveCreator(
   };
 }
 
-export const pawchiveAdapter = createArchiverAdapter({
+const PAWCHIVE_CONFIG: ArchiverAdapterConfig = {
   source: PAWCHIVE_SOURCE,
   apiRoot: API_ROOT,
   fileRoot: FILE_ROOT,
@@ -69,4 +73,33 @@ export const pawchiveAdapter = createArchiverAdapter({
   bypassProxy: true,
   maxRetry: 3,
   resolveCreatorByIdentifier: resolvePawchiveCreator,
-});
+};
+
+export const pawchiveAdapter = createArchiverAdapter(PAWCHIVE_CONFIG);
+
+/**
+ * 拉取单个帖子（回溯文件名用）。
+ * service/userId/postId 可由帖子 URL 解析得到。
+ */
+export async function fetchPawchivePost(
+  service: string,
+  userId: string,
+  postId: string,
+): Promise<PlatformPost> {
+  const resp = await request({
+    method: 'GET',
+    responseType: 'json',
+    url: `${API_ROOT}/${service}/user/${userId}/post/${postId}`,
+    bypassProxy: true,
+    maxRetry: 3,
+  });
+  if (resp.status >= 400) {
+    throw new Error(`拉取帖子失败（status=${resp.status}）`);
+  }
+  const creator: PlatformCreator = {
+    id: `${service}/${userId}`,
+    name: '',
+    username: `${service}/${userId}`,
+  };
+  return toPlatformPost(resp.body, creator, PAWCHIVE_CONFIG);
+}

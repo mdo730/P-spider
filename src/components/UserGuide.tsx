@@ -1,4 +1,3 @@
-/* eslint-disable react/prop-types */
 import { QuestionOutlined } from '@ant-design/icons';
 import { Button, Collapse, Drawer } from 'antd';
 import { useMount } from 'ahooks';

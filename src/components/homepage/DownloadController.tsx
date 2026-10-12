@@ -1,4 +1,4 @@
-/* eslint-disable react/prop-types */
+import { getErrorMessage } from '../../utils/error';
 import {
   App,
   Button,
@@ -74,7 +74,7 @@ export const DownloadController: React.FC = () => {
     try {
       createCreationTask('twitter', toPlatformCreator(user), filter);
       message.success('已成功创建下载任务，请到下载管理页查看');
-    } catch (err: any) {
+    } catch (err: unknown) {
       log.error(err);
       message.error('创建下载任务失败');
     }
@@ -106,9 +106,9 @@ export const DownloadController: React.FC = () => {
           `已订阅 @${user.screenName}，将每 ${intervalMin} 分钟检查一次新内容并自动下载`,
         );
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       log.error(err);
-      message.error(`订阅失败：${err?.message || '未知原因'}`);
+      message.error(`订阅失败：${getErrorMessage(err) || '未知原因'}`);
     } finally {
       setSubscribing(false);
     }
@@ -135,9 +135,9 @@ export const DownloadController: React.FC = () => {
           ? `已切换 @${user.screenName} 为观察（只进时间流）`
           : `已观察 @${user.screenName}（只进时间流，不下载）`,
       );
-    } catch (err: any) {
+    } catch (err: unknown) {
       log.error(err);
-      message.error(`观察失败：${err?.message || '未知原因'}`);
+      message.error(`观察失败：${getErrorMessage(err) || '未知原因'}`);
     } finally {
       setSubscribing(false);
     }

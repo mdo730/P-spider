@@ -182,6 +182,8 @@ export async function fetchCategories(): Promise<Map<number, FigmemoCategory>> {
   });
   const map = new Map<number, FigmemoCategory>();
   for (const c of (body || []) as any[]) {
+    // 跳过「Uncategorized」(id=1) 与空分类（如「非公開」count=0）
+    if (c.id === 1 || !c.count) continue;
     map.set(c.id, {
       id: c.id,
       name: c.name,
@@ -344,6 +346,20 @@ export async function fetchPostImages(
     if (seen.has(c.url)) continue;
     seen.add(c.url);
     out.push(c);
+  }
+  // 同帖可能存在「同名不同图」（不同上传月份目录）→ 文件名撞车会互相覆盖。
+  // 撞名的加媒体 id 后缀保证唯一；未撞名的保持原名（不影响已下载的旧文件匹配）。
+  const usedName = new Map<string, number>();
+  for (const m of out) {
+    const name = m.fileName || `figmemo-${m.id}`;
+    const n = usedName.get(name) || 0;
+    usedName.set(name, n + 1);
+    if (n > 0) {
+      const dot = name.lastIndexOf('.');
+      const base = dot > 0 ? name.slice(0, dot) : name;
+      const ext = dot > 0 ? name.slice(dot) : '';
+      m.fileName = `${base}__${m.id}${ext}`;
+    }
   }
   return out;
 }
@@ -866,6 +882,18 @@ async function syncSiteTags(
     }),
   ].filter((s) => s.parentId);
   const childMap = useFigmemoTagsStore.getState().addTagsBatch(childSpecs);
+
+  // 清理已不在文章里的分类标签（如「非公開」count=0、「Uncategorized」）
+  if (rootId && entries.length > 0) {
+    const stale = useFigmemoTagsStore
+      .getState()
+      .tags.filter(
+        (t) => (t.parentId ?? null) === rootId && !catNames.has(t.name),
+      );
+    for (const t of stale) {
+      useFigmemoTagsStore.getState().removeTag(t.id);
+    }
+  }
 
   // 逐条算标签，一次性写入文件夹关系
   const relEntries: { relPath: string; tagIds: string[] }[] = [];
@@ -1614,9 +1642,11 @@ export async function saveFigmemoMedia(
 }
 
 /** 保存单篇文章到本地（手动保存：不计统计、不打标；调用方随后可 syncLocalTags） */
-export async function saveFigmemoPost(item: FigmemoListItem): Promise<number> {
+export async function saveFigmemoPost(
+  item: FigmemoListItem,
+): Promise<{ added: number; total: number }> {
   const images = await fetchPostImages(item.postId);
-  if (images.length === 0) return 0;
+  if (images.length === 0) return { added: 0, total: 0 };
   await upsertMetaImageCount(
     {
       postId: item.postId,
@@ -1641,12 +1671,12 @@ export async function saveFigmemoPost(item: FigmemoListItem): Promise<number> {
     postUrl: item.link,
     source: FIGMEMO_SOURCE,
   };
-  await useDownloadStore.getState().batchCreateDownloadTask(
+  const added = await useDownloadStore.getState().batchCreateDownloadTask(
     images.map((media) => ({
       source: FIGMEMO_SOURCE,
       post: platformPost,
       media,
     })),
   );
-  return images.length;
+  return { added, total: images.length };
 }

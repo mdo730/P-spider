@@ -80,6 +80,7 @@ function bootstrapPetWindow() {
  */
 async function renderMainApp(): Promise<void> {
   await import('./stores/download-history');
+  await import('./stores/subscription');
   await import('./stores/figmemo');
   await import('./stores/moeyo');
   await import('./pet/activity-bridge');
@@ -152,6 +153,13 @@ async function bootstrap() {
   await ensureExplorerMenu();
   if (await handleImageSearchArg()) return;
   await renderMainApp();
+
+  // 日志保留：只留最近 1 天、总量封顶 300MB（超出删最旧）
+  if ('__TAURI__' in window || '__TAURI_INTERNALS__' in window) {
+    void import('@tauri-apps/api').then(({ invoke }) =>
+      invoke('cleanup_logs', { days: 1, capMb: 300 }).catch(() => undefined),
+    );
+  }
 
   // 若已解锁且启用桌面宠物 → 随软件启动显示（等 app-state 异步水合后再判断）
   window.setTimeout(async () => {

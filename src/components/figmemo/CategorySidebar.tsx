@@ -1,4 +1,4 @@
-/* eslint-disable react/prop-types */
+import { getErrorMessage } from '../../utils/error';
 import { DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
 import {
   App,
@@ -115,8 +115,8 @@ export const CategorySidebar: React.FC<Props> = ({
       ).length;
       moveTag(moveId, moveParent, childCount);
       setMoveId(null);
-    } catch (err: any) {
-      message.error(err?.message || '移动失败');
+    } catch (err: unknown) {
+      message.error(getErrorMessage(err) || '移动失败');
     }
   };
 
@@ -168,8 +168,8 @@ export const CategorySidebar: React.FC<Props> = ({
         renameTag(editModal.id, nameInput);
       }
       setEditModal(null);
-    } catch (err: any) {
-      message.error(err?.message || '操作失败');
+    } catch (err: unknown) {
+      message.error(getErrorMessage(err) || '操作失败');
     }
   };
 

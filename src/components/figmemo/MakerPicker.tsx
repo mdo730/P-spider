@@ -1,4 +1,3 @@
-/* eslint-disable react/prop-types */
 import { DownOutlined, SearchOutlined } from '@ant-design/icons';
 import { Input, Popover } from 'antd';
 import React, { useMemo, useState } from 'react';

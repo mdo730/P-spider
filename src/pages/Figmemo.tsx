@@ -1,4 +1,4 @@
-/* eslint-disable react/prop-types */
+import { getErrorMessage } from '../utils/error';
 import {
   ArrowLeftOutlined,
   CheckOutlined,
@@ -41,6 +41,11 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import { invoke } from '@tauri-apps/api';
+import {
+  visionCatChipActiveStyle,
+  visionCatChipStyle,
+} from '../utils/tag-color';
 import { CategorySidebar } from '../components/figmemo/CategorySidebar';
 import { autoMatchHpoi } from '../services/hpoi-automatch';
 import { PageHeader } from '../components/PageHeader';
@@ -329,9 +334,9 @@ export const FigmemoPage: React.FC = () => {
       try {
         setItems(await refreshSitePosts());
         lastRefreshAt = Date.now();
-      } catch (err: any) {
+      } catch (err: unknown) {
         log.error(err);
-        if (!shown) message.error(err?.message || '读取文章列表失败');
+        if (!shown) message.error(getErrorMessage(err) || '读取文章列表失败');
       } finally {
         setLoading(false);
       }
@@ -363,8 +368,18 @@ export const FigmemoPage: React.FC = () => {
       if (item.exists) {
         try {
           const content = await scanDirectory(item.folderPath);
-          local = content.files
-            .filter((f) => f.kind === 'image')
+          // 过滤掉 0 字节文件（源图损坏/下载失败留下的空文件），不显示裂图
+          const imgs = content.files.filter((f) => f.kind === 'image');
+          const sized = await Promise.all(
+            imgs.map(async (f) => ({
+              ...f,
+              size: await invoke<number>('file_size', { path: f.path }).catch(
+                () => 0,
+              ),
+            })),
+          );
+          local = sized
+            .filter((f) => f.size > 0)
             .map((f) => ({ path: f.path, name: f.name }));
         } catch {
           local = [];
@@ -428,9 +443,9 @@ export const FigmemoPage: React.FC = () => {
           ).catch(() => undefined);
         }
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       log.error(err);
-      message.error(err?.message || '读取文章详情失败');
+      message.error(getErrorMessage(err) || '读取文章详情失败');
     } finally {
       setDetailLoading(false);
     }
@@ -440,11 +455,15 @@ export const FigmemoPage: React.FC = () => {
     if (!selected) return;
     setSaving(true);
     try {
-      const n = await saveFigmemoPost(selected);
-      if (n > 0) {
-        message.success(`已加入下载队列（${n} 个附件）`);
-      } else {
+      const { added, total } = await saveFigmemoPost(selected);
+      if (total === 0) {
         message.info('该文章没有可下载的图片');
+      } else if (added > 0) {
+        message.success(`已加入下载队列（新增 ${added} 张 / 共 ${total} 张）`);
+      } else {
+        message.info(
+          `图片已在本地（共 ${total} 张，未新增）；若仍裂图，可能是源图损坏`,
+        );
       }
       // 下载后顺带刷新：重抓远端图并更新详情展示与计数
       // （旧记录可能只存了封面 1 张，按「下载」时一并修正）
@@ -455,18 +474,20 @@ export const FigmemoPage: React.FC = () => {
       setImages(imgs);
       setLocalImages([]);
       setSelected((s) =>
-        s ? { ...s, imageCount: imgs.length, exists: n > 0 || s.exists } : s,
+        s
+          ? { ...s, imageCount: imgs.length, exists: added > 0 || s.exists }
+          : s,
       );
       setItems((prev) =>
         prev.map((it) =>
           it.postId === postId
-            ? { ...it, imageCount: imgs.length, exists: n > 0 || it.exists }
+            ? { ...it, imageCount: imgs.length, exists: added > 0 || it.exists }
             : it,
         ),
       );
       await load();
-    } catch (err: any) {
-      message.error(err?.message || '保存失败');
+    } catch (err: unknown) {
+      message.error(getErrorMessage(err) || '保存失败');
     } finally {
       setSaving(false);
     }
@@ -493,8 +514,8 @@ export const FigmemoPage: React.FC = () => {
     setTagSaving(true);
     try {
       await setArticleTags(selected, clean);
-    } catch (err: any) {
-      message.error(err?.message || '标签保存失败');
+    } catch (err: unknown) {
+      message.error(getErrorMessage(err) || '标签保存失败');
     } finally {
       setTagSaving(false);
     }
@@ -565,8 +586,8 @@ export const FigmemoPage: React.FC = () => {
     );
     try {
       await setHpoiMatch(selected, hpoi);
-    } catch (err: any) {
-      message.error(err?.message || 'hpoi 关联保存失败');
+    } catch (err: unknown) {
+      message.error(getErrorMessage(err) || 'hpoi 关联保存失败');
     }
   };
 
@@ -763,7 +784,18 @@ export const FigmemoPage: React.FC = () => {
   }, [preVisualList, visualPostTags]);
 
   const visualTagGroups = useMemo(() => {
-    const order = ['体型', '服装', '姿势', '元素', '道具', '发型', '配饰'];
+    const order = [
+      '体型',
+      '服装',
+      '发型',
+      '姿势',
+      '构图',
+      '元素',
+      '道具',
+      '配饰',
+      '内容',
+      'R18',
+    ];
     const byCat = new Map<
       string,
       { cat: string; zh: string; count: number }[]
@@ -936,8 +968,8 @@ export const FigmemoPage: React.FC = () => {
         } else if (key === 'openImg' && media.url) {
           await openUrl(media.url);
         }
-      } catch (err: any) {
-        message.error(err?.message || '操作失败');
+      } catch (err: unknown) {
+        message.error(getErrorMessage(err) || '操作失败');
       }
     },
   });
@@ -1260,14 +1292,15 @@ export const FigmemoPage: React.FC = () => {
                     return (
                       <span
                         key={key}
-                        className="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-xs leading-5 text-sky-600"
+                        className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs leading-5"
+                        style={visionCatChipStyle(it.cat)}
                       >
-                        <span className="text-gray-400">{it.cat}</span>
+                        <span className="opacity-60">{it.cat}</span>
                         {it.zh}
                         <button
                           type="button"
                           title="删除该标签"
-                          className="text-sky-400 transition-colors hover:text-rose-500"
+                          className="opacity-60 transition-colors hover:text-rose-500"
                           onClick={() => applyVisionEdit(undefined, key)}
                         >
                           ×
@@ -1587,24 +1620,15 @@ export const FigmemoPage: React.FC = () => {
                               key={key}
                               type="button"
                               onClick={() => toggleVisual(key)}
-                              className={
-                                'rounded-full border px-2 py-0.5 text-xs transition-colors ' +
-                                (on
-                                  ? 'border-ant-color-primary bg-ant-color-primary-bg text-ant-color-primary'
-                                  : 'border-gray-200 bg-white text-gray-600 hover:border-ant-color-primary')
+                              className="rounded-full border px-2 py-0.5 text-xs transition-colors"
+                              style={
+                                on
+                                  ? visionCatChipActiveStyle(t.cat)
+                                  : visionCatChipStyle(t.cat)
                               }
                             >
                               {t.zh}
-                              <span
-                                className={
-                                  'ml-1 ' +
-                                  (on
-                                    ? 'text-ant-color-primary'
-                                    : 'text-gray-400')
-                                }
-                              >
-                                {t.count}
-                              </span>
+                              <span className="ml-1 opacity-70">{t.count}</span>
                             </button>
                           );
                         })}

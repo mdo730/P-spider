@@ -88,7 +88,10 @@ export async function copyLocalImageToClipboard(
   filePath: string,
 ): Promise<void> {
   if (isTauri()) {
-    await invoke('copy_image_to_clipboard', { path: filePath });
+    await invoke('copy_image_to_clipboard', {
+      path: filePath,
+      ...proxyArgs(),
+    });
     return;
   }
   const bytes = await fs.readBinaryFile(filePath);

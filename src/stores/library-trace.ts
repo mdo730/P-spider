@@ -1,3 +1,4 @@
+import { getErrorMessage } from '../utils/error';
 import { create } from 'zustand';
 import {
   TraceProgress,
@@ -39,13 +40,13 @@ export const useLibraryTraceStore = create<LibraryTraceStore>((set, get) => ({
         set({ progress, phase: progress.phase });
       }, controller.signal);
       set({ running: false, phase: 'idle', progress: null, result });
-    } catch (err: any) {
+    } catch (err: unknown) {
       log.error('联网溯源失败', err);
       set({
         running: false,
         phase: 'idle',
         progress: null,
-        error: err?.message || '溯源失败',
+        error: getErrorMessage(err) || '溯源失败',
       });
     } finally {
       controller = null;

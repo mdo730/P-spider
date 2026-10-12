@@ -1,6 +1,7 @@
-/* eslint-disable react/prop-types */
+import { getErrorMessage } from '../../utils/error';
 import {
   DeleteOutlined,
+  EyeOutlined,
   FileOutlined,
   FileZipOutlined,
   FolderOpenOutlined,
@@ -11,6 +12,7 @@ import {
 import { App, Checkbox, Dropdown, MenuProps } from 'antd';
 import React, { useState } from 'react';
 import { deleteLibraryFiles } from '../../services/library-actions';
+import { VisualRecord } from '../../services/vision-core';
 import {
   DownloadHistoryRecord,
   FileTweetInfo,
@@ -57,6 +59,14 @@ interface Props {
   historyMap?: Map<string, DownloadHistoryRecord>;
   /** 联网溯源缓存（文件路径 → 记录） */
   traceMap?: Map<string, TracedRecord>;
+  /** 视觉标签索引（文件路径 → 记录），用于卡片角标 + 右侧信息条标签管理 */
+  visualMap?: Map<string, VisualRecord>;
+  /** 右键「编辑视觉标签」回调 */
+  onEditVisual?: (path: string) => void;
+  /** 右侧信息条里增删视觉标签后回调（更新父级缓存） */
+  onVisualSaved?: (rec: VisualRecord) => void;
+  /** 右侧信息条点视觉标签 → 快捷跳转筛选当前目录 */
+  onFilterTag?: (key: string) => void;
 }
 
 /**
@@ -72,6 +82,10 @@ export const FileGrid: React.FC<Props> = ({
   coverFolderName,
   historyMap,
   traceMap,
+  visualMap,
+  onEditVisual,
+  onVisualSaved,
+  onFilterTag,
 }) => {
   const { message, modal } = App.useApp();
   const setFolderCover = useLibraryStore((s) => s.setFolderCover);
@@ -149,16 +163,16 @@ export const FileGrid: React.FC<Props> = ({
   const reveal = async (file: FileRef) => {
     try {
       await showInFolder(file.path, true);
-    } catch (err: any) {
-      message.error(err?.message || '打开资源管理器失败');
+    } catch (err: unknown) {
+      message.error(getErrorMessage(err) || '打开资源管理器失败');
     }
   };
 
   const openWithSystem = async (file: FileRef) => {
     try {
       await openPath(file.path);
-    } catch (err: any) {
-      message.error(err?.message || '打开文件失败');
+    } catch (err: unknown) {
+      message.error(getErrorMessage(err) || '打开文件失败');
     }
   };
 
@@ -181,9 +195,9 @@ export const FileGrid: React.FC<Props> = ({
       } else {
         message.info('未检测到 Bandizip，已用默认压缩软件打开');
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       hide();
-      message.error(err?.message || '解压失败');
+      message.error(getErrorMessage(err) || '解压失败');
     }
   };
 
@@ -259,7 +273,14 @@ export const FileGrid: React.FC<Props> = ({
     return {
       items: [
         ...(!isVideo
-          ? imageMenuItems({ localPath: file.path, postUrl, author })
+          ? [
+              ...imageMenuItems({ localPath: file.path, postUrl, author }),
+              {
+                key: 'editVisual',
+                label: '编辑视觉标签',
+                icon: <EyeOutlined />,
+              },
+            ]
           : [
               {
                 key: 'reveal',
@@ -305,6 +326,10 @@ export const FileGrid: React.FC<Props> = ({
             message,
           ))
         ) {
+          return;
+        }
+        if (key === 'editVisual') {
+          onEditVisual?.(file.path);
           return;
         }
         if (key === 'open') return openWithSystem(file);
@@ -388,6 +413,14 @@ export const FileGrid: React.FC<Props> = ({
                     <PlayCircleFilled className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-4xl text-white/90" />
                   </div>
                 )}
+                {visualMap?.has(file.path) && (
+                  <span
+                    title="已视觉识别"
+                    className="absolute right-1 bottom-1 z-10 flex h-4 w-4 items-center justify-center rounded-full bg-violet-500 text-white shadow"
+                  >
+                    <EyeOutlined className="text-[10px] leading-none" />
+                  </span>
+                )}
                 {selectMode && (
                   <span className="absolute left-1 top-1">
                     <Checkbox
@@ -428,6 +461,24 @@ export const FileGrid: React.FC<Props> = ({
             setViewerOpen(false);
             setVideoFile(null);
           }}
+          visualFilePath={
+            sidebarFile?.kind === 'image' ? sidebarFile.path : undefined
+          }
+          visualRecord={
+            sidebarFile?.kind === 'image'
+              ? visualMap?.get(sidebarFile.path)
+              : undefined
+          }
+          onVisualSaved={onVisualSaved}
+          onFilterTag={
+            onFilterTag
+              ? (key) => {
+                  onFilterTag(key);
+                  setViewerOpen(false);
+                  setSidebarCollapsed(false);
+                }
+              : undefined
+          }
         />
       )}
 

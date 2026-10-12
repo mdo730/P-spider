@@ -1,4 +1,4 @@
-/* eslint-disable react/prop-types */
+import { getErrorMessage } from '../utils/error';
 import {
   Alert,
   App,
@@ -131,8 +131,8 @@ export const PixivPage: React.FC = () => {
               `${subInterval} 分钟`
             }检查一次新作品`,
       );
-    } catch (err: any) {
-      message.error(err?.message || '订阅失败');
+    } catch (err: unknown) {
+      message.error(getErrorMessage(err) || '订阅失败');
     } finally {
       setSubscribing(false);
     }
@@ -156,8 +156,8 @@ export const PixivPage: React.FC = () => {
           ? '已切换该画师为观察（只进时间流）'
           : '已观察该画师（只进时间流，不下载）',
       );
-    } catch (err: any) {
-      message.error(err?.message || '观察失败');
+    } catch (err: unknown) {
+      message.error(getErrorMessage(err) || '观察失败');
     } finally {
       setSubscribing(false);
     }
@@ -174,8 +174,8 @@ export const PixivPage: React.FC = () => {
     setKeyword(s);
     try {
       await loadUser(s);
-    } catch (err: any) {
-      message.error(err?.message || '加载失败，请检查链接 / ID');
+    } catch (err: unknown) {
+      message.error(getErrorMessage(err) || '加载失败，请检查链接 / ID');
     }
   };
 
@@ -189,8 +189,8 @@ export const PixivPage: React.FC = () => {
     if (st.hasMore) {
       try {
         await st.loadMore();
-      } catch (err: any) {
-        message.error(err?.message || '加载更多失败');
+      } catch (err: unknown) {
+        message.error(getErrorMessage(err) || '加载更多失败');
       }
     }
     return { hasMore: usePixivStore.getState().hasMore };
@@ -225,8 +225,8 @@ export const PixivPage: React.FC = () => {
     try {
       const n = await downloadPixivWork(work);
       message.success(`已加入下载（${n} 个媒体）`);
-    } catch (err: any) {
-      message.error(err?.message || '下载失败');
+    } catch (err: unknown) {
+      message.error(getErrorMessage(err) || '下载失败');
     } finally {
       setDownloading(false);
     }

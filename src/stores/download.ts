@@ -1,3 +1,4 @@
+import { getErrorMessage } from '../utils/error';
 import { fs, invoke, notification, path } from '@tauri-apps/api';
 import MediaType from '../enums/MediaType';
 import { nanoid } from 'nanoid';
@@ -146,10 +147,14 @@ export async function prepareDownloadTask({
     const baseName = media.fileName || `file-${media.id || Date.now()}`;
     fileName = `${datePrefix} ${baseName}`.trim();
   } else if (source !== 'twitter' && source !== 'pixiv') {
-    // 归档站（pawchive）：固定两级目录，附件保留原始文件名
+    // 归档站（pawchive）：固定两级目录；文件名走「归档站文件名模板」（空则保留原始文件名）
     const { dir: archiverDir } = await prepareArchiverPostDir(post);
     dir = archiverDir;
-    fileName = media.fileName || `file-${media.id || Date.now()}`;
+    const tpl = settings.download.pawchiveFileNameTemplate;
+    const fallback = media.fileName || `file-${media.id || Date.now()}`;
+    fileName = tpl
+      ? resolveVariables(tpl, { media, post }) || fallback
+      : fallback;
   } else {
     // twitter / pixiv：走文件名模板机制
     // 用户名绑定：同一账号改显示名（加活动/摊位后缀等）不再新建文件夹
@@ -249,7 +254,7 @@ export interface DownloadStore {
   createDownloadTask: (params: CreateDownloadTaskParams) => Promise<void>;
   batchCreateDownloadTask: (
     paramsList: CreateDownloadTaskParams[],
-  ) => Promise<void>;
+  ) => Promise<number>;
   pauseDownloadTask: (gid: string) => Promise<void>;
   pauseAllDownloadTask: () => Promise<void>;
   unpauseDownloadTask: (gid: string) => Promise<void>;
@@ -349,15 +354,25 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
       if (settings.download.sameFileSkip) {
         const filePath = await path.join(task.dir, task.fileName);
         if (await fs.exists(filePath)) {
-          log().info('Skip because sameFileSkip', task.fileName);
-          continue;
+          let size = 1;
+          try {
+            size = await invoke<number>('file_size', { path: filePath });
+          } catch {
+            size = 1;
+          }
+          // 0 字节（下载失败/中断）视为缺失 → 重新下载
+          if (size > 0) {
+            log().info('Skip because sameFileSkip', task.fileName);
+            continue;
+          }
+          log().info('Re-download empty file', task.fileName);
         }
       }
       tasks.push(task);
     }
 
     if (tasks.length === 0) {
-      return;
+      return 0;
     }
 
     const gids: string[] = (
@@ -380,6 +395,7 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
     set({
       downloadTasks: newTasks,
     });
+    return tasks.length;
   },
   pauseDownloadTask: async (gid) => {
     const task = get().downloadTasks.find((t) => t.gid === gid);
@@ -569,6 +585,24 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
 
       // 任务首次完成时触发，供订阅统计与下载历史记录使用
       if (status.status === 'complete' && task.status !== 'complete') {
+        // 源文件为空（0 字节，站点本身损坏的图）→ 当失败处理，删掉空文件，避免留一堆 0 字节
+        const fp = await path.join(newTask.dir, newTask.fileName);
+        const sz = await invoke<number>('file_size', { path: fp }).catch(
+          () => 0,
+        );
+        if (sz === 0) {
+          await fs.removeFile(fp).catch(() => undefined);
+          updateDownloadTask(
+            {
+              ...newTask,
+              status: AriaStatus.Error,
+              completeSize: 0,
+              error: '源文件为空（0 字节，站点图已损坏）',
+            },
+            Date.now(),
+          );
+          return;
+        }
         // GIF：下载即转成真实 .gif（需系统 ffmpeg + 设置开启），并替换 mp4
         if (
           useSettingsStore.getState().download.gifToRealGif &&
@@ -840,10 +874,11 @@ async function scheduleCreationTasks() {
     await runCreationTask(task, abortController.signal);
     log().info('Completed creation task, remove it', task);
     removeCreationTask(task.id);
-  } catch (err: any) {
+  } catch (err: unknown) {
     log().error('runCreationTaskError', err);
     removeCreationTask(task.id);
-    const reason = typeof err === 'string' ? err : err?.message || '未知原因';
+    const reason =
+      typeof err === 'string' ? err : getErrorMessage(err) || '未知原因';
     notification.sendNotification({
       title: '爬虫任务运行失败',
       body: reason,

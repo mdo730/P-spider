@@ -11,6 +11,7 @@ export const DEFAULT_SETTINGS: Settings = {
     dirTemplate: '',
     fileNameTemplate:
       '%POST_TIME% %USER_SCREEN_NAME% %POST_ID%-%MEDIA_INDEX%%EXT%',
+    pawchiveFileNameTemplate: '%MEDIA_INDEX,w=2%_%TITLE%%EXT%',
     sameFileSkip: true,
     gifToRealGif: false,
   },
@@ -60,7 +61,7 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   vision: {
     engine: 'builtin',
-    model: 'wd-v1-4-moat-tagger-v2',
+    model: 'wd-swinv2-tagger-v3',
     modelDir: '',
     imagesPerPost: '5',
     pythonPath: 'E:\\OPENCODE\\wd14-venv\\Scripts\\python.exe',

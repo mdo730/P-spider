@@ -1,3 +1,4 @@
+import { getErrorMessage } from '../utils/error';
 import { invoke, shell } from '@tauri-apps/api';
 import { createCrossPlatformInvoker } from './cross-platform';
 
@@ -38,8 +39,8 @@ export async function extractArchive(
   try {
     await invoke('extract_archive', { archive, outDir });
     return 'extracted';
-  } catch (err: any) {
-    const msg = String(err?.message ?? err);
+  } catch (err: unknown) {
+    const msg = String(getErrorMessage(err) ?? err);
     if (msg.includes('BANDIZIP_NOT_FOUND')) {
       await shell.open(archive);
       return 'opened';

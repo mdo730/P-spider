@@ -1,4 +1,3 @@
-/* eslint-disable react/prop-types */
 import { CloseOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons';
 import { Avatar } from 'antd';
 import dayjs from 'dayjs';
@@ -10,6 +9,8 @@ import { useSubscriptionStore } from '../../stores/subscription';
 import { getUser } from '../../twitter/api';
 import { buildUserUrl } from '../../twitter/url';
 import { openUrl } from '../../utils/shell';
+import { VisualRecord } from '../../services/vision-core';
+import { VisualTagPanel } from './VisualTagEditor';
 
 /** 用户信息缓存（用户名 → 头像/昵称），避免重复请求 */
 const authorCache = new Map<string, { avatar?: string; name?: string }>();
@@ -29,6 +30,12 @@ interface Props {
   onClose: () => void;
   collapsed: boolean;
   onToggleCollapse: () => void;
+  /** 当前图片的视觉标签记录（仅图片传入） */
+  visualFilePath?: string;
+  visualRecord?: VisualRecord;
+  onVisualSaved?: (rec: VisualRecord) => void;
+  /** 点视觉标签 → 快捷跳转筛选当前目录 */
+  onFilterTag?: (key: string) => void;
 }
 
 /**
@@ -41,6 +48,10 @@ export const TweetSidebar: React.FC<Props> = ({
   onClose,
   collapsed,
   onToggleCollapse,
+  visualFilePath,
+  visualRecord,
+  onVisualSaved,
+  onFilterTag,
 }) => {
   const [authorInfo, setAuthorInfo] = useState<{
     avatar?: string;
@@ -235,6 +246,18 @@ export const TweetSidebar: React.FC<Props> = ({
           <div className="mt-4 text-sm text-gray-500">未找到关联推文信息</div>
         )}
       </div>
+
+      {visualFilePath && onVisualSaved && (
+        <div className="border-t border-white/10 px-5 py-4">
+          <VisualTagPanel
+            dark
+            filePath={visualFilePath}
+            record={visualRecord}
+            onSaved={onVisualSaved}
+            onFilterTag={onFilterTag}
+          />
+        </div>
+      )}
 
       {fileName && (
         <div className="px-5 pb-5 text-xs text-gray-500 break-all">

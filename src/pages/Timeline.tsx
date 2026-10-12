@@ -1,4 +1,4 @@
-/* eslint-disable react/prop-types */
+import { getErrorMessage } from '../utils/error';
 import {
   App,
   Avatar,
@@ -10,6 +10,7 @@ import {
   MenuProps,
   Modal,
   Popover,
+  Progress,
   Select,
   Space,
   Spin,
@@ -71,7 +72,7 @@ import { getHpoiIntelNotes, refreshHpoiIntel } from '../services/hpoi-intel';
 import { syncHpoiIncremental } from '../services/hpoi-delta';
 import {
   ensureHpoiIndexLoaded,
-  getHpoiHobbyRefs,
+  getHpoiHobbyRefsBatch,
 } from '../services/hpoi-search';
 import { useHpoiFavoritesStore } from '../stores/hpoi-favorites';
 
@@ -95,12 +96,25 @@ async function filterHpoiNotesByFav<T extends { postId: string }>(
   } catch {
     indexReady = false;
   }
+  let refsMap = new Map<number, string[]>();
+  if (indexReady) {
+    const needIds: number[] = [];
+    for (const n of list) {
+      const id = Number(n.postId);
+      if (id && !favs.has(`hobby:${id}`)) needIds.push(id);
+    }
+    try {
+      refsMap = await getHpoiHobbyRefsBatch(needIds);
+    } catch {
+      refsMap = new Map();
+    }
+  }
   return list.filter((n) => {
     const id = Number(n.postId);
     if (!id) return false;
     if (favs.has(`hobby:${id}`)) return true;
     if (!indexReady) return false;
-    const refs = getHpoiHobbyRefs(id);
+    const refs = refsMap.get(id);
     if (!refs) return false;
     return refs.some((r) => {
       const [c, rid] = r.split(':');
@@ -340,6 +354,7 @@ export const TimelinePage: React.FC = () => {
   const [loading, setLoading] = useState(!groupsCache);
   const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const checkProgress = useSubscriptionStore((s) => s.checkProgress);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const maxTextLen = useSettingsStore((s) => s.timeline?.maxTextLen ?? 200);
@@ -775,6 +790,31 @@ export const TimelinePage: React.FC = () => {
 
       {/* 右下角圆形按钮：日期定位 / 刷新 / 标签筛选 / 回到顶部 */}
       <div className="fixed right-6 bottom-6 z-50 flex flex-col items-end gap-3">
+        {checkProgress?.running && (
+          <div className="flex items-center gap-2 rounded-full border border-gray-100 bg-white/95 px-3 py-2 shadow-lg">
+            <Progress
+              type="circle"
+              size={30}
+              percent={
+                checkProgress.total
+                  ? Math.round((checkProgress.done / checkProgress.total) * 100)
+                  : 0
+              }
+              format={() => `${checkProgress.done}`}
+            />
+            <div className="text-xs leading-tight">
+              <div className="font-medium">
+                更新订阅 {checkProgress.done}/{checkProgress.total}
+              </div>
+              <div className="max-w-[170px] truncate text-gray-400">
+                {checkProgress.current}
+                {checkProgress.newCount > 0
+                  ? ` · 新增 ${checkProgress.newCount}`
+                  : ''}
+              </div>
+            </div>
+          </div>
+        )}
         <TimelineDateScrubber
           groups={displayedGroups}
           rangeDays={rangeDays}
@@ -1041,8 +1081,15 @@ const TimelineItem: React.FC<{
   const openArticle = useRouteStore((s) => s.openArticle);
   const records = dedupeMediaRecords(group.records);
   const first = records[0];
-  const url = first?.username
-    ? buildUserUrl(first.username)
+  // 无附件帖子（纯文字/投票/外链）records 为空，作者信息只在 group 上——优先取 group
+  const authorName =
+    group.displayName ||
+    group.username ||
+    first?.displayName ||
+    first?.username;
+  const authorUsername = group.username || first?.username;
+  const url = authorUsername
+    ? buildUserUrl(authorUsername)
     : 'javascript:void(0);';
   // 头像：下载/转贴用真人头像；记事用对应标签页的图标
   const platformIcon =
@@ -1141,8 +1188,8 @@ const TimelineItem: React.FC<{
       } else {
         message.success(`已订阅 @${group.username}，之后其原创媒体会自动下载`);
       }
-    } catch (err: any) {
-      message.error(`订阅失败：${err?.message || '未知原因'}`);
+    } catch (err: unknown) {
+      message.error(`订阅失败：${getErrorMessage(err) || '未知原因'}`);
     } finally {
       setSubscribing(false);
     }
@@ -1215,8 +1262,8 @@ const TimelineItem: React.FC<{
         media,
       });
       message.success('已添加到下载队列');
-    } catch (err: any) {
-      message.error(err?.message || '添加下载失败');
+    } catch (err: unknown) {
+      message.error(getErrorMessage(err) || '添加下载失败');
     }
   };
 
@@ -1269,21 +1316,21 @@ const TimelineItem: React.FC<{
               </span>
             ) : isNote ? (
               <span className="font-medium">{group.sourceLabel || '记事'}</span>
-            ) : first?.displayName || first?.username ? (
+            ) : authorName ? (
               <a
                 href={url}
                 target="_blank"
                 rel="noreferrer"
                 className="font-medium"
               >
-                {first?.displayName || first?.username}
+                {authorName}
               </a>
             ) : (
               <span className="font-medium">未知用户</span>
             )}
-            {!isNote && !isRetweet && (
+            {!isNote && !isRetweet && authorUsername && (
               <span className="text-gray-400 text-sm ml-2">
-                @{first?.username}
+                @{authorUsername}
               </span>
             )}
             {/* 记事：站点分类色标 */}
@@ -1531,14 +1578,14 @@ const TimelineItem: React.FC<{
                 if (k === 'reveal' && localPath) {
                   try {
                     await showInFolder(localPath, true);
-                  } catch (err: any) {
-                    message.error(err?.message || '打开资源管理器失败');
+                  } catch (err: unknown) {
+                    message.error(getErrorMessage(err) || '打开资源管理器失败');
                   }
                 } else if (k === 'open' && localPath) {
                   try {
                     await openPath(localPath);
-                  } catch (err: any) {
-                    message.error(err?.message || '打开文件失败');
+                  } catch (err: unknown) {
+                    message.error(getErrorMessage(err) || '打开文件失败');
                   }
                 } else if (k === 'download') {
                   await saveMedia(record);

@@ -84,14 +84,16 @@ function extractExternalLinks(
   return Array.from(links);
 }
 
-function toPlatformPost(
+export function toPlatformPost(
   post: any,
   creator: PlatformCreator,
   config: ArchiverAdapterConfig,
 ): PlatformPost {
+  // 顺序：封面（file）在前，其后是正文附件（attachments）原顺序。
+  // 该顺序即「正确顺序」，用于 %MEDIA_INDEX% 编号与封面选择。
   const medias: PlatformMedia[] = [
-    ...(Array.isArray(post?.attachments) ? post.attachments : []),
     ...(post?.file ? [post.file] : []),
+    ...(Array.isArray(post?.attachments) ? post.attachments : []),
   ]
     .map((att) => toPlatformMedia(att, config))
     .filter((m): m is PlatformMedia => m !== null);

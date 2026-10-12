@@ -90,6 +90,13 @@ fn focus_browser() {
 /// 打开 URL（系统默认浏览器），并尝试把浏览器窗口提到最前
 #[tauri::command]
 pub fn open_url_foreground(url: String) -> Result<(), String> {
+    // 安全校验：仅允许 http/https，拒绝 file:// 与本地可执行文件路径，
+    // 防止 XSS 链经此命令执行任意程序
+    let lower = url.trim().to_ascii_lowercase();
+    if !lower.starts_with("http://") && !lower.starts_with("https://") {
+        return Err(format!("拒绝打开非 http(s) 链接：{url}"));
+    }
+
     // 允许随后启动/激活的进程（浏览器）自行抢前台
     unsafe { AllowSetForegroundWindow(ASFW_ANY) };
 

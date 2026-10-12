@@ -1,4 +1,3 @@
-/* eslint-disable react/prop-types */
 import { dialog } from '@tauri-apps/api';
 import { Button, Input, InputProps, Space } from 'antd';
 import React from 'react';
