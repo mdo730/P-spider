@@ -47,6 +47,8 @@ import {
   DownloadHistoryRecord,
   getMediaOriginalUrl,
   getMediaThumbUrl,
+  getRecentLocalMediaMap,
+  mediaUrlKey,
   TimelineGroup,
 } from '../stores/download-history';
 import { useDownloadStore } from '../stores/download';
@@ -312,7 +314,11 @@ function resolveFeedLibraryTags(
 }
 
 /** 把 feed 缓存条目（X/Pawchive/pixiv）转成时间流分组 */
-function feedGroup(item: FeedItem, libraryTags: string[]): TimelineGroup {
+function feedGroup(
+  item: FeedItem,
+  libraryTags: string[],
+  localMedia: Map<string, { filePath: string; existsLocal: boolean }>,
+): TimelineGroup {
   return {
     postId: item.id,
     tweetTime: item.time,
@@ -323,22 +329,26 @@ function feedGroup(item: FeedItem, libraryTags: string[]): TimelineGroup {
     kind: 'download',
     libraryTags,
     filterTokens: libraryTags,
-    records: item.medias.map((m) => ({
-      postId: item.id,
-      tweetTime: item.time,
-      mediaType: m.type,
-      mediaUrl: m.url,
-      videoUrl: m.videoUrl,
-      filePath: '',
-      fileName: '',
-      downloadedAt: 0,
-      source: 'subscription',
-      platform: item.source,
-      postUrl: item.url,
-      username: item.username,
-      displayName: item.displayName,
-      avatar: item.avatar,
-    })),
+    records: item.medias.map((m) => {
+      const local = localMedia.get(mediaUrlKey(m.url));
+      return {
+        postId: item.id,
+        tweetTime: item.time,
+        mediaType: m.type,
+        mediaUrl: m.url,
+        videoUrl: m.videoUrl,
+        filePath: local?.filePath || '',
+        existsLocal: local ? local.existsLocal : undefined,
+        fileName: '',
+        downloadedAt: 0,
+        source: 'subscription' as const,
+        platform: item.source,
+        postUrl: item.url,
+        username: item.username,
+        displayName: item.displayName,
+        avatar: item.avatar,
+      };
+    }),
   };
 }
 
@@ -392,11 +402,25 @@ export const TimelinePage: React.FC = () => {
     } catch {
       // 忽略
     }
+    // 已下载媒体：mediaUrlKey → 本地路径（feed 条目对回本地文件，动图能动、复制走本地）
+    let localMedia = new Map<
+      string,
+      { filePath: string; existsLocal: boolean }
+    >();
+    try {
+      localMedia = await getRecentLocalMediaMap(days);
+    } catch {
+      // 忽略
+    }
     let downloads: TimelineGroup[] = [];
     try {
       const feed = await getRecentFeedItems(days);
       downloads = feed.map((it) =>
-        feedGroup(it, resolveFeedLibraryTags(it, folderTags, pinned)),
+        feedGroup(
+          it,
+          resolveFeedLibraryTags(it, folderTags, pinned),
+          localMedia,
+        ),
       );
     } catch {
       // 忽略

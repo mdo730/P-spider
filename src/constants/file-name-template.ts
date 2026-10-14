@@ -89,7 +89,15 @@ export const REPLACER_MAP: Record<
   },
   USER_NAME: {
     desc: '用户昵称',
-    replacer: R.path(['post', 'creator', 'name']),
+    replacer: (data) => {
+      const name = data.post.creator?.name;
+      // name 为空或仅含点（Windows 非法文件夹名）→ 回退到 @username
+      if (!name || /^[.\s]*$/.test(name)) {
+        const username = data.post.creator?.username;
+        return username ? `@${username}` : 'unknown';
+      }
+      return name;
+    },
   },
   USER_SCREEN_NAME: {
     desc: '用户名',

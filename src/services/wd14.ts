@@ -381,6 +381,7 @@ export function groupPromptTags(
     '配饰',
     '背景',
     '画质',
+    '图类',
   ];
   const byCat = new Map<string, PromptTag[]>();
   for (const raw of rawTags) {

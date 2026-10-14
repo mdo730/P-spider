@@ -247,7 +247,10 @@ pub fn convert_video_to_gif(src: String, dst: String) -> Result<(), String> {
 }
 
 /// 把图片复制到系统剪贴板（原生写，无需窗口聚焦、比 WebView clipboard API 快）。
-/// 传 `path`（本地文件）或 `url`（远程，走代理拉取）二选一；解码后以 BMP 写入剪贴板。
+/// 传 `path`（本地文件）或 `url`（远程，走代理拉取）二选一。
+/// 模仿 QQ 复制图片的剪贴板布局：QQ 私有富文本 XML(filepath) + FileDrop + "GIF" + 首帧，
+/// QQ 粘贴时按 filepath 加载本地文件（gif 动图 / 静态图）。
+/// 传 `url`（如时间流里未下载的图）时，先把图片缓存到本地临时文件，再用该文件路径。
 #[tauri::command]
 pub fn copy_image_to_clipboard(
   path: Option<String>,
@@ -258,33 +261,98 @@ pub fn copy_image_to_clipboard(
 ) -> Result<(), String> {
   #[cfg(windows)]
   {
-    let bytes: Vec<u8> = if let Some(p) = path.filter(|p| !p.is_empty()) {
-      std::fs::read(&p).map_err(|e| format!("读取图片失败：{e}"))?
-    } else if let Some(u) = url.filter(|u| !u.is_empty()) {
-      let mut b = reqwest::blocking::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(15))
-        .timeout(std::time::Duration::from_secs(60));
-      if enable_proxy && !proxy_url.is_empty() {
-        b = b.proxy(reqwest::Proxy::all(&proxy_url).map_err(|e| e.to_string())?);
-      } else if !enable_proxy {
-        b = b.no_proxy();
+    // 读字节；并确定用于 QQ filepath 的本地文件路径（远程图先缓存到临时文件）
+    let (bytes, src_path): (Vec<u8>, Option<std::path::PathBuf>) =
+      if let Some(p) = path.as_ref().filter(|p| !p.is_empty()) {
+        let b = std::fs::read(p).map_err(|e| format!("读取图片失败：{e}"))?;
+        (b, Some(std::path::PathBuf::from(p)))
+      } else if let Some(u) = url.filter(|u| !u.is_empty()) {
+        let mut b = reqwest::blocking::Client::builder()
+          .connect_timeout(std::time::Duration::from_secs(15))
+          .timeout(std::time::Duration::from_secs(60));
+        // 本地媒体代理（127.0.0.1 / localhost）必须直连——它内部已自带上游代理（p= 参数），
+        // 若再经外部代理会因代理无法转发 localhost 而报 502。
+        let low = u.to_ascii_lowercase();
+        let is_local = low.starts_with("http://127.0.0.1")
+          || low.starts_with("http://localhost")
+          || low.starts_with("http://[::1]");
+        if is_local {
+          b = b.no_proxy();
+        } else if enable_proxy && !proxy_url.is_empty() {
+          b = b.proxy(reqwest::Proxy::all(&proxy_url).map_err(|e| e.to_string())?);
+        } else if !enable_proxy {
+          b = b.no_proxy();
+        }
+        let client = b.build().map_err(|e| e.to_string())?;
+        let mut req = client.get(&u);
+        if let Some(hs) = headers {
+          for (k, v) in hs {
+            req = req.header(k, v);
+          }
+        }
+        let resp = req.send().map_err(|e| e.to_string())?;
+        if !resp.status().is_success() {
+          return Err(format!("下载图片失败：HTTP {}", resp.status().as_u16()));
+        }
+        let data = resp.bytes().map_err(|e| e.to_string())?.to_vec();
+        // 缓存到本地临时文件，供 QQ filepath 引用（失败则退回纯位图）
+        let cached = cache_clipboard_file(&data);
+        (data, cached)
+      } else {
+        return Err("缺少图片路径或链接".into());
+      };
+
+    let is_gif = bytes.starts_with(b"GIF89a") || bytes.starts_with(b"GIF87a");
+
+    use clipboard_win::{raw, Clipboard};
+    let _clip = Clipboard::new_attempts(10).map_err(|e| format!("打开剪贴板失败：{e}"))?;
+
+    // 有本地文件路径：模仿 QQ 剪贴板布局（QQ 粘贴按 filepath 加载本地文件）
+    if let Some(local_path) = src_path.as_ref() {
+      let local_str = local_path.to_string_lossy().to_string();
+      // FileDrop 清空剪贴板并写入文件列表
+      raw::set_file_list(&[local_str.clone()])
+        .map_err(|e| format!("写入文件列表失败：{e}"))?;
+      // QQ 私有富文本：XML filepath 指向本地文件
+      if let Some(qq_fmt) = raw::register_format("QQ_Unicode_RichEdit_Format") {
+        let esc = local_str.replace('&', "&amp;").replace('"', "&quot;");
+        let xml = format!(
+          "<QQRichEditFormat><Info version=\"1001\"></Info><EditElement type=\"1\" filepath=\"{esc}\" shortcut=\"\"></EditElement></QQRichEditFormat>"
+        );
+        let mut data = xml.into_bytes();
+        data.push(0);
+        let _ = raw::set_without_clear(qq_fmt.get(), &data);
       }
-      let client = b.build().map_err(|e| e.to_string())?;
-      let mut req = client.get(&u);
-      if let Some(hs) = headers {
-        for (k, v) in hs {
-          req = req.header(k, v);
+      // 标准 "GIF" 注册格式（Telegram / Chrome 等读它）
+      if is_gif {
+        if let Some(gif_fmt) = raw::register_format("GIF") {
+          let _ = raw::set_without_clear(gif_fmt.get(), &bytes);
         }
       }
-      let resp = req.send().map_err(|e| e.to_string())?;
-      if !resp.status().is_success() {
-        return Err(format!("下载图片失败：HTTP {}", resp.status().as_u16()));
+      // 首帧静态位图兜底（不支持动画的应用）
+      if let Ok(img) = image::load_from_memory(&bytes) {
+        let mut bmp: Vec<u8> = Vec::new();
+        if img
+          .write_to(
+            &mut std::io::Cursor::new(&mut bmp),
+            image::ImageOutputFormat::Bmp,
+          )
+          .is_ok()
+        {
+          let _ = raw::set_bitmap(&bmp);
+        }
       }
-      resp.bytes().map_err(|e| e.to_string())?.to_vec()
-    } else {
-      return Err("缺少图片路径或链接".into());
-    };
+      return Ok(());
+    }
 
+    // 无本地路径（缓存失败兜底）：写 "GIF" 格式 + 位图
+    raw::empty().map_err(|e| format!("清空剪贴板失败：{e}"))?;
+    if is_gif {
+      if let Some(gif_fmt) = raw::register_format("GIF") {
+        raw::set_without_clear(gif_fmt.get(), &bytes)
+          .map_err(|e| format!("写入 GIF 失败：{e}"))?;
+      }
+    }
     let img = image::load_from_memory(&bytes).map_err(|e| format!("不支持的图片格式：{e}"))?;
     let mut bmp: Vec<u8> = Vec::new();
     img.write_to(
@@ -292,8 +360,7 @@ pub fn copy_image_to_clipboard(
       image::ImageOutputFormat::Bmp,
     )
     .map_err(|e| format!("转换为 BMP 失败：{e}"))?;
-    clipboard_win::set_clipboard(clipboard_win::formats::Bitmap, bmp.as_slice())
-      .map_err(|e| format!("写入剪贴板失败：{e}"))?;
+    raw::set_bitmap(&bmp).map_err(|e| format!("写入剪贴板失败：{e}"))?;
     Ok(())
   }
   #[cfg(not(windows))]
@@ -301,6 +368,60 @@ pub fn copy_image_to_clipboard(
     let _ = (path, url, enable_proxy, proxy_url, headers);
     Err("仅支持 Windows".into())
   }
+}
+
+/// 按字节魔数推断图片扩展名
+#[cfg(windows)]
+fn guess_image_ext(bytes: &[u8]) -> &'static str {
+  if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+    "gif"
+  } else if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+    "png"
+  } else if bytes.starts_with(b"\xff\xd8\xff") {
+    "jpg"
+  } else if bytes.len() > 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+    "webp"
+  } else if bytes.starts_with(b"BM") {
+    "bmp"
+  } else {
+    "bin"
+  }
+}
+
+/// 把图片字节缓存到本地临时文件（供 QQ filepath 引用），返回文件路径；
+/// 顺带清理 3 小时前的旧缓存，避免临时目录无限增长。
+#[cfg(windows)]
+fn cache_clipboard_file(bytes: &[u8]) -> Option<std::path::PathBuf> {
+  use std::time::{SystemTime, UNIX_EPOCH};
+  let dir = std::env::temp_dir().join("p-spider-clipboard");
+  std::fs::create_dir_all(&dir).ok()?;
+  if let Ok(rd) = std::fs::read_dir(&dir) {
+    if let Some(cutoff) =
+      SystemTime::now().checked_sub(std::time::Duration::from_secs(3 * 3600))
+    {
+      for e in rd.flatten() {
+        if let Ok(md) = e.metadata() {
+          if let Ok(mtime) = md.modified() {
+            if mtime < cutoff {
+              let _ = std::fs::remove_file(e.path());
+            }
+          }
+        }
+      }
+    }
+  }
+  let nanos = SystemTime::now()
+    .duration_since(UNIX_EPOCH)
+    .map(|d| d.as_nanos())
+    .unwrap_or(0);
+  let path = dir.join(format!(
+    "{}-{}.{}",
+    std::process::id(),
+    nanos,
+    guess_image_ext(bytes)
+  ));
+  std::fs::write(&path, bytes).ok()?;
+  Some(path)
 }
 
 /// 下载 pixiv ugoira 的 zip → 解压帧序列 → 用系统 ffmpeg 合成 mp4（或 gif）。

@@ -417,6 +417,7 @@ export const FolderGrid: React.FC<Props> = ({
       '道具',
       '配饰',
       '内容',
+      '图类',
       'R18',
     ];
     const byCat = new Map<

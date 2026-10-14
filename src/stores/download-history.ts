@@ -207,6 +207,45 @@ export function resolvePostUrl(
   return undefined;
 }
 
+/** 媒体 URL 的稳定键：去 query、取文件名、小写（feed 媒体 ↔ 下载历史 匹配用） */
+export function mediaUrlKey(url?: string): string {
+  if (!url) return '';
+  const noQ = url.split('?')[0];
+  const base = noQ.substring(noQ.lastIndexOf('/') + 1);
+  return base.toLowerCase();
+}
+
+/**
+ * 近 N 天「已下载媒体」映射：mediaUrlKey → { filePath, existsLocal }。
+ * 供时间流把 feed 条目对回本地文件——已下载的用本地：动图能动、复制走本地文件。
+ */
+export async function getRecentLocalMediaMap(
+  days = 7,
+): Promise<Map<string, { filePath: string; existsLocal: boolean }>> {
+  const out = new Map<string, { filePath: string; existsLocal: boolean }>();
+  const sinceIso = new Date(
+    Date.now() - days * 24 * 60 * 60 * 1000,
+  ).toISOString();
+  let recent: DownloadHistoryRecord[] = [];
+  try {
+    recent = await invoke<DownloadHistoryRecord[]>('hist_recent', {
+      sinceIso,
+      limit: 0,
+    });
+  } catch (err) {
+    log().warn('读取下载历史失败', err);
+    return out;
+  }
+  for (const r of recent) {
+    if (!r.filePath || !r.mediaUrl) continue;
+    const key = mediaUrlKey(r.mediaUrl);
+    if (!key || out.has(key)) continue;
+    const existsLocal = await fs.exists(r.filePath).catch(() => false);
+    out.set(key, { filePath: r.filePath, existsLocal });
+  }
+  return out;
+}
+
 export interface FileTweetInfo {
   displayName?: string;
   username?: string;

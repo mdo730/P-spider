@@ -59,6 +59,10 @@ export function unicodeSplit(str: string) {
 }
 
 export function unicodeFilenamify(str: string) {
+  // Windows 不允许 "." 和 ".." 作为文件夹名（代表当前/上级目录）
+  if (str === '.' || str === '..') {
+    return '_';
+  }
   if (windowsReservedNameRegex().test(str)) {
     return str + '!';
   }
