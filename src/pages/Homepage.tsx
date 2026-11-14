@@ -7,6 +7,7 @@ import { useAppStateStore } from '../stores/app-state';
 import { useHomepageStore } from '../stores/homepage';
 import { buildUserUrl } from '../twitter/url';
 import { parseTwitterScreenName } from '../utils/twitter-input';
+import { mediaProxyUrl } from '../utils/media-proxy';
 
 export const Homepage: React.FC = () => {
   const { message } = App.useApp();
@@ -151,7 +152,15 @@ export const Homepage: React.FC = () => {
                   rel="noreferrer"
                 >
                   <div>
-                    <Avatar src={userInfo.data.avatar} size={50} alt="头像" />
+                    <Avatar
+                      src={
+                        userInfo.data.avatar
+                          ? mediaProxyUrl(userInfo.data.avatar)
+                          : undefined
+                      }
+                      size={50}
+                      alt="头像"
+                    />
                   </div>
                   <div className="ml-2">
                     <p>

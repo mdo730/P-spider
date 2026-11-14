@@ -88,6 +88,8 @@ import {
   tagCoveredSet,
 } from '../utils/library';
 import { openUrl } from '../utils/shell';
+import { ensureMediaProxy, mediaProxyUrl } from '../utils/media-proxy';
+import { onTaskCompleted } from '../stores/download';
 import { handleImageMenuKey, imageMenuItems } from '../utils/image-menu';
 import { useTextSelectionMenu } from '../hooks/useTextSelectionMenu';
 import { LocalThumb } from '../components/library/LocalThumb';
@@ -108,6 +110,17 @@ const TAG_GROUPS: { key: string; options: string[] }[] = [
   { key: '发型', options: ['长发', '短发', '特殊发型'] },
   { key: '体型', options: ['幼女', '成女', '熟女'] },
 ];
+
+// 提前启动本地流式代理：fig-memo 站点直连很慢，远程图统一经应用代理取
+ensureMediaProxy();
+
+const FIGMEMO_IMG_REFERER = 'https://fig-memo-r18.site/';
+
+/** 远程图走本地流式代理（缩略图、大图预览同等处理） */
+function remoteFigImage(url?: string): string | undefined {
+  if (!url || !/^https?:/i.test(url)) return url;
+  return mediaProxyUrl(url, FIGMEMO_IMG_REFERER);
+}
 
 // 会话级内存缓存：切走再切回 fig-memo 时直接用内存列表，避免重复「读缓存→构建→同步标签→渲染」
 const ITEMS_TTL = 3 * 60 * 1000;
@@ -292,6 +305,79 @@ export const FigmemoPage: React.FC = () => {
 
   const relOf = (item: FigmemoListItem) => `fig-memo/${item.folderName}`;
 
+  const selectedRef = useRef<FigmemoListItem | null>(null);
+  useEffect(() => {
+    selectedRef.current = selected;
+  }, [selected]);
+
+  /** 扫描文章目录里的有效图片（过滤 0 字节的损坏文件，避免裂图） */
+  const scanLocalImages = useCallback(async (folderPath: string) => {
+    try {
+      const content = await scanDirectory(folderPath);
+      const imgs = content.files.filter((f) => f.kind === 'image');
+      const sized = await Promise.all(
+        imgs.map(async (f) => ({
+          ...f,
+          size: await invoke<number>('file_size', { path: f.path }).catch(
+            () => 0,
+          ),
+        })),
+      );
+      return sized
+        .filter((f) => f.size > 0)
+        .map((f) => ({ path: f.path, name: f.name }));
+    } catch {
+      return [];
+    }
+  }, []);
+
+  /** 下载完成 / 已下载时把当前文章切换为本地图展示 */
+  const syncLocalImages = useCallback(
+    async (item: FigmemoListItem) => {
+      const local = await scanLocalImages(item.folderPath);
+      if (local.length > 0 && openArticleCache?.item.postId === item.postId) {
+        openArticleCache.localImages = local;
+      }
+      if (selectedRef.current?.postId !== item.postId || local.length === 0) {
+        return;
+      }
+      setLocalImages(local);
+      const count = local.length;
+      setSelected((s) =>
+        s && s.postId === item.postId
+          ? { ...s, exists: true, imageCount: count }
+          : s,
+      );
+      setItems((prev) =>
+        prev.map((it) =>
+          it.postId === item.postId
+            ? { ...it, exists: true, imageCount: count }
+            : it,
+        ),
+      );
+    },
+    [scanLocalImages],
+  );
+
+  // 下载队列里的 fig-memo 任务完成后，立刻把详情切到本地图（图片下载很快，不必等重开）
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const unlisten = onTaskCompleted.listen((task) => {
+      const cur = selectedRef.current;
+      if (!cur || task.source !== 'figmemo' || task.post?.id !== cur.postId) {
+        return;
+      }
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        void syncLocalImages(cur);
+      }, 600);
+    });
+    return () => {
+      if (timer) clearTimeout(timer);
+      unlisten();
+    };
+  }, [syncLocalImages]);
+
   const load = useCallback(
     async (force = false) => {
       // 快速路径：最近构建过就直接用内存列表（切回不卡），仅按间隔后台静默刷新。
@@ -363,28 +449,9 @@ export const FigmemoPage: React.FC = () => {
     setLocalImages([]);
     setDetailLoading(true);
     try {
-      // 本地优先：已下载且目录里有图片时，直接读本地（走缩略图缓存），不再拉站点媒体
-      let local: { path: string; name: string }[] = [];
-      if (item.exists) {
-        try {
-          const content = await scanDirectory(item.folderPath);
-          // 过滤掉 0 字节文件（源图损坏/下载失败留下的空文件），不显示裂图
-          const imgs = content.files.filter((f) => f.kind === 'image');
-          const sized = await Promise.all(
-            imgs.map(async (f) => ({
-              ...f,
-              size: await invoke<number>('file_size', { path: f.path }).catch(
-                () => 0,
-              ),
-            })),
-          );
-          local = sized
-            .filter((f) => f.size > 0)
-            .map((f) => ({ path: f.path, name: f.name }));
-        } catch {
-          local = [];
-        }
-      }
+      // 本地优先：目录里有图片就直接读本地（走缩略图缓存），不再拉站点媒体。
+      // 不看 item.exists——下载完成到列表刷新之间 exists 可能还是旧的。
+      const local = await scanLocalImages(item.folderPath);
       if (local.length > 0) {
         setLocalImages(local);
         const d = await fetchPostDetail(item.postId);
@@ -472,7 +539,6 @@ export const FigmemoPage: React.FC = () => {
         () => [] as PlatformMedia[],
       );
       setImages(imgs);
-      setLocalImages([]);
       setSelected((s) =>
         s
           ? { ...s, imageCount: imgs.length, exists: added > 0 || s.exists }
@@ -486,6 +552,8 @@ export const FigmemoPage: React.FC = () => {
         ),
       );
       await load();
+      // 已经全部在本地的（added=0）立刻切本地；新任务的完成事件会通过监听器再同步
+      void syncLocalImages(selected);
     } catch (err: unknown) {
       message.error(getErrorMessage(err) || '保存失败');
     } finally {
@@ -1127,12 +1195,12 @@ export const FigmemoPage: React.FC = () => {
                         >
                           <li className="lib-card-cv relative aspect-square bg-white rounded-md overflow-hidden border-[1px] border-gray-100 group">
                             <Image
-                              src={m.thumbUrl || m.url}
+                              src={remoteFigImage(m.thumbUrl || m.url)}
                               alt={m.fileName || ''}
                               loading="lazy"
                               className="object-cover w-full h-full"
                               wrapperClassName="w-full h-full"
-                              preview={{ src: m.url }}
+                              preview={{ src: remoteFigImage(m.url) }}
                             />
                           </li>
                         </Dropdown>
@@ -1693,7 +1761,7 @@ export const FigmemoPage: React.FC = () => {
                             />
                           ) : item.coverUrl ? (
                             <img
-                              src={item.coverUrl}
+                              src={remoteFigImage(item.coverUrl)}
                               alt={item.title}
                               loading="lazy"
                               referrerPolicy="no-referrer"

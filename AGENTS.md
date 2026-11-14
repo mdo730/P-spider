@@ -44,7 +44,7 @@ pnpm lint              # prettier + eslint
 
 - **浏览器预览判断**：`useBootstrap.ts` 用 `'__TAURI__' in window || '__TAURI_INTERNALS__' in window` 判断是否 Tauri 环境。Tauri v1 注入 `window.__TAURI__`，v2 注入 `__TAURI_INTERNALS__`。不要只用其中一个，否则桌面版会被误判为浏览器而跳过 aria2 启动（曾因此踩坑）
 - **aria2 端口**：P-Spider 用 **6802**（原版 x-spider 用 6801），避免与 x-spider 同时运行冲突
-- **数据存储**：`%APPDATA%\p-spider\` 下，`settings.json`（含 pixiv refresh_token/用户缓存）、`app-state.json`（含 cookie）、`subscriptions.json`（订阅+统计）、`downloads.jsonl`（下载历史，本地库溯源用）、`timeline-feed.jsonl`（时间流 v2 的订阅 feed 缓存）、`pet.json`（宠物彩蛋「香蕉君」存档）
+- **数据存储**：`%APPDATA%\p-spider\` 下，`settings.json`（含 pixiv refresh_token/用户缓存）、`app-state.json`（含 cookie）、`subscriptions.json`（订阅+统计）、`downloads.jsonl`（下载历史，本地库溯源用）、`timeline-feed.jsonl`（时间流 v2 的订阅 feed 缓存）、`launcher.json`（启动器条目/标签树/开关）、`launcher-icons/`（启动器图标缓存）、`pet.json`（宠物彩蛋「香蕉君」存档）
 - **GPL-3.0**：保留原 LICENSE，分发需附源码
 
 - **宠物彩蛋解耦**：`src/pet/` 是自包含模块，core（`engine.ts`）为纯函数、零外部依赖；与业务唯一耦合点是 `pet/activity-bridge.ts`（main.tsx 副作用 import）。改宠物功能不要反向侵入业务 store；新增物品只加 `pet/items.ts` 数据。

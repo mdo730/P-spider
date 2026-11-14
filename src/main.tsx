@@ -84,6 +84,9 @@ async function renderMainApp(): Promise<void> {
   await import('./stores/figmemo');
   await import('./stores/moeyo');
   await import('./pet/activity-bridge');
+  // 预启动本地媒体代理：主页/预览等处的远程图片经它走应用代理（内置代理也能生效）
+  const { ensureMediaProxy } = await import('./utils/media-proxy');
+  ensureMediaProxy();
   const { App } = await import('./App');
   log.info('Bootstrap view');
   ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(

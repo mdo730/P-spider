@@ -1,4 +1,5 @@
 import { getErrorMessage } from '../../utils/error';
+import { invoke } from '@tauri-apps/api';
 import {
   DeleteOutlined,
   EyeOutlined,
@@ -18,6 +19,7 @@ import {
   FileTweetInfo,
 } from '../../stores/download-history';
 import { useLibraryStore } from '../../stores/library';
+import { useLibraryRootsStore } from '../../stores/library-roots';
 import { useSettingsStore } from '../../stores/settings';
 import {
   LibraryFile,
@@ -89,6 +91,7 @@ export const FileGrid: React.FC<Props> = ({
 }) => {
   const { message, modal } = App.useApp();
   const setFolderCover = useLibraryStore((s) => s.setFolderCover);
+  const activeRootId = useLibraryRootsStore((s) => s.activeRootId);
   const fileNameTemplate = useSettingsStore((s) => s.download.fileNameTemplate);
   const [videoFile, setVideoFile] = useState<LibraryFile | null>(null);
   const [viewerOpen, setViewerOpen] = useState(false);
@@ -273,15 +276,13 @@ export const FileGrid: React.FC<Props> = ({
     return {
       items: [
         ...(!isVideo
-          ? [
-              ...imageMenuItems({ localPath: file.path, postUrl, author }),
-              {
-                key: 'editVisual',
-                label: '编辑视觉标签',
-                icon: <EyeOutlined />,
-              },
-            ]
+          ? imageMenuItems({ localPath: file.path, postUrl, author })
           : [
+              {
+                key: 'toGif',
+                label: '转为 GIF',
+                icon: <PlayCircleFilled />,
+              },
               {
                 key: 'reveal',
                 label: '在资源管理器中打开',
@@ -291,12 +292,17 @@ export const FileGrid: React.FC<Props> = ({
                 ? [
                     {
                       key: 'openPost',
-                      label: '打开原网页',
+                      label: '看原帖',
                       icon: <LinkOutlined />,
                     },
                   ]
                 : []),
             ]),
+        {
+          key: 'editVisual',
+          label: '编辑视觉标签',
+          icon: <EyeOutlined />,
+        },
         { type: 'divider' },
         { key: 'open', label: '打开', icon: <FileOutlined /> },
         ...(coverFolderName
@@ -328,6 +334,20 @@ export const FileGrid: React.FC<Props> = ({
         ) {
           return;
         }
+        if (key === 'toGif') {
+          const src = file.path;
+          const dst = `${src.replace(/\.[^.\\/]+$/, '')}.gif`;
+          const hide = message.loading('正在转换为 GIF…（需系统 ffmpeg）', 0);
+          try {
+            await invoke('convert_video_to_gif', { src, dst });
+            hide();
+            message.success('已生成 GIF（与视频同目录）');
+          } catch (err: unknown) {
+            hide();
+            message.error(getErrorMessage(err) || '转换失败（需系统 ffmpeg）');
+          }
+          return;
+        }
         if (key === 'editVisual') {
           onEditVisual?.(file.path);
           return;
@@ -339,7 +359,7 @@ export const FileGrid: React.FC<Props> = ({
           return;
         }
         if (key === 'setCover' && coverFolderName) {
-          setFolderCover(coverFolderName, file.path);
+          setFolderCover(activeRootId, coverFolderName, file.path);
           message.success('已设为文件夹缩略图');
           return;
         }
@@ -461,13 +481,9 @@ export const FileGrid: React.FC<Props> = ({
             setViewerOpen(false);
             setVideoFile(null);
           }}
-          visualFilePath={
-            sidebarFile?.kind === 'image' ? sidebarFile.path : undefined
-          }
+          visualFilePath={sidebarFile?.path}
           visualRecord={
-            sidebarFile?.kind === 'image'
-              ? visualMap?.get(sidebarFile.path)
-              : undefined
+            sidebarFile ? visualMap?.get(sidebarFile.path) : undefined
           }
           onVisualSaved={onVisualSaved}
           onFilterTag={

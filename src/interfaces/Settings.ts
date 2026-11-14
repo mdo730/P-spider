@@ -117,6 +117,19 @@ export interface Settings_V3 extends Settings_V2 {
     /** CUDA/cuDNN DLL 目录（external，默认复用 ComfyUI torch 的 lib） */
     cudaLibPath?: string;
   };
+  /** 内置代理（mihomo 核心 + Clash 订阅） */
+  builtinProxy?: {
+    /** 启用内置代理（应用请求走本地 mixed-port） */
+    enable?: boolean;
+    /** Clash 订阅链接 */
+    subscriptionUrl?: string;
+    /** 本地 mixed-port（默认 7899） */
+    port?: number;
+    /** 启用前的代理地址备份（关闭时还原） */
+    savedUrl?: string;
+    /** 启用前的「使用系统代理」备份 */
+    savedUseSystem?: boolean;
+  };
 }
 
 export type Settings = Settings_V3;

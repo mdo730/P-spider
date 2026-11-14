@@ -10,4 +10,6 @@ export interface CreationTask {
   status: 'waiting' | 'active';
   completeCount: number;
   skipCount: number;
+  /** 临时状态提示（如「X 限流，等待中」） */
+  note?: string;
 }

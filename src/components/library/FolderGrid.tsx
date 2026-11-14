@@ -33,12 +33,16 @@ import {
 } from '../../services/library-visual';
 import { effectiveItems, VisualRecord } from '../../services/vision-core';
 import { useLibraryVisionStore } from '../../stores/library-vision';
-import { useLibraryStore } from '../../stores/library';
+import {
+  EMPTY_CATEGORIES,
+  LibraryCategory,
+  categorySiblings,
+  useLibraryStore,
+} from '../../stores/library';
 import {
   getPlatformSegments,
   normalizePath,
 } from '../../stores/download-history';
-import { useSettingsStore } from '../../stores/settings';
 import { PlatformSource } from '../../platforms';
 import {
   FOLDER_SORT_OPTIONS,
@@ -60,12 +64,54 @@ import { SortSelect } from './SortSelect';
 import { VisualTagEditor } from './VisualTagEditor';
 
 interface Props {
+  /** 当前库根 id（分类/封面按根隔离） */
+  rootId: string;
+  /** 当前库根绝对路径（视觉标签前缀、平台段用） */
+  rootPath: string;
+  /** 外部根：不参与联网溯源 / 平台标记 */
+  isExternal: boolean;
   folders: LibraryRootFolder[];
   loading: boolean;
   keyword: string;
   onKeywordChange: (value: string) => void;
   onOpen: (folder: LibraryRootFolder) => void;
   onRefresh: () => void;
+}
+
+/** 把多级标签构建成 antd 菜单项 */
+function buildCategoryItems(
+  categories: LibraryCategory[],
+  keyPrefix: string,
+  parentId: string | null,
+  selectedIds?: string[],
+  depth = 0,
+): NonNullable<MenuProps['items']> {
+  const items: NonNullable<MenuProps['items']> = [];
+  for (const category of categorySiblings(categories, parentId)) {
+    items.push({
+      key: `${keyPrefix}${category.id}`,
+      label: <span style={{ paddingLeft: depth * 14 }}>{category.name}</span>,
+      ...(selectedIds
+        ? {
+            icon: selectedIds.includes(category.id) ? (
+              <CheckOutlined className="text-ant-color-primary" />
+            ) : (
+              <span className="inline-block w-3" />
+            ),
+          }
+        : {}),
+    });
+    items.push(
+      ...buildCategoryItems(
+        categories,
+        keyPrefix,
+        category.id,
+        selectedIds,
+        depth + 1,
+      ),
+    );
+  }
+  return items;
 }
 
 /** 文件夹网格每页数量 */
@@ -75,6 +121,9 @@ const MEDIA_PAGE_SIZE = 120;
 
 /** 本地库一级文件夹网格：封面 + 名称 + 标签（多标签）+ 属性 + 多选批量 */
 export const FolderGrid: React.FC<Props> = ({
+  rootId,
+  rootPath,
+  isExternal,
   folders,
   loading,
   keyword,
@@ -83,7 +132,9 @@ export const FolderGrid: React.FC<Props> = ({
   onRefresh,
 }) => {
   const { message, modal } = App.useApp();
-  const categories = useLibraryStore((s) => s.categories);
+  const categories = useLibraryStore(
+    (s) => s.categoriesByRoot[rootId] ?? EMPTY_CATEGORIES,
+  );
   const addCategory = useLibraryStore((s) => s.addCategory);
   const addFolderToCategory = useLibraryStore((s) => s.addFolderToCategory);
   const removeFolderFromCategory = useLibraryStore(
@@ -98,18 +149,21 @@ export const FolderGrid: React.FC<Props> = ({
   const [propsTarget, setPropsTarget] = useState<LibraryRootFolder | null>(
     null,
   );
-  const saveDirBase = useSettingsStore((s) => s.download.saveDirBase);
   const [folderPlatform, setFolderPlatform] = useState<
     Map<string, PlatformSource>
   >(new Map());
 
-  // 用下载历史/溯源里的平台字段覆盖结构启发式（更准）
+  // 用下载历史/溯源里的平台字段覆盖结构启发式（更准）；外部根不参与
   useEffect(() => {
+    if (isExternal || !rootPath) {
+      setFolderPlatform(new Map());
+      return;
+    }
     let cancelled = false;
-    Promise.all([getPlatformSegments(saveDirBase), readTraceMap()])
+    Promise.all([getPlatformSegments(rootPath), readTraceMap()])
       .then(([segPlatform, trace]) => {
-        if (cancelled || !saveDirBase) return;
-        const prefix = `${normalizePath(saveDirBase).replace(/\\+$/, '')}\\`;
+        if (cancelled) return;
+        const prefix = `${normalizePath(rootPath).replace(/\\+$/, '')}\\`;
         const map = new Map<string, PlatformSource>();
         for (const [seg, platform] of segPlatform) map.set(seg, platform);
         const consider = (filePath?: string, platform?: PlatformSource) => {
@@ -128,7 +182,7 @@ export const FolderGrid: React.FC<Props> = ({
     return () => {
       cancelled = true;
     };
-  }, [saveDirBase]);
+  }, [rootPath, isExternal]);
 
   const sortedFolders = useMemo(
     () => sortFolders(folders, sort),
@@ -208,14 +262,14 @@ export const FolderGrid: React.FC<Props> = ({
   };
 
   const basePrefix = useMemo(
-    () => normalizePath(saveDirBase || '').replace(/\\+$/, '') + '\\',
-    [saveDirBase],
+    () => normalizePath(rootPath || '').replace(/\\+$/, '') + '\\',
+    [rootPath],
   );
 
   /** 文件夹名（小写）→ 该文件夹下所有图片命中的标签集合 */
   const folderTagSets = useMemo(() => {
     const m = new Map<string, Set<string>>();
-    if (!saveDirBase) return m;
+    if (!rootPath) return m;
     const known = new Set(sortedFolders.map((f) => f.name.toLowerCase()));
     for (const [p, rec] of visualMap) {
       const np = normalizePath(p);
@@ -230,11 +284,11 @@ export const FolderGrid: React.FC<Props> = ({
       for (const it of effectiveItems(rec)) set.add(`${it.cat}|${it.zh}`);
     }
     return m;
-  }, [visualMap, saveDirBase, basePrefix, sortedFolders]);
+  }, [visualMap, rootPath, basePrefix, sortedFolders]);
 
   const recognizedFolders = useMemo(() => {
     const s = new Set<string>();
-    if (!saveDirBase) return s;
+    if (!rootPath) return s;
     for (const p of visualMap.keys()) {
       const np = normalizePath(p);
       if (np.startsWith(basePrefix)) {
@@ -242,7 +296,7 @@ export const FolderGrid: React.FC<Props> = ({
       }
     }
     return s;
-  }, [visualMap, saveDirBase, basePrefix]);
+  }, [visualMap, rootPath, basePrefix]);
 
   const visualMeta = useMemo(() => {
     const meta = new Map<string, { cat: string; zh: string }>();
@@ -454,8 +508,8 @@ export const FolderGrid: React.FC<Props> = ({
   const confirmCreate = () => {
     if (createNames.length === 0) return;
     try {
-      const id = addCategory(newName);
-      createNames.forEach((name) => addFolderToCategory(name, id));
+      const id = addCategory(rootId, newName);
+      createNames.forEach((name) => addFolderToCategory(rootId, name, id));
       message.success(
         `已为 ${createNames.length} 个文件夹添加标签「${newName.trim()}」`,
       );
@@ -467,28 +521,30 @@ export const FolderGrid: React.FC<Props> = ({
   };
 
   const batchAddTag = (categoryId: string) => {
-    selectedFolders.forEach((f) => addFolderToCategory(f.name, categoryId));
+    selectedFolders.forEach((f) =>
+      addFolderToCategory(rootId, f.name, categoryId),
+    );
     message.success(`已为 ${selectedCount} 个文件夹添加标签`);
     clearSelection();
   };
 
   const batchRemoveTag = (categoryId: string) => {
     selectedFolders.forEach((f) =>
-      removeFolderFromCategory(f.name, categoryId),
+      removeFolderFromCategory(rootId, f.name, categoryId),
     );
     message.success(`已移除标签`);
     clearSelection();
   };
 
   const batchClearTags = () => {
-    selectedFolders.forEach((f) => clearFolderCategories(f.name));
+    selectedFolders.forEach((f) => clearFolderCategories(rootId, f.name));
     message.success('已清空所选文件夹的标签');
     clearSelection();
   };
 
   const addTagMenu: MenuProps = {
     items: [
-      ...categories.map((c) => ({ key: `cat:${c.id}`, label: c.name })),
+      ...buildCategoryItems(categories, 'cat:', null),
       ...(categories.length ? [{ type: 'divider' as const }] : []),
       { key: 'new', label: '新建标签并添加…', icon: <PlusOutlined /> },
     ],
@@ -502,7 +558,7 @@ export const FolderGrid: React.FC<Props> = ({
   };
 
   const removeTagMenu: MenuProps = {
-    items: categories.map((c) => ({ key: `cat:${c.id}`, label: c.name })),
+    items: buildCategoryItems(categories, 'cat:', null),
     onClick: ({ key }) => {
       if (key.startsWith('cat:')) batchRemoveTag(key.slice(4));
     },
@@ -718,10 +774,13 @@ export const FolderGrid: React.FC<Props> = ({
                 <FolderCard
                   key={folder.path}
                   folder={folder}
+                  rootId={rootId}
                   categories={categories}
                   platform={
-                    folderPlatform.get(folder.name.toLowerCase()) ||
-                    folder.platform
+                    isExternal
+                      ? undefined
+                      : folderPlatform.get(folder.name.toLowerCase()) ||
+                        folder.platform
                   }
                   selectMode={selectMode}
                   selected={isSelected(folder.path)}
@@ -788,6 +847,7 @@ export const FolderGrid: React.FC<Props> = ({
 
       <FolderProperties
         open={!!propsTarget}
+        rootId={rootId}
         folderName={propsTarget?.name || ''}
         folderPath={propsTarget?.path}
         mediaCount={propsTarget?.mediaCount}
@@ -842,7 +902,8 @@ export const FolderGrid: React.FC<Props> = ({
 
 interface FolderCardProps {
   folder: LibraryRootFolder;
-  categories: { id: string; name: string }[];
+  rootId: string;
+  categories: LibraryCategory[];
   platform?: PlatformSource;
   selectMode: boolean;
   selected: boolean;
@@ -858,6 +919,7 @@ interface FolderCardProps {
 
 const FolderCard: React.FC<FolderCardProps> = ({
   folder,
+  rootId,
   categories,
   platform,
   selectMode,
@@ -871,9 +933,11 @@ const FolderCard: React.FC<FolderCardProps> = ({
   recognized,
 }) => {
   const categoryIds = useLibraryStore((s) =>
-    s.getFolderCategoryIds(folder.name),
+    s.getFolderCategoryIds(rootId, folder.name),
   );
-  const coverOverride = useLibraryStore((s) => s.folderCovers[folder.name]);
+  const coverOverride = useLibraryStore(
+    (s) => s.coversByRoot[rootId]?.[folder.name],
+  );
   const addFolderToCategory = useLibraryStore((s) => s.addFolderToCategory);
   const removeFolderFromCategory = useLibraryStore(
     (s) => s.removeFolderFromCategory,
@@ -889,15 +953,7 @@ const FolderCard: React.FC<FolderCardProps> = ({
       key: 'tags',
       label: '标签',
       children: [
-        ...categories.map((c) => ({
-          key: `tag:${c.id}`,
-          label: c.name,
-          icon: categoryIds.includes(c.id) ? (
-            <CheckOutlined className="text-ant-color-primary" />
-          ) : (
-            <span className="inline-block w-3" />
-          ),
-        })),
+        ...buildCategoryItems(categories, 'tag:', null, categoryIds),
         ...(categories.length ? [{ type: 'divider' as const }] : []),
         { key: 'newtag', label: '新建标签并添加…', icon: <PlusOutlined /> },
       ],
@@ -925,14 +981,15 @@ const FolderCard: React.FC<FolderCardProps> = ({
     if (key === 'props') return onShowProps();
     if (key === 'clearVisual') return onClearVisual();
     if (key === 'resetCover') {
-      setFolderCover(folder.name, null);
+      setFolderCover(rootId, folder.name, null);
       message.success('已恢复默认缩略图');
       return;
     }
     if (key.startsWith('tag:')) {
       const id = key.slice(4);
-      if (categoryIds.includes(id)) removeFolderFromCategory(folder.name, id);
-      else addFolderToCategory(folder.name, id);
+      if (categoryIds.includes(id))
+        removeFolderFromCategory(rootId, folder.name, id);
+      else addFolderToCategory(rootId, folder.name, id);
     }
   };
 

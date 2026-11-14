@@ -14,6 +14,7 @@ import React from 'react';
 import { DownloadTask } from '../../interfaces/DownloadTask';
 import { useDownloadStore } from '../../stores/download';
 import { showInFolder } from '../../utils/shell';
+import { mediaProxyUrl } from '../../utils/media-proxy';
 import { StatusText } from './StatusText';
 import { TaskAction, TaskActions } from './TaskActions';
 
@@ -161,7 +162,7 @@ export const DownloadListItem: React.FC<DownloadListItemProps> = React.memo(
         >
           {t.media.thumbUrl ? (
             <img
-              src={t.media.thumbUrl}
+              src={mediaProxyUrl(t.media.thumbUrl)}
               loading="lazy"
               className="w-full h-full object-cover transition-transform transform hover:scale-105"
             />
@@ -185,7 +186,14 @@ export const DownloadListItem: React.FC<DownloadListItemProps> = React.memo(
             rel="noreferrer"
             className="text-xs flex items-center space-x-1 w-fit text-ant-color-text-secondary bg-gray-100 p-1 rounded-full pr-2 overflow-hidden"
           >
-            <Avatar src={t.post.creator?.avatar} size={20} />
+            <Avatar
+              src={
+                t.post.creator?.avatar
+                  ? mediaProxyUrl(t.post.creator.avatar)
+                  : undefined
+              }
+              size={20}
+            />
             <span>{t.post.creator?.name || '未知用户'}</span>
             {t.post.creator?.username && (
               <span>@{t.post.creator.username}</span>

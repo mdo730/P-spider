@@ -35,6 +35,19 @@ function getCommonHeaders(withCredentials = true): Record<string, string> {
 }
 
 function ensureResponse(response: Response) {
+  if (response.status === 429) {
+    // X 限流：把恢复时间（x-rate-limit-reset，epoch 秒）带给调用方，便于等待后重试
+    const resetHeader = response.headers?.['x-rate-limit-reset']?.[0];
+    const resetMs = resetHeader
+      ? Number(resetHeader) * 1000
+      : Date.now() + 15 * 60 * 1000;
+    log.warn('X rate limited, reset at', new Date(resetMs).toISOString());
+    const err = new Error('RATE_LIMIT') as Error & {
+      rateLimitReset?: number;
+    };
+    err.rateLimitReset = resetMs;
+    throw err;
+  }
   if (response.status >= 400) {
     log.error(response);
     throw new Error(`Response error: status=${response.status}`);

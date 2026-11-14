@@ -103,12 +103,12 @@ export const VisualTagPanel: React.FC<PanelProps> = ({
         <div
           className={`mb-2 text-sm font-medium ${dark ? 'text-gray-200' : ''}`}
         >
-          视觉标签（模型识别 · 可增删）
+          视觉标签（可手动增删）
         </div>
       )}
       {items.length === 0 ? (
         <p className={`mb-2 text-xs ${muted}`}>
-          暂无识别结果（可点「识别」，或下面手动添加）
+          暂无视觉标签，可在下面手动添加
         </p>
       ) : (
         <div className="mb-3 flex flex-wrap gap-1.5">

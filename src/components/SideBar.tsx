@@ -6,6 +6,7 @@ import { useRouteStore } from '../stores/route';
 import { useFigmemoStore } from '../stores/figmemo';
 import { useMoeyoStore } from '../stores/moeyo';
 import { useHpoiIntelStore } from '../stores/hpoi-intel';
+import { useLauncherStore } from '../stores/launcher';
 import { useSettingsStore } from '../stores/settings';
 import { useUpdateStore } from '../stores/update';
 import {
@@ -85,6 +86,7 @@ export const SideBar: React.FC = () => {
   const figmemoEnabled = useFigmemoStore((s) => s.featureEnabled);
   const moeyoEnabled = useMoeyoStore((s) => s.featureEnabled);
   const intelEnabled = useHpoiIntelStore((s) => s.featureEnabled);
+  const launcherEnabled = useLauncherStore((s) => s.featureEnabled);
   const hasUpdate = useUpdateStore((s) => s.hasUpdate);
   const hidden = useSettingsStore((s) => s.sidebar?.hidden || []);
   const order = useSettingsStore((s) => s.sidebar?.order || []);
@@ -97,7 +99,8 @@ export const SideBar: React.FC = () => {
       !hidden.includes(r.id) &&
       (r.id !== 'figmemo' || figmemoEnabled) &&
       (r.id !== 'moeyo' || moeyoEnabled) &&
-      (r.id !== 'intel' || intelEnabled),
+      (r.id !== 'intel' || intelEnabled) &&
+      (r.id !== 'launcher' || launcherEnabled),
   );
 
   // 当前页被隐藏 / 被功能开关关闭时，跳回时间流，避免「没有入口回去」

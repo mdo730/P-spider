@@ -707,13 +707,48 @@ async function runCreationTask(task: CreationTask, abortSignal: AbortSignal) {
     return acc + (elem.medias?.length || 0);
   }, 0);
 
+  // 限流（429）时等待恢复后重试同一页，而不是让整个任务失败
+  const fetchPageWithRetry = async (
+    cursor?: string,
+  ): Promise<{ posts: PlatformPost[]; cursor: string | null }> => {
+    for (;;) {
+      try {
+        const r = await fetchPage(cursor);
+        if (task.note) {
+          task.note = undefined;
+          updateCreationTask({ ...task, completeCount, skipCount });
+        }
+        return r;
+      } catch (err: unknown) {
+        const reset = (err as { rateLimitReset?: number })?.rateLimitReset;
+        if (reset) {
+          const waitMs = Math.min(
+            20 * 60 * 1000,
+            Math.max(5000, reset - Date.now() + 3000),
+          );
+          log().warn(
+            `X 限流，等待 ${Math.round(waitMs / 1000)} 秒后继续（cursor=${cursor ?? ''}）`,
+          );
+          const note = `X 限流，约 ${Math.max(
+            1,
+            Math.round(waitMs / 60000),
+          )} 分钟后自动继续`;
+          updateCreationTask({ ...task, completeCount, skipCount, note });
+          await new Promise((r) => setTimeout(r, waitMs));
+          continue;
+        }
+        throw err;
+      }
+    }
+  };
+
   while (nextCursor !== null && now.isAfter(since)) {
     if (abortSignal.aborted) {
       return;
     }
 
     log().info('CreationTask fetching', nextCursor);
-    const { posts, cursor } = await fetchPage(nextCursor);
+    const { posts, cursor } = await fetchPageWithRetry(nextCursor);
     if (abortSignal.aborted) break;
     nextCursor = cursor;
     // 本页最早帖时间作为推进基线；若本页全无发布时间则视为到底，避免死循环
@@ -835,6 +870,8 @@ async function runCreationTask(task: CreationTask, abortSignal: AbortSignal) {
     });
 
     if (abortSignal.aborted) break;
+    // 轻微间隔，降低连续请求触发限流的概率
+    await new Promise((r) => setTimeout(r, 300));
   }
 }
 

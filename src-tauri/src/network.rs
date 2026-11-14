@@ -42,12 +42,28 @@ pub async fn network_fetch(
       .connect_timeout(std::time::Duration::from_secs(15))
       .timeout(std::time::Duration::from_secs(30));
 
+    // 本机回环地址（应用自带的媒体代理 127.0.0.1:xxxx）：必须直连、且跳过 SSRF 拦截，
+    // 否则会经外部代理转发 localhost 而 502，或直接被 SSRF 拦截。
+    let is_local = reqwest::Url::parse(&url)
+      .ok()
+      .and_then(|u| {
+        u.host_str().map(|h| {
+          let h = h.trim_start_matches('[').trim_end_matches(']');
+          h.eq_ignore_ascii_case("localhost")
+            || h
+              .parse::<std::net::IpAddr>()
+              .map(|ip| ip.is_loopback())
+              .unwrap_or(false)
+        })
+      })
+      .unwrap_or(false);
+
     // IPv6 优先：某些网络（尤其 TUN 模式）域名 IPv4 路由不通、IPv6 正常，
     // reqwest 默认挑 IPv4 会一直等超时。这里把解析结果 IPv6 排在前面，
     // 失败再回退 IPv4（顺序尝试）。
     if let Ok(parsed) = reqwest::Url::parse(&url) {
-      // SSRF 防护：非代理模式下拒绝私网/回环/链路本地地址
-      if !enable_proxy || proxy_url.is_empty() {
+      // SSRF 防护：非代理模式下拒绝私网/回环/链路本地地址（本机回环放行）
+      if !is_local && (!enable_proxy || proxy_url.is_empty()) {
         let scheme = parsed.scheme();
         if scheme != "http" && scheme != "https" {
           return Err(format!("拒绝非 http(s) 协议：{url}"));
@@ -93,8 +109,10 @@ pub async fn network_fetch(
       }
     }
 
-    // Auto set proxy settings
-    if enable_proxy {
+    // 代理设置：本机回环直连，其余按代理配置
+    if is_local {
+      b = b.no_proxy();
+    } else if enable_proxy {
       if proxy_url.len() == 0 {
         // Use system proxy, do nothing
       } else {
@@ -157,12 +175,18 @@ pub async fn network_fetch(
         match serde_json::from_slice::<Value>(&bytes) {
           Ok(v) => Ok(v),
           Err(err) => {
-            // 把状态码 + 返回体前半段带进错误，便于判断是登录页 / 404 / 限流页
-            let text = String::from_utf8_lossy(&bytes);
-            let head: String = text.chars().take(300).collect();
-            Err(format!(
-              "Response is not JSON (status {status}): {err}; body[:300]={head:?}"
-            ))
+            let text = String::from_utf8_lossy(&bytes).to_string();
+            if status >= 400 {
+              // 错误响应体常不是 JSON（如 429 "Rate limit exceeded"）：原样返回，
+              // 交前端按状态码处理（限流等待/重试），而不是当解析错误整体失败。
+              Ok(Value::String(text))
+            } else {
+              // 把状态码 + 返回体前半段带进错误，便于判断是登录页 / 404 / 被墙页
+              let head: String = text.chars().take(300).collect();
+              Err(format!(
+                "Response is not JSON (status {status}): {err}; body[:300]={head:?}"
+              ))
+            }
           }
         }
       }

@@ -1,6 +1,10 @@
 import { Descriptions, Modal, Spin, Tag } from 'antd';
 import React, { useEffect, useState } from 'react';
-import { useLibraryStore } from '../../stores/library';
+import {
+  EMPTY_CATEGORIES,
+  categoryPath,
+  useLibraryStore,
+} from '../../stores/library';
 import {
   LibraryFolderStats,
   fetchFolderStats,
@@ -9,6 +13,8 @@ import {
 
 interface Props {
   open: boolean;
+  /** 库根 id（分类/标签按根隔离） */
+  rootId: string;
   folderName: string;
   /** 文件夹绝对路径（用于统计） */
   folderPath?: string;
@@ -22,13 +28,16 @@ interface Props {
 /** 文件夹属性：文件数 / 占用空间 / 标签 */
 export const FolderProperties: React.FC<Props> = ({
   open,
+  rootId,
   folderName,
   folderPath,
   mediaCount,
   showTags,
   onClose,
 }) => {
-  const categories = useLibraryStore((s) => s.categories);
+  const categories = useLibraryStore(
+    (s) => s.categoriesByRoot[rootId] ?? EMPTY_CATEGORIES,
+  );
   const [stats, setStats] = useState<LibraryFolderStats | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -79,7 +88,7 @@ export const FolderProperties: React.FC<Props> = ({
               {tags.length > 0 ? (
                 tags.map((t) => (
                   <Tag key={t.id} color="blue">
-                    {t.name}
+                    {categoryPath(categories, t.id)}
                   </Tag>
                 ))
               ) : (

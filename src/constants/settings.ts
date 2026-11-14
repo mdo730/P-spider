@@ -69,6 +69,13 @@ export const DEFAULT_SETTINGS: Settings = {
     cudaLibPath:
       'E:\\OPENCODE\\ainimte\\ComfyUI\\venv\\Lib\\site-packages\\torch\\lib',
   },
+  builtinProxy: {
+    enable: false,
+    subscriptionUrl: '',
+    port: 7899,
+    savedUrl: '',
+    savedUseSystem: true,
+  },
 };
 
-export const CURRENT_SETTINGS_VERSION = 6;
+export const CURRENT_SETTINGS_VERSION = 7;

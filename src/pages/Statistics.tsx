@@ -6,6 +6,7 @@ import { PageHeader } from '../components/PageHeader';
 import { useSubscriptionStore } from '../stores/subscription';
 import { useFigmemoStore } from '../stores/figmemo';
 import { buildUserUrl } from '../twitter/url';
+import { mediaProxyUrl } from '../utils/media-proxy';
 import figmemoIcon from '../assets/platform-icons/figmemo.png';
 
 const RANGE_OPTIONS = [
@@ -290,7 +291,7 @@ export const StatisticsPage: React.FC = () => {
                 render: (_, row) => (
                   <div className="flex items-center">
                     <img
-                      src={row.avatar}
+                      src={row.avatar ? mediaProxyUrl(row.avatar) : undefined}
                       alt="头像"
                       className="w-7 h-7 rounded-full mr-2 object-cover"
                     />

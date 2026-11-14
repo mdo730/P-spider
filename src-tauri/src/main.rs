@@ -14,6 +14,8 @@ mod wd14_infer;
 mod hpoi_db;
 mod hist_db;
 mod storage;
+mod clash;
+mod launcher;
 
 use tauri::{
     AppHandle, CustomMenuItem, Manager, SystemTray, SystemTrayEvent, SystemTrayMenu, WindowEvent,
@@ -125,6 +127,10 @@ fn main() {
         image_search::forward_show();
         std::process::exit(0);
     }
+
+    // 主实例：清理上次异常退出残留的自家 mihomo（按路径精确匹配，避免占端口）
+    #[cfg(windows)]
+    clash::kill_orphans();
 
     let show_item = CustomMenuItem::new("show", "显示窗口");
     let quit_item = CustomMenuItem::new("quit", "退出");
@@ -265,7 +271,22 @@ fn main() {
           fsutil::video_thumbnail,
           fsutil::download_and_convert_ugoira,
           fsutil::copy_image_to_clipboard,
+          clash::clash_core_status,
+          clash::clash_core_install,
+          clash::clash_start,
+          clash::clash_stop,
+          clash::clash_status,
+          clash::clash_proxies,
+          clash::clash_select,
+          launcher::launcher_open,
+          launcher::launcher_icon,
+          launcher::launcher_cursor_position,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, event| {
+            if let tauri::RunEvent::Exit = event {
+                clash::kill();
+            }
+        });
 }

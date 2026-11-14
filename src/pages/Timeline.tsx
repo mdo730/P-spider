@@ -131,7 +131,12 @@ import { getUserFolderMap } from '../services/user-folders';
 import { useFigmemoStore } from '../stores/figmemo';
 import { useMoeyoStore } from '../stores/moeyo';
 import { useHpoiIntelStore } from '../stores/hpoi-intel';
-import { useLibraryStore } from '../stores/library';
+import {
+  EMPTY_CATEGORIES,
+  categoryPath,
+  useLibraryStore,
+} from '../stores/library';
+import { DEFAULT_ROOT_ID } from '../stores/library-roots';
 import { tagChipActiveStyle, tagChipStyle } from '../utils/tag-color';
 import { useSettingsStore } from '../stores/settings';
 import { useRouteStore } from '../stores/route';
@@ -271,13 +276,16 @@ function retweetGroup(n: RetweetNote): TimelineGroup {
 /** 本地库「一级文件夹名 → 标签名[]」映射（来自 library.json 的 categories） */
 function buildFolderTagMap(): Map<string, string[]> {
   const map = new Map<string, string[]>();
-  for (const c of useLibraryStore.getState().categories) {
+  const categories =
+    useLibraryStore.getState().categoriesByRoot[DEFAULT_ROOT_ID] ?? [];
+  for (const c of categories) {
+    const label = categoryPath(categories, c.id);
     for (const f of c.folders) {
       const arr = map.get(f);
       if (arr) {
-        if (!arr.includes(c.name)) arr.push(c.name);
+        if (!arr.includes(label)) arr.push(label);
       } else {
-        map.set(f, [c.name]);
+        map.set(f, [label]);
       }
     }
   }
@@ -375,7 +383,9 @@ export const TimelinePage: React.FC = () => {
   // 胶囊筛选：本地库标签 + [转贴] + [fig-memo] + [moeyo]（多选并集，未命中隐藏）
   const [filterTags, setFilterTags] = useState<Set<string>>(new Set());
   const [filterOpen, setFilterOpen] = useState(false);
-  const libraryCategories = useLibraryStore((s) => s.categories);
+  const libraryCategories = useLibraryStore(
+    (s) => s.categoriesByRoot[DEFAULT_ROOT_ID] ?? EMPTY_CATEGORIES,
+  );
   const figmemoEnabled = useFigmemoStore((s) => s.featureEnabled);
   const moeyoEnabled = useMoeyoStore((s) => s.featureEnabled);
   const intelEnabled = useHpoiIntelStore((s) => s.featureEnabled);
@@ -650,7 +660,9 @@ export const TimelinePage: React.FC = () => {
 
   // 筛选浮窗里的胶囊选项：本地库标签 + 转贴 + 站点（fig-memo/moeyo）
   const filterOptions = useMemo(() => {
-    const opts = libraryCategories.map((c) => c.name);
+    const opts = libraryCategories.map((c) =>
+      categoryPath(libraryCategories, c.id),
+    );
     const withFixed = (t: string) => {
       if (!opts.includes(t)) opts.push(t);
     };

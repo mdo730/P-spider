@@ -9,6 +9,7 @@ import {
   ClockCircleOutlined,
   FolderOutlined,
   GiftOutlined,
+  AppstoreOutlined,
 } from '@ant-design/icons';
 import xIcon from '../assets/platform-icons/x.svg';
 import pawchiveIcon from '../assets/platform-icons/pawchive.svg';
@@ -41,6 +42,7 @@ function siteIcon(src: string): ReactElement {
 import { Homepage } from '../pages/Homepage';
 import { Archiver } from '../pages/Archiver';
 import { LibraryPage } from '../pages/Library';
+import { LauncherPage } from '../pages/Launcher';
 import { FigmemoPage } from '../pages/Figmemo';
 import { MoeyoPage } from '../pages/Moeyo';
 import { IntelPage } from '../pages/Intel';
@@ -76,6 +78,12 @@ export const ROUTES: Route[] = [
     name: '本地库',
     icon: <FolderOutlined />,
     element: <LibraryPage />,
+  },
+  {
+    id: 'launcher',
+    name: '启动器',
+    icon: <AppstoreOutlined />,
+    element: <LauncherPage />,
   },
   {
     id: 'figmemo',
@@ -142,6 +150,7 @@ export const SIDEBAR_HIDEABLE_IDS: string[] = [
   'home',
   'archiver',
   'library',
+  'launcher',
   'statistics',
   'figmemo',
   'moeyo',

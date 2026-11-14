@@ -15,6 +15,7 @@ import {
   MenuOutlined,
   ArrowUpOutlined,
   ArrowDownOutlined,
+  AppstoreOutlined,
 } from '@ant-design/icons';
 import Joi from 'joi';
 import { SavePathSelector } from '../components/settings/SavePathSelector';
@@ -36,6 +37,7 @@ import {
 } from 'antd';
 import { useSettingsStore } from '../stores/settings';
 import { useSettingsUiStore } from '../stores/settings-ui';
+import { useClashStore } from '../stores/clash';
 import { FileNameTemplateInput } from '../components/settings/FileNameTemplateInput';
 import { openUrlForeground, showInFolder } from '../utils/shell';
 import { path } from '@tauri-apps/api';
@@ -55,6 +57,7 @@ import {
 import { useMoeyoStore } from '../stores/moeyo';
 import { useHpoiIntelStore } from '../stores/hpoi-intel';
 import { useHpoiAuthStore } from '../stores/hpoi-auth';
+import { useLauncherStore } from '../stores/launcher';
 import {
   getHpoiIndexDir,
   importHpoiIndexZip,
@@ -109,6 +112,7 @@ const SECTION_GROUP: Record<string, string> = {
   moeyo: 'sites',
   hpoi: 'sites',
   library: 'tools',
+  launcher: 'tools',
   imageSearch: 'tools',
   dataBackup: 'tools',
   storage: 'tools',
@@ -140,6 +144,7 @@ export const Settings: React.FC = () => {
   const moeyo = useMoeyoStore();
   const [moeyoCategories, setMoeyoCategories] = useState<MoeyoCategory[]>([]);
   const intel = useHpoiIntelStore();
+  const launcher = useLauncherStore();
   const hpoiAuth = useHpoiAuthStore();
   const [hpoiAccount, setHpoiAccount] = useState('');
   const [hpoiPassword, setHpoiPassword] = useState('');
@@ -224,6 +229,98 @@ export const Settings: React.FC = () => {
   useEffect(() => {
     setProxyUrlDraft(proxyCfg.url);
   }, [proxyCfg.url]);
+  const builtinCfg = useSettingsStore((s) => s.builtinProxy) || {};
+  const [builtinSubDraft, setBuiltinSubDraft] = useState(
+    builtinCfg.subscriptionUrl || '',
+  );
+  useEffect(() => {
+    setBuiltinSubDraft(builtinCfg.subscriptionUrl || '');
+  }, [builtinCfg.subscriptionUrl]);
+  const clashRunning = useClashStore((s) => s.running);
+  const clashNodes = useClashStore((s) => s.nodes);
+  const clashNow = useClashStore((s) => s.now);
+  const clashListProxies = useClashStore((s) => s.listProxies);
+  const clashSelect = useClashStore((s) => s.select);
+  const clashCoreInstalled = useClashStore((s) => s.coreInstalled);
+  const clashCoreVersion = useClashStore((s) => s.coreVersion);
+  const clashInstalling = useClashStore((s) => s.installing);
+  const clashInstallPct = useClashStore((s) => s.installPct);
+  const clashTraffic = useClashStore((s) => s.traffic);
+  useEffect(() => {
+    void useClashStore.getState().checkCore();
+  }, []);
+  useEffect(() => {
+    if (clashRunning) void clashListProxies();
+  }, [clashRunning, clashListProxies]);
+  const installCore = () =>
+    void useClashStore
+      .getState()
+      .installCore()
+      .catch((err: unknown) =>
+        message.error(getErrorMessage(err) || '安装内核失败'),
+      );
+  const [clashBusy, setClashBusy] = useState(false);
+  const onToggleBuiltin = async (checked: boolean) => {
+    setClashBusy(true);
+    try {
+      if (checked) {
+        const sub = (
+          builtinSubDraft ||
+          builtinCfg.subscriptionUrl ||
+          ''
+        ).trim();
+        if (!sub) {
+          message.error('请先填写 Clash 订阅链接');
+          return;
+        }
+        // 备份当前代理设置，关闭内置代理时还原
+        await updateOne('builtinProxy', 'savedUrl', proxyCfg.url);
+        await updateOne('builtinProxy', 'savedUseSystem', proxyCfg.useSystem);
+        await updateOne('builtinProxy', 'subscriptionUrl', sub);
+        await updateOne('builtinProxy', 'enable', true);
+        await useClashStore.getState().start(sub, builtinCfg.port || 7899);
+        message.success('内置代理已启动');
+      } else {
+        await useClashStore.getState().stop();
+        await updateOne('proxy', 'url', builtinCfg.savedUrl || proxyCfg.url);
+        await updateOne(
+          'proxy',
+          'useSystem',
+          builtinCfg.savedUseSystem ?? true,
+        );
+        await updateOne('builtinProxy', 'enable', false);
+        message.success('内置代理已停止');
+      }
+    } catch (err: unknown) {
+      message.error(getErrorMessage(err) || '内置代理操作失败');
+      if (checked) await updateOne('builtinProxy', 'enable', false);
+    } finally {
+      setClashBusy(false);
+    }
+  };
+  const onRefreshBuiltin = async () => {
+    const sub = (builtinSubDraft || builtinCfg.subscriptionUrl || '').trim();
+    if (!sub) {
+      message.error('请先填写 Clash 订阅链接');
+      return;
+    }
+    setClashBusy(true);
+    try {
+      await updateOne('builtinProxy', 'subscriptionUrl', sub);
+      await useClashStore.getState().start(sub, builtinCfg.port || 7899);
+      message.success('已刷新订阅');
+    } catch (err: unknown) {
+      message.error(getErrorMessage(err) || '刷新失败');
+    } finally {
+      setClashBusy(false);
+    }
+  };
+  const onSubBlur = async () => {
+    const v = builtinSubDraft.trim();
+    await updateOne('builtinProxy', 'subscriptionUrl', v);
+    // 已启用时改了链接 → 直接重新应用
+    if (builtinCfg.enable === true && v) void onRefreshBuiltin();
+  };
   const orderedRoutes = applySidebarOrder(sidebarOrder);
   const moveSidebarRoute = (idx: number, dir: -1 | 1) => {
     const ids = orderedRoutes.map((r) => r.id);
@@ -774,6 +871,28 @@ export const Settings: React.FC = () => {
               </div>
             </Section>
             <Section
+              title="启动器"
+              name="launcher"
+              titleIcon={<AppstoreOutlined />}
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm">启用启动器</span>
+                <Switch
+                  checked={launcher.featureEnabled}
+                  onChange={(v) => launcher.setFeatureEnabled(v)}
+                />
+                <span className="text-sm text-gray-400">
+                  {launcher.featureEnabled
+                    ? `已添加 ${launcher.entries.length} 个启动项`
+                    : '默认关闭，开启后侧栏显示「启动器」'}
+                </span>
+              </div>
+              <p className="mt-2 text-sm text-gray-400">
+                把 exe / 快捷方式（.lnk、.url）/
+                文件夹加到启动器里，按标签树分类，单击选中、双击启动。
+              </p>
+            </Section>
+            <Section
               title="订阅与数据"
               name="dataBackup"
               titleIcon={<FolderOutlined />}
@@ -807,8 +926,9 @@ export const Settings: React.FC = () => {
             >
               <p className="text-sm text-gray-400 mb-3">
                 用箭头调整页面顺序；开关控制显示/隐藏。可隐藏：X主页 / Pawchive
-                / 本地库 / 统计 / fig-memo / moeyo / pixiv；其余页面（时间流 /
-                订阅 / 下载管理 / 设置 / 关于）常显，不可隐藏。
+                / 本地库 / 启动器 / 统计 / fig-memo / moeyo /
+                pixiv；其余页面（时间流 / 订阅 / 下载管理 / 设置 /
+                关于）常显，不可隐藏。
               </p>
               <ul className="space-y-1">
                 {orderedRoutes.map((r, i) => {
@@ -1110,6 +1230,168 @@ export const Settings: React.FC = () => {
                     updateOne('proxy', 'url', val);
                   }}
                 />
+              </div>
+              <div className="mt-4 border-t border-gray-200 pt-3">
+                <div className="mb-2 flex flex-wrap items-center gap-2 text-sm">
+                  <span className="font-medium text-gray-700">
+                    内置代理（Clash 订阅）
+                  </span>
+                  {clashCoreInstalled ? (
+                    <>
+                      <span className="text-xs text-gray-400">
+                        内核 {clashCoreVersion} 已就绪
+                      </span>
+                      <Button
+                        size="small"
+                        loading={clashInstalling}
+                        onClick={installCore}
+                      >
+                        重装内核
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-xs text-gray-400">内核未安装</span>
+                      <Button
+                        size="small"
+                        type="primary"
+                        loading={clashInstalling}
+                        onClick={installCore}
+                      >
+                        安装内核
+                      </Button>
+                      {clashInstalling && clashInstallPct >= 0 && (
+                        <span className="text-xs text-gray-400">
+                          {clashInstallPct}%
+                        </span>
+                      )}
+                    </>
+                  )}
+                </div>
+                <div className="mb-2 flex items-center gap-2">
+                  <span className="shrink-0 text-sm text-gray-500">
+                    订阅链接
+                  </span>
+                  <Input
+                    style={{ maxWidth: 480 }}
+                    value={builtinSubDraft}
+                    placeholder="https://example.com/subscribe?token=..."
+                    onChange={(e) => setBuiltinSubDraft(e.target.value)}
+                    onBlur={onSubBlur}
+                  />
+                </div>
+                <div className="flex flex-wrap items-center gap-x-6 gap-y-3 text-sm">
+                  <label
+                    className="flex items-center gap-2"
+                    title="启用后应用自带 mihomo 核心，用上面的 Clash 订阅节点代理所有请求（会临时覆盖上面的系统/手动代理，关闭时自动还原）"
+                  >
+                    <span>启用</span>
+                    <Switch
+                      size="small"
+                      checked={builtinCfg.enable === true}
+                      loading={clashBusy}
+                      disabled={!clashCoreInstalled}
+                      onChange={onToggleBuiltin}
+                    />
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <span className="text-gray-500">本地端口</span>
+                    <InputNumber
+                      size="small"
+                      min={1024}
+                      max={65535}
+                      value={builtinCfg.port ?? 7899}
+                      onChange={(v) =>
+                        updateOne('builtinProxy', 'port', v ?? 7899)
+                      }
+                    />
+                  </label>
+                  <Button
+                    size="small"
+                    disabled={builtinCfg.enable !== true}
+                    loading={clashBusy}
+                    onClick={onRefreshBuiltin}
+                  >
+                    刷新订阅
+                  </Button>
+                  <span className="text-xs text-gray-400">
+                    {clashRunning ? '运行中' : '未运行'}
+                  </span>
+                </div>
+                {clashRunning && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+                    <span className="shrink-0 text-gray-500">节点</span>
+                    <Select
+                      size="small"
+                      style={{ minWidth: 260 }}
+                      value={clashNow || undefined}
+                      placeholder="加载中…"
+                      showSearch
+                      options={clashNodes.map((n) => ({
+                        label: n,
+                        value: n,
+                      }))}
+                      onChange={(v) => void clashSelect(v)}
+                    />
+                    <Button
+                      size="small"
+                      onClick={() => void clashListProxies()}
+                    >
+                      刷新节点
+                    </Button>
+                    <span className="text-xs text-gray-400">
+                      AUTO = 自动测速选最快并自动切换；选具体节点则固定用它
+                    </span>
+                  </div>
+                )}
+                {clashTraffic && clashTraffic.total > 0 && (
+                  <div className="mt-2">
+                    <div className="mb-1 text-xs text-gray-500">
+                      订阅流量：已用{' '}
+                      {formatBytes(clashTraffic.upload + clashTraffic.download)}{' '}
+                      / {formatBytes(clashTraffic.total)}，剩余{' '}
+                      {formatBytes(
+                        Math.max(
+                          0,
+                          clashTraffic.total -
+                            clashTraffic.upload -
+                            clashTraffic.download,
+                        ),
+                      )}
+                      {clashTraffic.expire > 0
+                        ? ` · 到期 ${new Date(
+                            clashTraffic.expire * 1000,
+                          ).toLocaleDateString()}`
+                        : ''}
+                    </div>
+                    <Progress
+                      percent={Math.min(
+                        100,
+                        Math.round(
+                          ((clashTraffic.upload + clashTraffic.download) /
+                            clashTraffic.total) *
+                            100,
+                        ),
+                      )}
+                      size="small"
+                      showInfo={false}
+                      strokeColor={
+                        (clashTraffic.upload + clashTraffic.download) /
+                          clashTraffic.total >
+                        0.9
+                          ? '#ff4d4f'
+                          : undefined
+                      }
+                    />
+                  </div>
+                )}
+                <div className="mt-1 text-xs text-gray-400">
+                  {!clashCoreInstalled
+                    ? '先点「安装内核」下载核心（约 30MB，不随安装包分发），再填订阅链接、打开「启用」。'
+                    : builtinCfg.enable === true
+                      ? '已启用：应用所有请求走本地端口（上面「使用系统代理 / 代理地址」被临时覆盖，关闭时还原）。改了链接点「刷新订阅」生效。'
+                      : '先填订阅链接，再打开「启用」。启用后应用所有请求走本地端口，核心拉取订阅需几秒。'}
+                </div>
               </div>
             </Section>
             <Section title="应用" name="app">

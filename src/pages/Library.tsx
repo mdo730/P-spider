@@ -1,6 +1,11 @@
 import { getErrorMessage } from '../utils/error';
-import { LeftOutlined, RightOutlined } from '@ant-design/icons';
-import { App, Breadcrumb, Button, Empty } from 'antd';
+import {
+  LeftOutlined,
+  RightOutlined,
+  SettingOutlined,
+} from '@ant-design/icons';
+import { App, Breadcrumb, Button, Empty, Input, Modal, Select } from 'antd';
+import { dialog } from '@tauri-apps/api';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { PageHeader } from '../components/PageHeader';
 import {
@@ -10,7 +15,12 @@ import {
 } from '../components/library/CategorySidebar';
 import { FolderDetail } from '../components/library/FolderDetail';
 import { FolderGrid } from '../components/library/FolderGrid';
-import { useLibraryStore } from '../stores/library';
+import {
+  EMPTY_CATEGORIES,
+  collectCategorySubtree,
+  useLibraryStore,
+} from '../stores/library';
+import { DEFAULT_ROOT_ID, useLibraryRootsStore } from '../stores/library-roots';
 import { useSettingsStore } from '../stores/settings';
 import {
   LibraryRootFolder,
@@ -24,7 +34,19 @@ import {
 export const LibraryPage: React.FC = () => {
   const { message } = App.useApp();
   const saveDirBase = useSettingsStore((s) => s.download.saveDirBase);
-  const categories = useLibraryStore((s) => s.categories);
+  const activeRootId = useLibraryRootsStore((s) => s.activeRootId);
+  const roots = useLibraryRootsStore((s) => s.roots);
+  const setActiveRoot = useLibraryRootsStore((s) => s.setActiveRoot);
+  const addRoot = useLibraryRootsStore((s) => s.addRoot);
+  const renameRoot = useLibraryRootsStore((s) => s.renameRoot);
+  const removeRoot = useLibraryRootsStore((s) => s.removeRoot);
+  const isExternal = activeRootId !== DEFAULT_ROOT_ID;
+  const rootPath = isExternal
+    ? roots.find((r) => r.id === activeRootId)?.path || ''
+    : saveDirBase;
+  const categories = useLibraryStore(
+    (s) => s.categoriesByRoot[activeRootId] ?? EMPTY_CATEGORIES,
+  );
 
   const [selectedId, setSelectedId] = useState<string>(ALL_CATEGORY_ID);
   const [rootFolders, setRootFolders] = useState<LibraryRootFolder[]>([]);
@@ -34,15 +56,61 @@ export const LibraryPage: React.FC = () => {
   const [subStack, setSubStack] = useState<LibrarySubFolder[]>([]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
+  const [addOpen, setAddOpen] = useState(false);
+  const [newRootName, setNewRootName] = useState('');
+  const [newRootPath, setNewRootPath] = useState('');
+  const [manageOpen, setManageOpen] = useState(false);
+
+  const switchRoot = (id: string) => {
+    setActiveRoot(id);
+    setSelectedId(ALL_CATEGORY_ID);
+    setOpened(null);
+    setSubStack([]);
+  };
+  const openAddRoot = () => {
+    setNewRootName('');
+    setNewRootPath('');
+    setAddOpen(true);
+  };
+  const pickRootDir = async () => {
+    try {
+      const dir = await dialog.open({ directory: true, title: '选择库根目录' });
+      if (typeof dir === 'string') {
+        setNewRootPath(dir);
+        setNewRootName(
+          (prev) => prev || dir.split(/[\\/]/).filter(Boolean).pop() || dir,
+        );
+      }
+    } catch (err) {
+      message.error(getErrorMessage(err) || '选择目录失败');
+    }
+  };
+  const confirmAddRoot = () => {
+    if (!newRootPath) {
+      message.error('请先选择目录');
+      return;
+    }
+    const id = addRoot(newRootName || newRootPath, newRootPath);
+    setAddOpen(false);
+    switchRoot(id);
+  };
+
+  // 切换库根时回到「全部」并关闭已打开的文件夹
+  useEffect(() => {
+    setSelectedId(ALL_CATEGORY_ID);
+    setOpened(null);
+    setSubStack([]);
+  }, [activeRootId]);
+
   const loadFolders = useCallback(
     async (refresh = false) => {
-      if (!saveDirBase) {
+      if (!rootPath) {
         setRootFolders([]);
         return;
       }
       setLoading(true);
       try {
-        const listed = await listRootFolders(saveDirBase);
+        const listed = await listRootFolders(rootPath);
         const summarized = await summarizeFolders(listed, refresh);
         const mtimes = await fetchMtimes(summarized.map((f) => f.path));
         setRootFolders(
@@ -61,7 +129,7 @@ export const LibraryPage: React.FC = () => {
         setLoading(false);
       }
     },
-    [saveDirBase, message],
+    [rootPath, message],
   );
 
   useEffect(() => {
@@ -72,7 +140,12 @@ export const LibraryPage: React.FC = () => {
     const assigned = new Set(categories.flatMap((c) => c.folders));
     const byId: Record<string, number> = {};
     for (const category of categories) {
-      byId[category.id] = category.folders.length;
+      const subtree = collectCategorySubtree(categories, category.id);
+      byId[category.id] = rootFolders.filter((folder) =>
+        categories.some(
+          (c) => subtree.has(c.id) && c.folders.includes(folder.name),
+        ),
+      ).length;
     }
     return {
       all: rootFolders.length,
@@ -87,10 +160,10 @@ export const LibraryPage: React.FC = () => {
       const assigned = new Set(categories.flatMap((c) => c.folders));
       list = list.filter((f) => !assigned.has(f.name));
     } else if (selectedId !== ALL_CATEGORY_ID) {
-      const category = categories.find((c) => c.id === selectedId);
-      list = category
-        ? list.filter((f) => category.folders.includes(f.name))
-        : [];
+      const subtree = collectCategorySubtree(categories, selectedId);
+      list = list.filter((f) =>
+        categories.some((c) => subtree.has(c.id) && c.folders.includes(f.name)),
+      );
     }
     const kw = keyword.trim().toLowerCase();
     if (kw) {
@@ -149,18 +222,50 @@ export const LibraryPage: React.FC = () => {
   return (
     <div className="flex flex-col h-screen">
       <PageHeader />
-      {!saveDirBase ? (
+      {!rootPath ? (
         <Empty
           className="mt-24"
-          description="尚未设置保存目录，请先到「设置 → 下载」中设置保存路径"
+          description={
+            isExternal
+              ? '该库根路径无效，请在「管理库根」里检查或重新选择'
+              : '尚未设置保存目录，请先到「设置 → 下载」中设置保存路径'
+          }
         />
       ) : (
         <div className="flex-1 min-h-0 flex gap-2 pb-4">
           {!sidebarCollapsed && (
             <CategorySidebar
+              rootId={activeRootId}
               selectedId={selectedId}
               onSelect={handleSelectCategory}
               counts={counts}
+              header={
+                <div className="flex items-center gap-1">
+                  <Select
+                    size="small"
+                    className="flex-1 min-w-0"
+                    value={activeRootId}
+                    onChange={(v) => {
+                      if (v === '__add__') {
+                        openAddRoot();
+                        return;
+                      }
+                      switchRoot(v);
+                    }}
+                    options={[
+                      { value: DEFAULT_ROOT_ID, label: '下载目录' },
+                      ...roots.map((r) => ({ value: r.id, label: r.name })),
+                      { value: '__add__', label: '＋ 添加库根…' },
+                    ]}
+                  />
+                  <Button
+                    size="small"
+                    icon={<SettingOutlined />}
+                    title="管理库根"
+                    onClick={() => setManageOpen(true)}
+                  />
+                </div>
+              }
             />
           )}
           <button
@@ -194,6 +299,9 @@ export const LibraryPage: React.FC = () => {
             {opened ? (
               <FolderDetail
                 dir={currentDir}
+                rootId={activeRootId}
+                rootPath={rootPath}
+                isExternal={isExternal}
                 rootFolderName={opened.name}
                 onOpenFolder={(folder) =>
                   setSubStack((prev) => [...prev, folder])
@@ -201,6 +309,9 @@ export const LibraryPage: React.FC = () => {
               />
             ) : (
               <FolderGrid
+                rootId={activeRootId}
+                rootPath={rootPath}
+                isExternal={isExternal}
                 folders={filteredFolders}
                 loading={loading}
                 keyword={keyword}
@@ -215,6 +326,76 @@ export const LibraryPage: React.FC = () => {
           </section>
         </div>
       )}
+
+      <Modal
+        open={addOpen}
+        title="添加库根"
+        okText="添加"
+        cancelText="取消"
+        onOk={confirmAddRoot}
+        onCancel={() => setAddOpen(false)}
+        destroyOnClose
+      >
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <span className="w-14 shrink-0 text-sm text-gray-500">名称</span>
+            <Input
+              value={newRootName}
+              placeholder="给这个库起个名字"
+              onChange={(e) => setNewRootName(e.target.value)}
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-14 shrink-0 text-sm text-gray-500">目录</span>
+            <Input
+              value={newRootPath}
+              placeholder="选择本地目录"
+              readOnly
+              onClick={pickRootDir}
+            />
+            <Button onClick={pickRootDir}>选择…</Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={manageOpen}
+        title="管理库根"
+        footer={null}
+        onCancel={() => setManageOpen(false)}
+      >
+        <div className="mb-2 text-sm text-gray-500">
+          下载目录（默认，不可移除）
+        </div>
+        {roots.length === 0 ? (
+          <div className="text-sm text-gray-400">还没有外部库根</div>
+        ) : (
+          <div className="space-y-2">
+            {roots.map((r) => (
+              <div key={r.id} className="flex items-center gap-2">
+                <Input
+                  size="small"
+                  defaultValue={r.name}
+                  onBlur={(e) => renameRoot(r.id, e.target.value)}
+                  className="w-40 shrink-0"
+                />
+                <span
+                  className="min-w-0 flex-1 truncate text-xs text-gray-400"
+                  title={r.path}
+                >
+                  {r.path}
+                </span>
+                <Button size="small" danger onClick={() => removeRoot(r.id)}>
+                  移除
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="mt-3 text-xs text-gray-400">
+          移除只删除配置，不会删除磁盘里的文件。
+        </div>
+      </Modal>
     </div>
   );
 };

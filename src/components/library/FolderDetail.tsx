@@ -12,6 +12,7 @@ import {
 import {
   App,
   Button,
+  Checkbox,
   Dropdown,
   Empty,
   MenuProps,
@@ -31,6 +32,7 @@ import React, {
 import { deleteLibraryFiles } from '../../services/library-actions';
 import {
   clearLibraryVisualTags,
+  collectImagesUnderFolders,
   readLibraryVisualTags,
 } from '../../services/library-visual';
 import { effectiveItems, VisualRecord } from '../../services/vision-core';
@@ -41,7 +43,6 @@ import {
   normalizePath,
 } from '../../stores/download-history';
 import { useLibraryVisionStore } from '../../stores/library-vision';
-import { useSettingsStore } from '../../stores/settings';
 import { PlatformSource } from '../../platforms';
 import { readTraceMap, TracedRecord } from '../../utils/library';
 import {
@@ -67,6 +68,12 @@ import { VisualTagEditor } from './VisualTagEditor';
 
 interface Props {
   dir: string;
+  /** 库根 id（分类/封面按根隔离） */
+  rootId: string;
+  /** 库根绝对路径（平台段用） */
+  rootPath: string;
+  /** 外部根：不参与联网溯源 / 平台标记 */
+  isExternal: boolean;
   /** 最外层一级文件夹名（用于「设为文件夹缩略图」） */
   rootFolderName?: string;
   onOpenFolder: (folder: LibrarySubFolder) => void;
@@ -92,6 +99,9 @@ const FILE_PAGE_SIZE = 120;
 /** 文件夹详情：平铺/按文件夹切换、排序、文件多选批量删除、右键菜单/属性 + WD14 视觉标签 */
 export const FolderDetail: React.FC<Props> = ({
   dir,
+  rootId,
+  rootPath,
+  isExternal,
   rootFolderName,
   onOpenFolder,
 }) => {
@@ -113,20 +123,19 @@ export const FolderDetail: React.FC<Props> = ({
 
   // ---- 按平台决定默认排序 ----
   // pawchive（归档站）：按帖子顺序（时间 新→旧）；X / pixiv：名称 Z→A。
-  // 平台取自下载历史（hist_platform_segments，比「有无子文件夹」的结构启发式准）。
-  const saveDirBase = useSettingsStore((s) => s.download.saveDirBase);
+  // 平台取自下载历史（hist_platform_segments，比「有无子文件夹」的结构启发式准）；外部根不参与。
   const [segPlatform, setSegPlatform] = useState<Map<string, PlatformSource>>(
     new Map(),
   );
   useEffect(() => {
     let cancelled = false;
-    if (!saveDirBase) {
+    if (isExternal || !rootPath) {
       setSegPlatform(new Map());
       return () => {
         cancelled = true;
       };
     }
-    getPlatformSegments(saveDirBase)
+    getPlatformSegments(rootPath)
       .then((m) => {
         if (!cancelled) setSegPlatform(m);
       })
@@ -134,7 +143,7 @@ export const FolderDetail: React.FC<Props> = ({
     return () => {
       cancelled = true;
     };
-  }, [saveDirBase]);
+  }, [rootPath, isExternal]);
   // 切换一级创作者文件夹时按平台重设默认排序（二级子文件夹不重置，保留用户当前选择）
   useEffect(() => {
     const platform = rootFolderName
@@ -453,6 +462,18 @@ export const FolderDetail: React.FC<Props> = ({
 
   const filePaths = useMemo(() => pagedFiles.map((f) => f.path), [pagedFiles]);
 
+  // 当前视图下可选的项：文件夹视图 = 子文件夹 + 根目录散落文件；平铺视图 = 当前页文件
+  const selectableKeys = useMemo(
+    () =>
+      inFolderView
+        ? [
+            ...sortedFolders.map((f) => f.path),
+            ...visibleRootFiles.map((f) => f.path),
+          ]
+        : filePaths,
+    [inFolderView, sortedFolders, visibleRootFiles, filePaths],
+  );
+
   // 目录/排序/视觉筛选变化时回到第 1 页
   useEffect(() => {
     setPage(1);
@@ -465,7 +486,7 @@ export const FolderDetail: React.FC<Props> = ({
     clear: clearSelection,
     selectedCount,
     allSelected,
-  } = useSelection(filePaths);
+  } = useSelection(selectableKeys);
 
   // 切换目录 / 视图 / 分页时清空选择
   useEffect(() => {
@@ -477,6 +498,54 @@ export const FolderDetail: React.FC<Props> = ({
     clearSelection();
   };
 
+  // 选中项里的「文件」（用于删除）
+  const selectedFiles = useMemo(
+    () => (content?.files || []).filter((f) => selected.has(f.path)),
+    [content, selected],
+  );
+
+  // 识别所选：文件夹递归收集 + 直接选中的图片
+  const recognizeSelected = async () => {
+    if (visionRunning) return;
+    const folderPathSet = new Set((content?.folders || []).map((f) => f.path));
+    const imageByPath = new Set(
+      (content?.files || [])
+        .filter((f) => f.kind === 'image')
+        .map((f) => f.path),
+    );
+    const folderPaths: string[] = [];
+    const imageFiles: string[] = [];
+    for (const p of selected) {
+      if (folderPathSet.has(p)) folderPaths.push(p);
+      else if (imageByPath.has(p)) imageFiles.push(p);
+    }
+    if (folderPaths.length === 0 && imageFiles.length === 0) {
+      message.info('请选择文件夹或图片');
+      return;
+    }
+    const hide = message.loading('正在统计图片…', 0);
+    let images: string[] = [];
+    try {
+      const fromFolders = folderPaths.length
+        ? await collectImagesUnderFolders(folderPaths)
+        : [];
+      images = [...new Set([...fromFolders, ...imageFiles])];
+    } finally {
+      hide();
+    }
+    if (images.length === 0) {
+      message.info('所选内容里没有图片');
+      return;
+    }
+    modal.confirm({
+      title: 'WD14 视觉识别',
+      content: `将识别所选的 ${images.length} 张图片（已识别的自动跳过）。识别在后台进行，可继续浏览。`,
+      okText: '开始',
+      cancelText: '取消',
+      onOk: () => useLibraryVisionStore.getState().start(images),
+    });
+  };
+
   const revealFolder = async (folder: LibrarySubFolder) => {
     try {
       await showInFolder(folder.path);
@@ -486,7 +555,7 @@ export const FolderDetail: React.FC<Props> = ({
   };
 
   const batchDeleteFiles = () => {
-    const targets = pagedFiles.filter((f) => selected.has(f.path));
+    const targets = selectedFiles;
     if (targets.length === 0) return;
     modal.confirm({
       title: `删除 ${targets.length} 个文件？`,
@@ -525,7 +594,9 @@ export const FolderDetail: React.FC<Props> = ({
           {visualSelected.length > 0 ? ` · 命中 ${visibleFiles.length}` : ''}
         </span>
         <span className="ml-auto" />
-        {!inFolderView && sortedFiles.length > 0 && (
+        {(inFolderView
+          ? sortedFolders.length + visibleRootFiles.length > 0
+          : sortedFiles.length > 0) && (
           <Button
             type={selectMode ? 'primary' : 'default'}
             onClick={toggleSelectMode}
@@ -537,7 +608,7 @@ export const FolderDetail: React.FC<Props> = ({
           icon={visionRunning ? <LoadingOutlined /> : <ThunderboltOutlined />}
           onClick={startVision}
           disabled={visionRunning || visionImages.length === 0}
-          title={`WD14 识别当前文件夹的 ${visionImages.length} 张图片`}
+          title={`WD14 识别当前文件夹（含子文件夹）的 ${visionImages.length} 张图片`}
         >
           识别
         </Button>
@@ -614,7 +685,7 @@ export const FolderDetail: React.FC<Props> = ({
         emptyText="还没有识别结果，先点「识别」"
       />
 
-      {selectMode && !inFolderView && (
+      {selectMode && (
         <div className="flex items-center gap-2 pb-3">
           <span className="text-sm text-gray-500">已选 {selectedCount} 个</span>
           <Button size="small" onClick={toggleAll}>
@@ -632,9 +703,17 @@ export const FolderDetail: React.FC<Props> = ({
           )}
           <Button
             size="small"
+            icon={<ThunderboltOutlined />}
+            disabled={visionRunning || selectedCount === 0}
+            onClick={() => void recognizeSelected()}
+          >
+            识别所选
+          </Button>
+          <Button
+            size="small"
             danger
             icon={<DeleteOutlined />}
-            disabled={selectedCount === 0}
+            disabled={selectedFiles.length === 0}
             onClick={batchDeleteFiles}
           >
             删除文件
@@ -680,11 +759,30 @@ export const FolderDetail: React.FC<Props> = ({
                     trigger={['contextMenu']}
                     menu={{ items: menuItems, onClick: onMenuClick }}
                   >
-                    <li className="lib-card-cv bg-white rounded-md border-[1px] border-gray-100 overflow-hidden group">
+                    <li
+                      className={`lib-card-cv relative bg-white rounded-md border-[1px] overflow-hidden group ${
+                        selectMode && selected.has(folder.path)
+                          ? 'border-ant-color-primary ring-1 ring-ant-color-primary'
+                          : 'border-gray-100'
+                      }`}
+                    >
+                      {selectMode && (
+                        <div className="absolute top-2 left-2 z-10 rounded bg-white/90 p-0.5">
+                          <Checkbox
+                            checked={selected.has(folder.path)}
+                            onChange={() => toggle(folder.path)}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                        </div>
+                      )}
                       <button
                         className="block w-full text-left"
                         title={folder.name}
-                        onClick={() => onOpenFolder(folder)}
+                        onClick={() =>
+                          selectMode
+                            ? toggle(folder.path)
+                            : onOpenFolder(folder)
+                        }
                       >
                         <FolderCover
                           name={folder.name}
@@ -714,7 +812,7 @@ export const FolderDetail: React.FC<Props> = ({
                 </div>
                 <FileGrid
                   files={visibleRootFiles}
-                  selectMode={false}
+                  selectMode={selectMode}
                   selected={selected}
                   onToggle={toggle}
                   onDeleted={() => load()}
@@ -772,6 +870,7 @@ export const FolderDetail: React.FC<Props> = ({
 
       <FolderProperties
         open={!!propsTarget}
+        rootId={rootId}
         folderName={propsTarget?.name || ''}
         folderPath={propsTarget?.path}
         mediaCount={propsTarget?.mediaCount}

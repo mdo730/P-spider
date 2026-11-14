@@ -91,6 +91,18 @@ export function useBootstrap() {
             }
           },
         },
+        {
+          name: 'builtin-proxy',
+          async fn() {
+            // 若启用了内置代理（Clash 订阅），随启动拉起 mihomo 核心
+            try {
+              const { useClashStore } = await import('../stores/clash');
+              await useClashStore.getState().apply();
+            } catch (err) {
+              log.warn('内置代理启动失败', err);
+            }
+          },
+        },
       ];
 
       for (const item of flows) {

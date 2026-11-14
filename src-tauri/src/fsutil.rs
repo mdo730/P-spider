@@ -215,7 +215,7 @@ pub fn video_thumbnail(src: String, dst: String, size: u32) -> Result<(), String
 /// 用系统 ffmpeg 把视频（GIF 的 mp4）转成真实 .gif（“下载即转”用）。
 /// 需要系统 PATH 中有 ffmpeg；没有则返回错误，调用方保留 mp4。
 #[tauri::command]
-pub fn convert_video_to_gif(src: String, dst: String) -> Result<(), String> {
+pub async fn convert_video_to_gif(src: String, dst: String) -> Result<(), String> {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;

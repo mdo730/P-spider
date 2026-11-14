@@ -8,6 +8,7 @@ import FormItem from 'antd/es/form/FormItem';
 import { useForm } from 'antd/es/form/Form';
 import { parseCookie, stringifyCookie } from '../utils/cookie';
 import { useSettingsStore } from '../stores/settings';
+import { mediaProxyUrl } from '../utils/media-proxy';
 import clsx from 'clsx';
 
 export const Account: React.FC = () => {
@@ -117,7 +118,11 @@ export const Account: React.FC = () => {
               >
                 <Avatar
                   size={iconOnly ? 36 : 50}
-                  src={accountInfo.avatar}
+                  src={
+                    accountInfo.avatar
+                      ? mediaProxyUrl(accountInfo.avatar)
+                      : undefined
+                  }
                   alt="头像"
                 />
               </a>

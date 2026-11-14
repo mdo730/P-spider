@@ -70,6 +70,13 @@ export const useSettingsStore = create(
             ...(state.sidebar || {}),
           };
         }
+        if (version < 7) {
+          // 内置代理（mihomo + Clash 订阅）
+          state.builtinProxy = {
+            ...DEFAULT_SETTINGS.builtinProxy,
+            ...(state.builtinProxy || {}),
+          };
+        }
 
         return state;
       },

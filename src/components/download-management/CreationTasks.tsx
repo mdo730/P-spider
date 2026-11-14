@@ -2,6 +2,7 @@ import React from 'react';
 import { useDownloadStore } from '../../stores/download';
 import { Avatar, Button, Tooltip } from 'antd';
 import { QuestionCircleOutlined } from '@ant-design/icons';
+import { mediaProxyUrl } from '../../utils/media-proxy';
 
 export const CreationTasks: React.FC = () => {
   const { creationTasks, removeCreationTask } = useDownloadStore((s) => ({
@@ -27,7 +28,13 @@ export const CreationTasks: React.FC = () => {
               rel="noreferrer"
               className="flex items-center space-x-1 overflow-hidden pr-4"
             >
-              <Avatar size={20} src={t.creator.avatar} className="shrink-0" />
+              <Avatar
+                size={20}
+                src={
+                  t.creator.avatar ? mediaProxyUrl(t.creator.avatar) : undefined
+                }
+                className="shrink-0"
+              />
               <span className="whitespace-nowrap overflow-hidden text-ellipsis">
                 {`${t.creator?.name || '未知用户'} ${t.creator?.username ? `@${t.creator.username}` : ''}`}
               </span>
@@ -45,6 +52,9 @@ export const CreationTasks: React.FC = () => {
                   </span>
                 )}
               </span>
+              {t.note && (
+                <span className="text-xs text-ant-color-warning">{t.note}</span>
+              )}
               <Button
                 onClick={async () => {
                   removeCreationTask(t.id);

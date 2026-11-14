@@ -275,19 +275,42 @@ async function fetchContentImages(postId: string): Promise<PlatformMedia[]> {
     return [];
   }
   const html: string = body?.content?.rendered || '';
-  const urls = new Set<string>();
+  // 原图 URL → 正文里出现的各尺寸变体（srcset 会把 300x200 / 768x512 / 2048x1365 都列出来）
+  const variants = new Map<string, Set<string>>();
   const re =
     /https?:\/\/[^"'\s)]+\/wp-content\/uploads\/[^"'\s)]+?\.(?:jpg|jpeg|png|webp|gif)/gi;
   for (const m of html.matchAll(re)) {
     const url = m[0];
     if (url.includes('/cache/')) continue;
-    urls.add(url.replace(/-\d+x\d+(\.\w+)$/, '$1'));
+    const base = url.replace(/-\d+x\d+(\.\w+)$/, '$1');
+    let set = variants.get(base);
+    if (!set) {
+      set = new Set();
+      variants.set(base, set);
+    }
+    set.add(url);
   }
-  return [...urls].map((url) => ({
+  const pickContentThumb = (set: Set<string>, fallback: string): string => {
+    // 网格缩略图选最接近 WP medium（约 300px 宽）的变体，避免直接拉原图（单张常 >1MB）
+    let best = fallback;
+    let bestScore = Infinity;
+    for (const u of set) {
+      const mm = /-(\d+)x(\d+)\.\w+$/i.exec(u);
+      if (!mm) continue;
+      const w = Number(mm[1]);
+      const score = w >= 300 ? w - 300 : 1000 - w;
+      if (score < bestScore) {
+        bestScore = score;
+        best = u;
+      }
+    }
+    return best;
+  };
+  return [...variants.entries()].map(([url, set]) => ({
     id: url,
     type: MediaType.Photo,
     url,
-    thumbUrl: url,
+    thumbUrl: pickContentThumb(set, url),
     downloadUrl: url,
     fileName: decodeURIComponent(url.split('/').pop() || '') || 'figmemo',
   }));
